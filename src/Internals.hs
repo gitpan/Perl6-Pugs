@@ -15,8 +15,11 @@
 
 module Internals (
     module UTF8,
+    module Unicode,
     module Cont,
     module Posix,
+    module RRegex,
+    module RRegex.Syntax,
     module Rule.Pos,
     module Data.Dynamic,
     module Data.Unique,
@@ -25,13 +28,14 @@ module Internals (
     module System.Random,
     module System.IO,
     module System.IO.Unsafe,
+    module System.IO.Error,
     module System.Exit,
     module System.Time,
     module System.Directory,
     module System.Cmd,
     module Control.Monad.RWS,
     module Control.Monad.Error,
-    module GHC.Unicode,
+    module Data.Array,
     module Data.Bits,
     module Data.List,
     module Data.Either,
@@ -47,14 +51,19 @@ module Internals (
     module Debug.Trace,
     internalError,
     split,
+    breakOnGlue,
     decodeUTF8,
     encodeUTF8,
 ) where
 
 import UTF8
+import Unicode
 import Cont
 import Posix
+import RRegex
+import RRegex.Syntax
 import Data.Dynamic
+import Data.Array (elems)
 import System.Environment (getArgs, withArgs, getProgName)
 import System.Random hiding (split)
 import System.Exit
@@ -66,6 +75,7 @@ import System.IO (
     hSetBuffering, BufferMode(..), hIsTerminalDevice
     )
 import System.IO.Unsafe
+import System.IO.Error (ioeGetErrorString, isUserError)
 import System.Directory
 import Control.Exception (catchJust, errorCalls)
 import Control.Monad.RWS
@@ -75,7 +85,7 @@ import Data.Maybe
 import Data.Either
 import Data.List (
     (\\), find, genericLength, insert, sortBy, intersperse,
-    partition, group, sort, genericReplicate, isPrefixOf,
+    partition, group, sort, genericReplicate, isPrefixOf, isSuffixOf,
     genericTake, genericDrop, unfoldr, nub, nubBy, transpose
     )
 import Data.Unique
@@ -93,7 +103,6 @@ import Data.Tree
 import Data.IORef
 import Debug.Trace
 import Rule.Pos
-import GHC.Unicode
 
 -- Instances.
 instance Show Unique where
@@ -112,13 +121,28 @@ internalError s = error $
     "Internal error: " ++ s ++ " please file a bug report."
 
 split :: (Eq a) => [a] -> [a] -> [[a]]
-split [] str = map (: []) str
-split sep str = p : (if again then split sep ps else []) where
-   (p, ps, again) = split1 sep str
-   split1 _ [] = ([], [], False)
-   split1 sep str =
-      if isPrefixOf sep str then ([], drop (length sep) str, True) else
-      let (pre, post, x) = split1 sep (tail str) in ((head str) : pre, post, x)
+split []  _   = internalError "splitting by an empty list"
+split sep str =
+   case breakOnGlue sep str of
+     Just (before, after) -> before : split sep after
+     Nothing -> [str]
+
+-- returns Nothing if the glue isn't there
+breakOnGlue :: (Eq a) => [a] -> [a] -> Maybe ([a], [a])
+breakOnGlue _    [] = Nothing
+breakOnGlue glue list@(x:xs) =
+   case afterPrefix glue list of
+      Just rest -> Just ([], rest)
+      Nothing -> case breakOnGlue glue xs of
+                    Just (before, after) -> Just (x : before, after)
+                    Nothing -> Nothing
+
+afterPrefix :: (Eq a) => [a] -> [a] -> Maybe [a]
+afterPrefix []     list = Just list
+afterPrefix _      []   = Nothing  -- non-empty prefix of an empty list
+afterPrefix (p:ps) (x:xs)
+   | p == x = afterPrefix ps xs
+   | otherwise = Nothing
 
 encodeUTF8 :: String -> String
 encodeUTF8 = map (chr . fromEnum) . encode
@@ -127,4 +151,3 @@ decodeUTF8 :: String -> String
 decodeUTF8 str = fst $ decode bytes
     where
     bytes = map (toEnum . ord) str
-    

@@ -15,6 +15,7 @@ module AST where
 import Internals
 import Context
 import Rule
+import List
 
 type Ident = String
 
@@ -24,18 +25,20 @@ ifContextIsa c trueM falseM = do
         then trueM
         else falseM
 
-doFromValue v = do
+fromVal' (VThunk (MkThunk eval)) = fromVal' =<< eval
+fromVal' (MVal mval) = fromVal' =<< liftIO (readIORef mval)
+fromVal' v = do
     rv <- liftIO $ catchJust errorCalls (return . Right $ vCast v) $
         \str -> return (Left str)
     case rv of
         Right v -> return v
         Left e  -> retError e (Val v) -- XXX: not working yet
 
-fromMVal = (>>= fromValue) . readMVal
+fromMVal = (>>= fromVal) . readMVal
 
 class Value n where
-    fromValue :: Val -> Eval n
-    fromValue = doFromValue
+    fromVal :: Val -> Eval n
+    fromVal = fromVal'
     vCast :: Val -> n
     -- vCast (MVal v)      = vCast $ castV v
     vCast (VRef v)      = vCast v
@@ -72,6 +75,7 @@ instance Value (FiniteMap Val Val) where
 
 instance Value [VPair] where
     -- vCast VUndef = []
+    vCast (VRef v)      = vCast v
     vCast (VHash (MkHash h)) = fmToList h
     vCast (VPair p) = [p]
     vCast (VList vs) =
@@ -118,10 +122,7 @@ readMVal v         = return v
 instance Value VInt where
     castV = VInt
     doCast (VInt i)     = i
-    doCast (VStr s)
-        | ((n, _):_) <- reads s = n
-        | otherwise             = 0
-    doCast x            = truncate (vCast x :: VNum)
+    doCast x            = truncate (vCast x :: VRat)
 
 instance Value VRat where
     castV = VRat
@@ -131,6 +132,14 @@ instance Value VRat where
     doCast (VList l)    = genericLength l
     doCast (VArray (MkArray a))    = genericLength a
     doCast (VHash (MkHash h))    = fromIntegral $ sizeFM h
+    doCast (VStr s) | not (null s) , isSpace $ last s = doCast (VStr $ init s)
+    doCast (VStr s) | not (null s) , isSpace $ head s = doCast (VStr $ tail s)
+    doCast (VStr s)     =
+        case ( runParser naturalOrRat () "" s ) of
+            Left _   -> 0 % 1
+            Right rv -> case rv of
+                Left  i -> i % 1
+                Right d -> d
     doCast x            = toRational (vCast x :: VNum)
 
 instance Value VNum where
@@ -140,9 +149,16 @@ instance Value VNum where
     doCast (VInt i)     = fromIntegral i
     doCast (VRat r)     = realToFrac r
     doCast (VNum n)     = n
-    doCast (VStr s)
-        | ((n, _):_) <- reads s = n
-        | otherwise             = 0
+    doCast (VStr s) | not (null s) , isSpace $ last s = doCast (VStr $ init s)
+    doCast (VStr s) | not (null s) , isSpace $ head s = doCast (VStr $ tail s)
+    doCast (VStr "Inf") = 1/0
+    doCast (VStr "NaN") = 0/0
+    doCast (VStr s)     =
+        case ( runParser naturalOrRat () "" s ) of
+            Left _   -> 0
+            Right rv -> case rv of
+                Left  i -> fromIntegral i
+                Right d -> realToFrac d
     doCast (VList l)    = genericLength l
     doCast (VArray (MkArray a))    = genericLength a
     doCast (VHash (MkHash h))    = fromIntegral $ sizeFM h
@@ -154,7 +170,7 @@ instance Value VComplex where
 
 instance Value VStr where
     castV = VStr
-    fromValue (VHash (MkHash h)) = do
+    fromVal (VHash (MkHash h)) = do
         ls <- mapM strPair $ fmToList h
         return $ unlines ls
         where
@@ -162,7 +178,7 @@ instance Value VStr where
             k' <- fromMVal k
             v' <- fromMVal v
             return $ k' ++ "\t" ++ v'
-    fromValue v = doFromValue v
+    fromVal v = fromVal' v
     vCast VUndef        = ""
     vCast (VStr s)      = s
     vCast (VBool b)     = if b then "1" else ""
@@ -193,10 +209,10 @@ instance Value VArray where
 
 instance Value MVal where
     castV _ = error "Cannot cast MVal into Value"
-    fromValue (MVal x) = return x
-    fromValue (VRef v) = fromValue v
-    fromValue (VPair (_, v)) = fromValue v
-    fromValue v = retError "cannot modify constant item" $ Val v
+    fromVal (MVal x) = return x
+    fromVal (VRef v) = fromVal v
+    fromVal (VPair (_, v)) = fromVal v
+    fromVal v = retError "cannot modify constant item" $ Val v
     vCast (MVal x)      = x
     vCast (VRef v)      = vCast v
     vCast (VPair (_, y))= vCast y
@@ -278,10 +294,12 @@ type VNum  = Double
 type VComplex = Complex VNum
 type VStr  = String
 type VList = [Val]
+type VRule = Regex
 type VHandle = Handle
 type MVal = IORef Val
 newtype VArray = MkArray [Val] deriving (Show, Eq, Ord)
 newtype VHash  = MkHash (FiniteMap Val Val) deriving (Show, Eq, Ord)
+newtype VThunk = MkThunk (Eval Val)
 
 type VPair = (Val, Val)
 
@@ -303,8 +321,10 @@ data Val
     | VJunc     VJunc
     | VError    VStr Exp
     | VHandle   VHandle
+    | VRule     VRule
     | MVal      MVal
     | VControl  VControl
+    | VThunk    VThunk
     deriving (Show, Eq, Ord)
 
 valType :: Val -> String
@@ -327,6 +347,8 @@ valType (VError _ _)    = "Error"
 valType (VHandle  _)    = "Handle"
 valType (MVal     _)    = "Var"
 valType (VControl _)    = "Control"
+valType (VThunk   _)    = "Thunk"
+valType (VRule    _)    = "Rule"
 
 type VBlock = Exp
 data VControl
@@ -365,6 +387,7 @@ data Param = Param
     , isOptional    :: Bool
     , isNamed       :: Bool
     , isLValue      :: Bool
+    , isThunk       :: Bool
     , paramName     :: String
     , paramContext  :: Cxt
     , paramDefault  :: Exp
@@ -402,7 +425,7 @@ type Var = String
 data Exp
     = App String [Exp] [Exp]
     | Syn String [Exp]
-    | Sym Symbol
+    | Sym [Symbol]
     | Prim ([Val] -> Eval Val)
     | Val Val
     | Var Var
@@ -411,10 +434,10 @@ data Exp
     | Statements [(Exp, SourcePos)]
     deriving (Show, Eq, Ord)
 
-instance Show (CharParser Env Exp) where
-    show _ = "<parser>"
-instance Eq (CharParser Env Exp)
-instance Ord (CharParser Env Exp) where
+instance Show VThunk where
+    show _ = "<thunk>"
+instance Eq VThunk
+instance Ord VThunk where
     compare _ _ = EQ
 
 extractExp :: Exp -> ([Exp], [String]) -> ([Exp], [String])
@@ -433,9 +456,13 @@ extract ((Statements stmts), vs) = (Statements stmts', vs')
     poss = map snd stmts
     (exps', vs') = foldr extractExp ([], vs) exps
     stmts' = exps' `zip` poss
-extract ((Syn n exps), vs) = (Syn n exps', vs')
+extract ((Syn n exps), vs) = (Syn n exps', vs'')
     where
     (exps', vs') = foldr extractExp ([], vs) exps
+    vs'' = case n of
+        "when"  -> nub $ vs' ++ ["$_"]
+        "given" -> delete "$_" vs'
+        _       -> vs'
 extract ((Var name), vs)
     | (sigil:'^':identifer) <- name
     , name' <- (sigil : identifer)
@@ -468,6 +495,7 @@ buildParam cxt sigil name e = Param
     , isOptional    = (sigil ==) `any` ["?", "+"]
     , isNamed       = (null sigil || head sigil /= '+')
     , isLValue      = False
+    , isThunk       = False
     , paramName     = name
     , paramContext  = if null cxt then defaultCxt else cxt
     , paramDefault  = e
@@ -485,7 +513,7 @@ defaultHashParam    = buildParam "" "*" "%_" (Val VUndef)
 defaultScalarParam  = buildParam "" "*" "$_" (Val VUndef)
 
 data Env = Env { envContext :: Cxt
-	           , envLValue  :: Bool
+               , envLValue  :: Bool
                , envLexical :: Pad
                , envGlobal  :: IORef Pad
                , envClasses :: ClassTree
@@ -498,25 +526,32 @@ data Env = Env { envContext :: Cxt
                } deriving (Show, Eq)
 
 type Pad = [Symbol]
-data Symbol = Symbol { symScope :: Scope
-                     , symName  :: String
-                     , symExp   :: Exp
-                     } deriving (Show, Eq, Ord)
+data Symbol
+    = SymVal { symScope :: Scope
+             , symName  :: String
+             , symVal   :: Val
+             }
+    | SymExp { symScope :: Scope
+             , symName  :: String
+             , symExp   :: Exp
+             }
+    deriving (Show, Eq, Ord)
 
 data Scope = SGlobal | SMy | SOur | SLet | STemp | SState
     deriving (Show, Eq, Ord, Read, Enum)
 
 type Eval x = ContT Val (ReaderT Env IO) x
 
-findSym :: String -> Pad -> Maybe Exp
-findSym name pad
-    | Just s <- find ((== name) . symName) pad
-    = Just $ symExp s
-    | otherwise
-    = Nothing
+findSym :: String -> Pad -> Maybe Val
+findSym name pad = do
+    s <- find ((== name) . symName) pad
+    return $ symVal s
 
 writeMVal l (MVal r)     = writeMVal l =<< liftIO (readIORef r)
 writeMVal (MVal l) r     = liftIO $ writeIORef l r
+writeMVal (VThunk (MkThunk t)) r = do
+    l <- t
+    writeMVal l r
 writeMVal (VError s e) _ = retError s e
 writeMVal _ (VError s e) = retError s e
 writeMVal x _            = retError "Can't write a constant item" (Val x)
@@ -529,9 +564,10 @@ askGlobal = do
 readVar name = do
     glob <- askGlobal
     case find ((== name) . symName) glob of
-        Just Symbol{ symExp = Val ref } -> readMVal ref
-        Just _  -> internalError "readVar failed on non-value bindings"
-        Nothing -> return VUndef
+        Just SymVal{ symVal = ref } -> readMVal ref
+        _ -> return VUndef
+
+emptyExp = App "&not" [] []
 
 retError :: VStr -> Exp -> Eval a
 retError str exp = do
@@ -547,3 +583,87 @@ instance (Show a) => Show (Set a) where
     show x = show $ setToList x
 
 #endif
+
+naturalOrRat  = (<?> "number") $ do
+    sig <- sign
+    num <- natRat
+    return $ if sig
+        then num
+        else case num of
+            Left i  -> Left $ -i
+            Right d -> Right $ -d
+    where
+    natRat = do
+            char '0'
+            zeroNumRat
+        <|> decimalRat
+                      
+    zeroNumRat = do
+            n <- hexadecimal <|> decimal <|> octalBad <|> octal <|> binary
+            return (Left n)
+        <|> decimalRat
+        <|> fractRat 0
+        <|> return (Left 0)                  
+                      
+    decimalRat = do
+        n <- decimalLiteral
+        option (Left n) (try $ fractRat n)
+
+    fractRat n = do
+            fract <- try fraction
+            expo  <- option (1%1) expo
+            return (Right $ ((n % 1) + fract) * expo) -- Right is Rat
+        <|> do
+            expo <- expo
+            if expo < 1
+                then return (Right $ (n % 1) * expo)
+                else return (Right $ (n % 1) * expo)
+
+    fraction = do
+            char '.'
+            try $ do { char '.'; unexpected "dotdot" } <|> return ()
+            digits <- many digit <?> "fraction"
+            return (digitsToRat digits)
+        <?> "fraction"
+        where
+        digitsToRat d = digitsNum d % (10 ^ length d)
+        digitsNum d = foldl (\x y -> x * 10 + (toInteger $ digitToInt y)) 0 d 
+
+    expo :: GenParser Char st Rational
+    expo = do
+            oneOf "eE"
+            f <- sign
+            e <- decimalLiteral <?> "exponent"
+            return (power (if f then e else -e))
+        <?> "exponent"
+        where
+        power e | e < 0      = 1 % (10^abs(e))
+                | otherwise  = (10^e) % 1
+
+    -- sign            :: CharParser st (Integer -> Integer)
+    sign            =   (char '-' >> return False) 
+                    <|> (char '+' >> return True)
+                    <|> return True
+
+{-
+    nat             = zeroNumber <|> decimalLiteral
+        
+    zeroNumber      = do{ char '0'
+                        ; hexadecimal <|> decimal <|> octalBad <|> octal <|> decimalLiteral <|> return 0
+                        }
+                      <?> ""       
+-}
+
+    decimalLiteral         = number 10 digit        
+    hexadecimal     = do{ char 'x'; number 16 hexDigit }
+    decimal         = do{ char 'd'; number 10 digit }
+    octal           = do{ char 'o'; number 8 octDigit }
+    octalBad        = do{ many1 octDigit ; fail "0100 is not octal in perl6 any more, use 0o100 instead." }
+    binary          = do{ char 'b'; number 2 (oneOf "01")  }
+
+    -- number :: Integer -> CharParser st Char -> CharParser st Integer
+    number base baseDigit
+        = do{ digits <- many1 baseDigit
+            ; let n = foldl (\x d -> base*x + toInteger (digitToInt d)) 0 digits
+            ; seq n (return n)
+            }          

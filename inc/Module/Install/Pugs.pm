@@ -3,11 +3,17 @@ use Module::Install::Base; @ISA = qw(Module::Install::Base);
 use strict;
 use Config;
 use File::Spec;
+use File::Basename;
 
 sub WritePugs {
     my $self = shift;
     $self->WriteAll(@_);
     $self->pugs_fix_makefile;
+}
+
+sub base_path {
+    my $self = shift;
+    $self->{_top}{base};
 }
 
 sub set_blib {
@@ -57,6 +63,7 @@ sub pugs_fix_makefile {
     $full_blib =~ s{'}{\\'}g;
     $makefile =~ s/\b(runtests \@ARGV|test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = q*$full_pugs*; ENV->{PERL6LIB} = q*$full_blib*; $1/;
     $makefile =~ s/("-MExtUtils::Command::MM")/"-Iinc" $1/g;
+    $makefile =~ s/\$\(UNINST\)/0/g;
     close MAKEFILE;
     open MAKEFILE, '> Makefile' or die $!;
     print MAKEFILE $makefile;
@@ -88,19 +95,23 @@ sub deny_cygwin {
 }
 
 sub assert_ghc {
-    (`ghc --version` =~ /Glasgow/) or die << '.';
+    my $self = shift;
+    my $ghc = $self->can_run('ghc');
+    my $ghcver = `$ghc --version`;
+    ($ghcver =~ /Glasgow.*\bversion\s*(\S+)/s) or die << '.';
 *** Cannot find a runnable 'ghc' from path.
 *** Please install GHC from http://haskell.org/ghc/.
 .
+
+    return ($ghc, $1);
 }
 
-sub nativize {
+sub fixpaths {
     my $self = shift;
     my $text = shift;
     my $sep = File::Spec->catdir('');
     $text =~ s{\b/}{$sep}g;
     return $text;
 }
-
 
 1;

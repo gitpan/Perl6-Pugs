@@ -1,9 +1,10 @@
-module Test-0.0.1;
+module Test-0.0.2;
 use v6;
 
 my $loop = 0;
 my $plan = 0;
 my $failed = 0;
+my $log_file = %ENV{'TEST_LOG_FILE'};
 
 sub plan (Int $number_of_tests) returns Int is export {
     $plan = $number_of_tests;
@@ -11,101 +12,155 @@ sub plan (Int $number_of_tests) returns Int is export {
     return $number_of_tests;
 }
 
-sub proclaim (Bool $cond, Str ?$desc, Str ?$context) returns Bool {
+sub proclaim (Bool $cond, Str ?$desc, Str ?$context, Str ?$got, Str ?$expected) returns Bool {
     my $ok := $cond ?? "ok " :: "not ok ";
     my $out := defined($desc) ?? " - $desc" :: "";
     my $context_out := defined($context) ?? " # $context" :: "";
     $loop++;
     say $ok, $loop, $out, $context_out;
+
+    report_failure($context, $got, $expected) if (!$cond);
+    write_log(got => $got, expected => $expected, desc => $desc, content => $context) if (!$cond);
+
     return $cond;
 }
 
 sub ok (Bool $cond, Str ?$desc) returns Bool is export {
-    proclaim($cond, $desc);
-    if (!$cond) {
-        $*ERR.say("#     Failed test ($?CALLER::POSITION)");
-        $failed++;
-    }
-    return $cond;
+    proclaim($cond, $desc, undef);
 }
 
 sub is (Str $got, Str $expected, Str ?$desc) returns Bool is export {
     my $test := $got eq $expected; 
-    proclaim($test, $desc);
-    if (!$test) {
-        $*ERR.say("#     Failed test ($?CALLER::POSITION)");
-        $*ERR.say("#          got: '$got'");
-        $*ERR.say("#     expected: '$expected'");
-        $failed++;
-    }
-    return $test;
+    proclaim($test, $desc, undef, $got, $expected);
+}
+
+sub eval_ok (Str $code, Str ?$desc) returns Bool is export {
+	my $result = eval $code;
+	if ($!) {
+		proclaim(undef, $desc, undef, "eval was fatal");
+	} else {
+		&ok.goto($result, $desc);
+	}
+}
+
+sub todo_eval_ok (Str $code, Str ?$desc) returns Bool is export {
+	my $result = eval $code;
+	if ($!) {
+		proclaim(undef, $desc, "TODO", "eval was fatal");
+	} else {
+		&todo_ok.goto($result, $desc);
+	}
+}
+
+sub eval_is (Str $code, $expected, Str ?$desc) returns Bool is export {
+	my $result = eval $code;
+	if ($!) {
+		proclaim(undef, $desc, undef, "eval was fatal", $expected);
+	} else {
+		&is.goto($result, $expected, $desc);
+	}
+}
+
+sub todo_eval_is (Str $code, $expected, Str ?$desc) returns Bool is export {
+	my $result = eval $code;
+	if ($!) {
+		proclaim(undef, $desc, "TODO", "was fatal", $expected);
+	} else {
+		&todo_is.goto($result, $expected, $desc);
+	}
+}
+
+sub cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool is export {
+    my $test := $compare_func($got, $expected);
+    proclaim($test, $desc, undef); # << needs better error message handling
 }
 
 sub isa_ok ($ref, Str $expected_type, Str ?$desc) returns Bool is export {
     my $ref_type = ref($ref);
     my $out := defined($desc) ?? $desc :: "The object is-a '$expected_type'";    
     my $test := $ref_type eq $expected_type;
-    proclaim($test, $out);
-    if (!$test) {
-        $*ERR.say("#     Failed test ($?CALLER::POSITION)");
-        $*ERR.say("#          got: '$ref_type'");
-        $*ERR.say("#     expected: '$expected_type'");        
-        $failed++;
-    }
-    return $test;
+    proclaim($test, $out,  undef, $ref_type, $expected_type);
 }
 
 sub todo_ok (Bool $cond, Str ?$desc) returns Bool is export {
     proclaim($cond, $desc, "TODO");
-    if (!$cond) {
-        diag("    Failed (TODO) test ($?CALLER::POSITION)");
-    }
-    return $cond;
 }
 
 sub todo_is (Str $got, Str $expected, Str ?$desc) returns Bool is export {
     my $test = $got eq $expected;
-    proclaim($test, $desc, "TODO");
-    if (!$test) {
-        diag("    Failed (TODO) test ($?CALLER::POSITION)");
-        diag("         got: '$got'");
-        diag("    expected: '$expected'");
-    }
-    return $test;
+    proclaim($test, $desc, "TODO", $got, $expected);
+}
+
+sub todo_cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool is export {
+    my $test := $compare_func($got, $expected);
+    proclaim($test, $desc, "TODO", 4, 5); # << needs better error message handling
 }
 
 sub todo_isa_ok ($ref, Str $expected_type, Str ?$desc) returns Bool is export {
     my $ref_type = ref($ref);
     my $out := defined($desc) ?? $desc :: "The object is-a '$expected_type'";         
     my $test := $ref_type eq $expected_type;
-    proclaim($test, $out, "TODO");
-    if (!$test) {
-        diag("    Failed (TODO) test ($?CALLER::POSITION)");
-        diag("         got: '$ref_type'");
-        diag("    expected: '$expected_type'");        
-    }
-    return $test;
+    proclaim($test, $out, "TODO", $ref_type, $expected_type);
 }
 
 sub skip (Str ?$reason) returns Bool is export {
     proclaim(1, "", "skip $reason");
-    return 1;
 }
 
 sub pass (Str ?$desc) returns Bool is export {
     proclaim(1, $desc);
-    return 1;
 }
 
 sub fail (Str ?$desc) returns Bool is export {
     proclaim(0, $desc);
-    diag("    Failed test ($?CALLER::POSITION)");
-    return 0;
 }
 
 sub todo_fail (Str ?$desc) returns Bool is export {
     proclaim(0, $desc, 'TODO');
-    diag("    Failed (TODO) test ($?CALLER::POSITION)");
+}
+
+
+sub report_failure (Str ?$todo, Str ?$got, Str ?$expected) returns Bool is export {
+    if ($todo) {
+       diag("  Failed ($todo) test ($?CALLER::CALLER::CALLER::POSITION)");
+    }
+    else {
+        diag("  Failed test ($?CALLER::CALLER::CALLER::POSITION)");
+         $failed++;
+    }
+    diag("  Expected: $expected") if defined($expected);
+    diag("       Got: $got") if defined($got);
+}
+
+sub test_log_file (Str $filename) returns Str is export {
+    $log_file = $filename;
+    return $log_file;
+}
+
+sub write_log (+$got, +$expected, Str +$desc, Str +$errstr, Str +$context, Str +$operator = 'eq') returns Bool {
+    # return 0 but true unless $log_file; # not yet implemented
+    return 1 unless $log_file;
+    # until we have 'given'/'when'
+    my $status = 'FAILED';
+    if (index($?CALLER::CALLER::SUBNAME, 'todo') >= 0) {
+        $status = 'TODO';
+    }
+    if (index($?CALLER::CALLER::SUBNAME, 'skip') >= 0) {
+        $status = 'SKIPPED';
+    }
+    my $out;
+    if ($out = open(">>$log_file")) {
+	$out.say $?CALLER::CALLER::CALLER::FILE ~ " $loop $status";
+	$out.say $desc.[1] if $desc;
+	$out.say $errstr.[1] if $errstr;
+	$out.say $context.[1] if $context;
+	$out.say '### Expected ###';
+	$out.say $expected.[1];
+	$out.say '### Actual Results ###';
+	$out.say $got.[1], "\n";
+	$out.close;
+	return 1;
+    }
     return 0;
 }
 
@@ -126,6 +181,7 @@ END {
     if ($failed) {
         $*ERR.say("# Looks like you failed $failed tests of $loop");
     }
+
 }
 
 =kwid
@@ -139,7 +195,8 @@ Test - Test support module for perl6
   use v6;
   require Test;
   
-  plan 8;
+  plan 10;
+  test_log_file('test.log');
   
   ok(2 + 2 == 4, '2 and 2 make 4');
   is(2 + 2, 4, '2 and 2 make 4');
@@ -178,17 +235,41 @@ section of this document.
 All tests need a plan. A plan is simply the number of tests which are
 expected to run. This should be specified at the very top of your tests.
 
+- `test_log_file (Str $filename) returns Str`
+
+If you specify a log file, any failed tests will log some diagnostics
+there.  The filename 'test.log' is recommended.
+
 == Testing Functions
 
 - `ok (Bool $cond, Str ?$desc) returns Bool` 
 
 - `is (Str $got, Str $expected, Str ?$desc) returns Bool`
 
+- `cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool`
+
+This function will compare `$got` and `$expected` using `$compare_func`. This will
+eventually allow Test::More-style cmp_ok() though the following syntax:
+
+  cmp_ok('test', &infix:<gt>, 'me', '... testing gt on two strings');
+  
+However the `&infix:<gt>` is currently not implemented, so you will have to wait
+a little while. Until then, you can just write your own functions like this:
+
+  cmp_ok('test', sub ($a, $b) { ?($a gt $b) }, 'me', '... testing gt on two strings');
+
 - `isa_ok ($ref, Str $expected_type, Str ?$desc) returns Bool`
 
 This function currently on checks with ref() since we do not yet have
 object support. Once object support is created, we will add it here, and 
 maintain backwards compatibility as well.
+
+- `eval_ok (Str $code, Str ?$desc) returns Bool`
+
+- `eval_is (Str $code, $expected, Str ?$desc) returns Bool`
+
+These functions will eval a code snippet, and then pass the result to is or ok
+on success, or report that the eval was not successful on failure.
 
 == TODO Testing functions
 
@@ -201,7 +282,13 @@ functions.
 
 - `todo_is (Str $got, Str $expected, Str ?$desc) returns Bool`
 
+- `todo_cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool`
+
 - `todo_isa_ok ($ref, Str $expected_type, Str ?$desc) returns Bool`
+
+- `todo_eval_ok (Str $code, Str ?$desc) returns Bool`
+
+- `todo_eval_is (Str $code, $expected, Str ?$desc) returns Bool`
 
 == Misc. Functions
 
@@ -236,6 +323,11 @@ This module is still a work in progress. As Pugs grows, so will it's
 testing needs. This module will be the code support for those needs. The
 following is a list of future features planned for this module.
 
+- better error handling for cmp_ok
+
+The error handling capabilities need to be expanded more to handle the
+error reporting needs of the cmp_ok() function.
+
 - is_deeply
 
 Once nested data structures are implemented, we will need an easy way
@@ -265,6 +357,11 @@ These are functions taken directly from Test::Exception. They will
 accept a block to execute and then either an Exception type, a reg-exp
 or a string to match against the error.
 
+= ENVIRONMENT
+
+Setting the environment variable TEST_LOG_FILE sets the default 
+filename where test diagnostics should be written.
+
 = SEE ALSO
 
 The Perl 5 Test modules
@@ -289,6 +386,12 @@ Steve Peters
 Stevan Little <stevan@iinteractive.com>
 
 Brian Ingerson <ingy@cpan.org>
+
+Jesse Vincent <jesse@bestpractical.com>
+
+Yuval Kogman <nothingmuch@woobling.org>
+
+Nathan Gray <kolibrie@graystudios.org>
 
 = COPYRIGHT
 

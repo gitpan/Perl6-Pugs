@@ -3,14 +3,6 @@
 use v6;
 require Test;
 
-# XXX - stops right here if GHC doesn't have unicode support.
-if eval 'my $二 = 2; sub 恆等($x) {$x}; 恆等($二)' != 2 {
-    plan 2;
-    ok(eval 'my $foo; sub foo {}; 1', "ascii declaration");
-    skip("GHC is not in unicode mode; try setting LANG to UTF-8 mode?");
-    exit();
-}
-
 plan 18;
 
 # english ;-)
@@ -33,8 +25,8 @@ is(eval 'my $frénch = 2; sub bléch ($x) { $x }; bléch($frénch)', 2, "evaluat
 ok(eval 'my $一; 1', "chinese declaration");
 is(eval 'my $二 = 2; sub 恆等($x) {$x}; 恆等($二)', 2, "evaluation");
 
-# Tibeten Characters
-ok(eval 'my $༡; 1', "tibeten declaration");
+# Tibetan Characters
+ok(eval 'my $༡; 1', "tibetan declaration");
 is(eval 'my $༢ = 2; $༢', 2, "evaluation");
 
 # Japanese

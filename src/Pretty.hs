@@ -32,8 +32,15 @@ instance Pretty Exp where
     format (Syn x vs) = text "Syn" <+> format x $+$ (braces $ vcat (punctuate (text ";") (map format vs)))
     format (Statements lines) = (vcat $ punctuate (text ";") $ (map format) lines)
     format (App sub invs args) = text "App" <+> format sub <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
-    format (Sym (Symbol scope name exp)) = text "Sym" <+> text (show scope) <+> format name <+> text ":=" <+>  (nest defaultIndent $ format exp)
+    format (Sym syms) = text "Sym" <+> format syms
     format x = text $ show x
+
+instance Pretty [Symbol] where
+    format syms = cat $ map format syms
+
+instance Pretty Symbol where
+    format (SymVal scope name val) = text (show scope) <+> format name <+> text ":=" <+> (nest defaultIndent $ format val)
+    format (SymExp scope name exp) = text (show scope) <+> format name <+> text ":=" <+> (nest defaultIndent $ format exp)
 
 instance Pretty SourcePos where
     format pos =
@@ -65,7 +72,7 @@ instance Pretty Val where
     format (VBool x) = if x then text "bool::true" else text "bool::false"
     format (VNum x) = if x == 1/0 then text "Inf" else text $ show x
     format (VInt x) = integer x
-    format (VStr x) = text $ "'" ++ concatMap quoted x ++ "'"
+    format (VStr x) = text $ "'" ++ encodeUTF8 (concatMap quoted x) ++ "'"
     format (VRat x) = double $ ((fromIntegral $ numerator x) / (fromIntegral $ denominator x) :: Double)
     format (VComplex x) = text $ show x
     format (VControl x) = text $ show x
@@ -85,7 +92,11 @@ instance Pretty Val where
     format (VHash (MkHash x)) = braces $ (joinList $ text ", ") (map format $ fmToList x)
     
     format (VHandle x) = text $ show x
-    format (MVal _) = text $ "<mval>" -- format $ castV x
+    format (MVal v) = text $ unsafePerformIO $ do
+        val <- readIORef v
+        return $ pretty val
+    format (VThunk _) = text $ "{thunk}"
+    format (VRule _) = text $ "{rule}"
     format VUndef = text $ "undef"
 
 quoted '\'' = "\\'"

@@ -1,7 +1,7 @@
 #!pugs
 use v6;
 
-=pod
+######################################################################
 
 =head1 NAME
 
@@ -18,14 +18,28 @@ Non-Core Modules: I<none>
 =head1 COPYRIGHT AND LICENSE
 
 Locale::KeyedText is Copyright (c) 1999-2005, Darren R. Duncan.  All rights
-reserved.
+reserved.  Address comments, suggestions, and bug reports to
+B<perl@DarrenDuncan.net>, or visit "http://www.DarrenDuncan.net" for more
+information.
 
-Locale::KeyedText is free software; you can redistribute and/or modify this copy
-of it under the same terms as Perl 6 itself.
+Locale::KeyedText is free software; you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License (LGPL) version 2.1 as
+published by the Free Software Foundation (http://www.fsf.org/).  You should
+have received a copy of the LGPL as part of the Locale::KeyedText distribution,
+in the file named "LICENSE"; if not, write to the Free Software Foundation,
+Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
 
-=head1 AUTHORS
+Any versions of Locale::KeyedText that you modify and distribute must carry
+prominent notices stating that you changed the files and the date of any
+changes, in addition to preserving this original copyright notice and other
+credits. Locale::KeyedText is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE.  See the LGPL for more details.
 
-Darren Duncan <perl@DarrenDuncan.net>
+While it is by no means required, the copyright holders of Locale::KeyedText
+would appreciate being informed any time you create a modified version of
+Locale::KeyedText that you are willing to distribute, because that is a
+practical way of suggesting improvements to the standard version.
 
 =cut
 
@@ -33,22 +47,20 @@ Darren Duncan <perl@DarrenDuncan.net>
 ######################################################################
 
 subtype KeyName of Str where { .defined and m/^\w+$/ }
-subtype KeyNameHash of Hash is shape(KeyName) of Str; # keys are of type KeyName, values of type Str
 subtype PkgName of Str where { .defined and m/^<[a-zA-Z0-9_:]>+$/ }
-subtype PkgNameArray of Array of PkgName;
 
 ######################################################################
 ######################################################################
 
-module Locale::KeyedText-0.0.1 {
+module Locale::KeyedText-0.0.2 {
 
 ######################################################################
 
-sub new_message( $msg_key is KeyName, ?%msg_vars is KeyNameHash ) returns Locale::KeyedText::Message {
+sub new_message( KeyName $msg_key, Str ?%msg_vars is shape(KeyName) ) returns Locale::KeyedText::Message {
 	return Locale::KeyedText::Message.new( $msg_key, %msg_vars );
 }
 
-sub new_translator( @set_names is PkgNameArray, @member_names is PkgNameArray ) returns Locale::KeyedText::Translator {
+sub new_translator( PkgName @set_names, PkgName @member_names ) returns Locale::KeyedText::Translator {
 	return Locale::KeyedText::Translator.new( @set_names, @member_names );
 }
 
@@ -61,34 +73,34 @@ sub new_translator( @set_names is PkgNameArray, @member_names is PkgNameArray ) 
 
 class Locale::KeyedText::Message {
 	trusts Locale::KeyedText::Translator;
-	has $:msg_key is KeyName; # str - the machine-readable key that uniquely identifies this message
-	has %:msg_vars is KeyNameHash; # hash (str,str) - named variables for messages, if any, go here
+	has KeyName $:msg_key; # str - the machine-readable key that uniquely identifies this message
+	has Str %:msg_vars is shape(KeyName); # hash (str,str) - named variables for messages, if any, go here
 
 ######################################################################
 
-method new( $class: $msg_key is KeyName, ?%msg_vars is KeyNameHash ) returns Locale::KeyedText::Message {
+method new( $class: KeyName $msg_key, Str ?%msg_vars is shape(KeyName) ) returns Locale::KeyedText::Message {
 	return $class.bless( { msg_key => $msg_key, msg_vars => %msg_vars } );
 }
 
 ######################################################################
 
 method get_message_key( $message: ) returns KeyName {
-	return $message.msg_key;
+	return $message.:msg_key;
 }
 
-method get_message_variable( $message: $var_name is KeyName ) returns KeyName {
-	return $message.msg_vars{$var_name};
+method get_message_variable( $message: KeyName $var_name ) returns KeyName {
+	return $message.:msg_vars{$var_name};
 }
 
-method get_message_variables( $message: ) returns KeyNameHash {
-	return %{{$message.msg_vars}}; # copy list values
+method get_message_variables( $message: ) returns Hash is shape(KeyName) of Str {
+	return {$message.:msg_vars}; # copy list values; new hash ref puts attr in list context, so it flattens
 }
 
 ######################################################################
 
 method as_string( $message: ) returns Str {
 	# This method is intended for debugging use only.
-	return $message.msg_key~': '~$message.msg_vars.pairs.sort.
+	return $message.:msg_key~': '~$message.:msg_vars.pairs.sort.
 		map:{ .key~'='~(.value // '') }.join( ', ' ); # S02 says sorting Pairs sorts keys by default.
 	# I might use %hash.as() later, but don't know if it is customizable to sort or make undefs the empty str.
 }
@@ -101,32 +113,32 @@ method as_string( $message: ) returns Str {
 ######################################################################
 
 class Locale::KeyedText::Translator {
-	has @:tmpl_set_nms is PkgNameArray; # array of str - list of Template module Set Names to search
-	has @:tmpl_mem_nms is PkgNameArray; # array of str - list of Template module Member Names to search
+	has PkgName @:tmpl_set_nms; # array of str - list of Template module Set Names to search
+	has PkgName @:tmpl_mem_nms; # array of str - list of Template module Member Names to search
 
 ######################################################################
 
-method new( $class: @set_names is PkgNameArray, @member_names is PkgNameArray ) returns Locale::KeyedText::Translator {
+method new( $class: PkgName @set_names, PkgName @member_names ) returns Locale::KeyedText::Translator {
 	return $class.bless( { tmpl_set_nms => @set_names, tmpl_mem_nms => @member_names };
 }
 
 ######################################################################
 
-method get_template_set_names( $translator: ) returns PkgNameArray {
-	return @{[$translator.tmpl_set_nms]}; # copy list values
+method get_template_set_names( $translator: ) returns Array of PkgName {
+	return [$translator.:tmpl_set_nms]; # copy list values; new array ref puts attr in list context, so it flattens
 }
 
-method get_template_member_names( $translator: ) returns PkgNameArray {
-	return @{[$translator.tmpl_mem_nms]}; # copy list values
+method get_template_member_names( $translator: ) returns Array of PkgName {
+	return [$translator.:tmpl_mem_nms]; # copy list values; new array ref puts attr in list context, so it flattens
 }
 
 ######################################################################
 
 method translate_message( $translator: Locale::KeyedText::Message $message ) returns Str {
-	$message.defined or return;
+	$message.:defined or return;
 	my Str $text = undef;
-	MEMBER: for $translator.tmpl_mem_nms -> $member_name {
-		SET: for $translator.tmpl_set_nms -> $set_name {
+	MEMBER: for $translator.:tmpl_mem_nms -> $member_name {
+		SET: for $translator.:tmpl_set_nms -> $set_name {
 			my PkgName $template_module_name = $set_name~$member_name;
 			unless( $template_module_name.meta.can("get_text_by_key") ) {
 				require $template_module_name;
@@ -135,13 +147,13 @@ method translate_message( $translator: Locale::KeyedText::Message $message ) ret
 				}
 			}
 			try {
-				$text = $template_module_name.get_text_by_key( $message.msg_key );
+				$text = $template_module_name.get_text_by_key( $message.:msg_key );
 				CATCH {
 					next SET;
 				}
 			}
 			$text or next SET;
-			for $message.msg_vars.kv -> $var_name, $var_value {
+			for $message.:msg_vars.kv -> $var_name, $var_value {
 				$var_value //= '';
 				$text ~~ s:g/\{$var_name\}/$var_value/; # assumes msg props cleaned on input
 			}
@@ -155,8 +167,8 @@ method translate_message( $translator: Locale::KeyedText::Message $message ) ret
 
 method as_string( $translator: ) returns Str {
 	# This method is intended for debugging use only.
-	return 'SETS: '~$translator.tmpl_set_nms.as( '%s', ', ' )~'; MEMBERS: '~
-		$translator.tmpl_mem_nms.as( '%s', ', ' );
+	return 'SETS: '~$translator.:tmpl_set_nms.as( '%s', ', ' )~'; MEMBERS: '~
+		$translator.:tmpl_mem_nms.as( '%s', ', ' );
 }
 
 ######################################################################
@@ -242,7 +254,7 @@ the one with the program also adds support to the library.
 					show_message( $translator, $! ); # input error, detected by library
 				}
 			};
-			
+
 			redo LOOP;
 		}
 
@@ -704,7 +716,7 @@ Actually, it shows both methods together, with 4 embedded, 1 separate.
 			'MYLIB_MYINV_BAD_ARG' => 'my_invert(): argument NUMBER is not a number, it is "{GIVEN_VALUE}"',
 			'MYLIB_MYINV_RES_INF' => 'my_invert(): result is infinite because argument NUMBER is zero',
 		);
-	
+
 		sub get_text_by_key( Str $msg_key ) returns Str { return $text_strings{$msg_key}; }
 	}
 
@@ -744,7 +756,7 @@ Actually, it shows both methods together, with 4 embedded, 1 separate.
 					show_message( $translator, $! ); # input error, detected by library
 				}
 			};
-			
+
 			redo LOOP;
 		}
 

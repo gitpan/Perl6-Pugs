@@ -26,17 +26,17 @@ printInteractiveHelp
         putStrLn ":q              = quit"
         putStrLn ". <exp>         = show the syntax tree of an expression"
         putStrLn "? <exp>         = evaluate an expression in small steps"
-        putStrLn "<exp>           = evaluate an expression"
-{-
+        putStrLn "! <exp>         = same, but in the interactive environment"
+        putStrLn "<exp>           = run a command"
+        putStrLn ":i <exp>        = run a command, and ugly-print the result"
+        putStrLn ":r              = reset the evaluation environment"
         putStrLn ":l <filename>   = load a pugs file (need quotes around the name)" 
-        putStrLn ":r              = reload the current file"
--}
 
 {- FIXME: Somebody with more UI skillz should make this nicer -}
 printCommandLineHelp :: IO ()
 printCommandLineHelp
    = do putStrLn "Command-line flags:"
-        putStrLn "-e               executes it's argument"
+        putStrLn "-e               executes its argument"
         putStrLn "-h or --help     gives this message"
         putStrLn "-V               long configuration information & version"
         putStrLn "-v or --version  version"

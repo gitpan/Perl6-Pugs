@@ -20,10 +20,10 @@ import Parser
 
 op0 :: Ident -> [Val] -> Eval Val
 -- op0 ","  = return . VList . concatMap vCast
-op0 "!"  = return . VJunc . Junc JNone emptySet . mkSet . vCast . head
-op0 "&"  = return . opJuncAll . vCast . head
-op0 "^"  = return . opJuncOne . vCast . head
-op0 "|"  = return . opJuncAny . vCast . head
+op0 "!"  = return . VJunc . Junc JNone emptySet . mkSet
+op0 "&"  = return . opJuncAll
+op0 "^"  = return . opJuncOne
+op0 "|"  = return . opJuncAny
 op0 "undef" = \_ -> return VUndef
 op0 "time"  = \_ -> do
     clkt <- liftIO getClockTime
@@ -32,7 +32,8 @@ op0 "time"  = \_ -> do
     epochClkT = toClockTime epoch
     epoch = CalendarTime 2000 January 1 0 0 0 0 Saturday 0 "UTC" 0 False
 op0 "not" = const retEmpty
-op0 "¥" = (>>= return . VList . concat . transpose) . mapM fromValue
+op0 "so" = const (return $ VBool True)
+op0 "¥" = (>>= return . VList . concat . transpose) . mapM fromVal
 op0 "Y" = op0 "¥"
 op0 other = \x -> return $ VError ("unimplemented listOp: " ++ other) (App other (map Val x) [])
 
@@ -60,6 +61,12 @@ op1 "chomp" = \mv -> do
             liftIO $ writeIORef (vCast mv) $ VStr (init str)
             return $ VStr [last str]
         _   -> return VUndef
+op1 "lc" = return . VStr . (map toLower) . vCast
+op1 "lcfirst" = return . VStr .
+                (\x -> case x of { (a:as) -> toLower a : as ; a -> a}) . vCast
+op1 "uc" = return . VStr . (map toUpper) . vCast
+op1 "ucfirst" = return . VStr .
+                (\x -> case x of { (a:as) -> toUpper a : as ; a -> a}) . vCast
 op1 "undef" = \mv -> do
     liftIO $ writeIORef (vCast mv) $ VUndef
     return VUndef
@@ -67,7 +74,7 @@ op1 "+"    = return . op1Numeric id
 op1 "abs"  = return . op1Numeric abs
 op1 "post:++" = \mv -> do
     val <- readMVal mv
-    ref <- fromValue mv
+    ref <- fromVal mv
     liftIO $ writeIORef ref $ case val of
         (VStr str)  -> VStr $ strInc str
         _           -> op1Numeric (+1) (vCast val)
@@ -87,12 +94,15 @@ op1 "--"   = \mv -> do
     readMVal mv
 op1 "-"    = return . op1Numeric negate
 op1 "scalar" = return -- XXX refify?
+op1 "sort" = return . VList . sortBy cmp . vCast
+    where
+    cmp x y = compare (vCast x :: VStr) (vCast y :: VStr)
 op1 "reverse" = \v ->
     ifContextIsa "List"
         (return . VList . reverse . vCast $ v)
         (return . VStr . reverse . vCast $ v)
 op1 "list" = return . VList . vCast
-op1 "~"    = (>>= (return . VStr)) . (>>= fromValue) . readMVal
+op1 "~"    = (>>= (return . VStr)) . (>>= fromVal) . readMVal
 op1 "?"    = return . VBool . vCast
 op1 "int"  = return . VInt . vCast
 op1 "+^"   = return . VInt . (toInteger . (complement :: Word -> Word)) . vCast
@@ -101,6 +111,7 @@ op1 "?^"   = op1 "!"
 op1 "\\"   = return . VRef
 op1 "post:..."  = return . op1Range
 op1 "not"  = op1 "!"
+op1 "true" = op1 "?"
 op1 "any"  = return . opJuncAny . vCast
 op1 "all"  = return . opJuncAll . vCast
 op1 "one"  = return . opJuncOne . vCast
@@ -131,9 +142,8 @@ op1 "defined" = \v -> do
     return . VBool $ case v of
         VUndef  -> False
         _       -> True    
-op1 "last" = \_ -> do
-    shiftT $ \_ -> return VUndef
-op1 "return" = \v -> return (VError "cannot return outside a subroutine" (Val v))
+op1 "last" = \v -> return (VError "cannot last() outside a loop" (Val v))
+op1 "return" = \v -> return (VError "cannot return() outside a subroutine" (Val v))
 
 -- Side-effectful function: how far into Monadic IO shall we go?
 op1 "rand"  = \v -> do
@@ -166,13 +176,23 @@ op1 "chdir" = boolIO setCurrentDirectory
 op1 "chmod" = \v -> do
     v <- readMVal v
     vals <- mapM readMVal (vCast v)
-    rets <- liftIO $ mapM (iboolIO $ flip setFileMode $ intCast $ head vals) $ map vCast $ tail vals
+    rets <- liftIO $ mapM (doBoolIO $ flip setFileMode $ intCast $ head vals) $ map vCast $ tail vals
     return $ VInt $ sum $ map bool2n rets
 op1 "unlink" = \v -> do
     v <- readMVal v
     vals <- mapM readMVal (vCast v)
-    rets <- liftIO $ sequence $ map ( iboolIO removeFile ) $ map vCast vals
+    rets <- liftIO $ sequence $ map ( doBoolIO removeFile ) $ map vCast vals
     return $ VInt $ sum $ map bool2n rets
+op1 "slurp" = \v -> do
+    fileName <- fromVal v
+    ifContextIsa "List"
+        (slurpList fileName)
+        (slurpScalar fileName)
+    where
+    slurpList file = op1 "=" (VList [VStr file])
+    slurpScalar file = tryIO VUndef $ do
+        content <- readFile file
+        return $ VStr content
 op1 "open" = \v -> do
     let (mode, filename) = span (`elem` "+<> ") (vCast v)
     liftIO $ (`catch` \_ -> return VUndef) $ do
@@ -204,11 +224,11 @@ op1 "=" = \v -> do
     handleOf (VList [VStr x]) = liftIO $ openFile x ReadMode
     handleOf (VList []) = do
         args    <- readVar "@*ARGS"
-        files   <- fromValue args
+        files   <- fromVal args
         if null files
             then return stdin
             else handleOf (VList [VStr $ vCast (head files)]) -- XXX wrong
-    handleOf v = fromValue v
+    handleOf v = fromVal v
 op1 "ref"  = return . VStr . valType
 op1 "pop"  = op1Pop (last, init)
 op1 "shift"= op1Pop (head, tail)
@@ -244,27 +264,31 @@ op1Pop (fPick, fRem) list = do
             liftIO $ writeIORef (vCast array) $ VList $ fRem oldList
             return $ fPick oldList
 
+op1Print :: (Handle -> String -> IO ()) -> Val -> Eval Val
 op1Print f v = do
     val <- readMVal v
     vals <- mapM readMVal (vCast val)
     let (handle, vs) = case vals of
                         (VHandle h:vs)  -> (h, vs)
                         _               -> (stdout, vals)
-    liftIO . f handle . concatMap vCast $ vs
+    liftIO . f handle . concatMap (encodeUTF8 . vCast) $ vs
     return $ VBool True
 
 bool2n v = if v
   then 1
   else 0
 
-iboolIO f v = do
-    ok <- liftIO $ (`catch` \_ -> return False) $ do
+tryIO :: (MonadIO m) => a -> IO a -> m a
+tryIO err = liftIO . (`catch` \_ -> return err)
+
+doBoolIO f v = do
+    ok <- tryIO False $ do
         f (vCast v)
         return True
     return ok
 
 boolIO f v = do
-    ok <- iboolIO f v
+    ok <- doBoolIO f v
     return $ VBool ok
 
 boolIO2 f u v = do
@@ -284,7 +308,7 @@ opEval fatal name str = do
 
 retEvalResult fatal val = do
     glob <- askGlobal
-    let Just (Val errSV) = findSym "$!" glob
+    let Just errSV = findSym "$!" glob
     case val of
         VError _ _ | not fatal  -> do
             writeMVal errSV (VStr $ show val)
@@ -309,6 +333,8 @@ mapStr2Fill f x y = map (chr . fromEnum . uncurry f) $ x `zipFill` y
 
 
 op2 :: Ident -> Val -> Val -> Eval Val
+op2 op | "»" `isPrefixOf` op = op2Hyper . init . init . drop 2 $ op
+op2 op | ">>" `isPrefixOf` op = op2Hyper . init . init . drop 2 $ op
 op2 "rename" = boolIO2 rename
 op2 "symlink" = boolIO2 createSymbolicLink
 op2 "link" = boolIO2 createLink
@@ -316,7 +342,7 @@ op2 "*"  = op2Numeric (*)
 op2 "/"  = op2Divide
 op2 "%"  = op2Int mod
 op2 "x"  = \x y -> return $ VStr (concat $ (vCast y :: VInt) `genericReplicate` (vCast x :: VStr))
-op2 "xx" = \x y -> return $ VList ((vCast y :: VInt) `genericReplicate` x)
+op2 "xx" = \x y -> return $ VList $ concatMap vCast ((vCast y :: VInt) `genericReplicate` x)
 op2 "+&" = op2Int (.&.)
 op2 "+<" = op2Int shiftL
 op2 "+>" = op2Int shiftR
@@ -347,15 +373,18 @@ op2 "lt" = op2Cmp vCastStr (<)
 op2 "le" = op2Cmp vCastStr (<=)
 op2 "gt" = op2Cmp vCastStr (>)
 op2 "ge" = op2Cmp vCastStr (>=)
-op2 "~~" = op2Cmp vCastStr (==)
+op2 "~~" = op2Match
 op2 "!~" = op2Cmp vCastStr (/=)
 op2 "&&" = op2Logical not
-op2 "||" = op2Logical (id :: Bool -> Bool)
+op2 "||" = op2Logical id
 op2 "^^" = op2Bool ((/=) :: Bool -> Bool -> Bool)
 op2 "//" = op2Logical isJust
-op2 "!!" = op2Bool (\x y -> not x && not y)
--- NOTE:  "»" == chr 187
-op2 ('\187':op) = op2Hyper . init $ op
+op2 "!!" = \x y -> callCC $ \esc -> do
+    bx <- fromVal x
+    when bx $ esc (VBool False)
+    by <- fromVal y
+    when by $ esc (VBool False)
+    return (VBool True)
 -- XXX pipe forward XXX
 op2 "and"= op2 "&&"
 op2 "or" = op2 "||"
@@ -366,21 +395,77 @@ op2 "grep"= op2Grep
 op2 "map"= op2Map
 op2 "unshift" = op2Push (flip (++))
 op2 "push" = op2Push (++)
-op2 "split"= \x y -> return $ split (vCast x) (vCast y)
+op2 "split"= \x y -> return $ split' (vCast x) (vCast y)
     where
-    split :: VStr -> VStr -> Val
-    split [] xs = VList $ map (VStr . (:[])) xs
-    split glue xs = VList $ map VStr $ split' xs
-	where
-	split' [] = []
-	split' xs = piece : split' (dropGlue rest)
-	    where (piece, rest) = breakOnGlue glue xs
-	dropGlue = drop (length glue)
-    breakOnGlue _ [] = ([],[])
-    breakOnGlue glue rest@(x:xs)
-	| glue `isPrefixOf` rest = ([], rest)
-	| otherwise = (x:piece, rest') where (piece, rest') = breakOnGlue glue xs
+    split' :: VStr -> VStr -> Val
+    split' [] xs = VList $ map (VStr . (:[])) xs
+    split' glue xs = VList $ map VStr $ split glue xs
 op2 other = \x y -> return $ VError ("unimplemented binaryOp: " ++ other) (App other [Val x, Val y] [])
+
+
+op2Match x (VRule rx) = do
+    str     <- fromVal x
+    case encodeUTF8 str =~~ rx of
+        Nothing -> return $ VBool False
+        Just mr -> do
+            --- XXX: Fix $/ and make it lexical.
+            glob <- askGlobal
+            let Just matchAV = findSym "$/" glob
+                subs = elems $ mrSubs mr
+            writeMVal matchAV $ VList $ map VStr subs
+            return $ VBool True
+
+op2Match x y = op2Cmp vCastStr (==) x y
+
+op3 :: Ident -> Val -> Val -> Val -> Eval Val
+op3 "index" = \x y z -> do
+    str <- fromVal x
+    sub <- fromVal y
+    pos <- fromVal z
+    return . VInt $ doIndex 0 str sub pos
+    where
+    doIndex :: VInt -> VStr -> VStr -> VInt -> VInt
+    doIndex n a b p
+        | p > 0, null a     = doIndex n a b 0
+        | p > 0             = doIndex (n+1) (tail a) b (p-1) 
+        | b `isPrefixOf` a  = n
+        | null a            = -1
+        | otherwise         = doIndex (n+1) (tail a) b 0
+op3 "rindex" = \x y z -> do
+    str <- fromVal x
+    sub <- fromVal y
+    let skip | isJust (vCast z) = length str - (vCast z) - length sub
+             | otherwise        = 0
+    return . VInt $ doRindex str sub skip
+    where
+    doRindex :: VStr -> VStr -> Int -> VInt
+    doRindex a b skip
+        | skip > 0         = doRindex (init a) b (skip-1)
+        | b `isSuffixOf` a = toInteger $ length a - length b
+        | null a           = -1
+        | otherwise        = doRindex (init a) b 0
+
+op3 other = \x y z -> return $ VError ("unimplemented 3-ary op: " ++ other) (App other [Val x, Val y, Val z] [])
+
+op4 :: Ident -> Val -> Val -> Val -> Val -> Eval Val
+op4 "substr" = \x y z w -> do
+    str <- fromMVal x
+    pos <- fromVal y
+    let len | isJust (vCast z) = vCast z
+            | otherwise        = length str
+    let (pre, result, post) = doSubstr str pos len
+    when (isJust (vCast w) && result /= VUndef) $
+        liftIO $ writeIORef (vCast x) $ VStr $ pre ++ (vCast w) ++ post
+    return result
+    where
+    doSubstr :: VStr -> Int -> Int -> (VStr, Val, VStr)
+    doSubstr str pos len
+        | abs pos > length str = ("", VUndef, "")
+        | pos < 0   = doSubstr str (length str + pos) len
+        | len < 0   = doSubstr str pos (length str - pos + len)
+        | otherwise = ((take pos str), VStr (take len $ drop pos str), (drop (pos + len) str))
+
+op4 other = \x y z w -> return $ VError ("unimplemented 4-ary op: " ++ other) (App other [Val x, Val y, Val z, Val w] [])
 
 op2Hyper op x y
     | VList x' <- x, VList y' <- y
@@ -462,7 +547,11 @@ op2ChainedList x y
     | VList ys <- y                 = VList (x:ys)
     | otherwise                     = VList [x, y]
 
-op2Logical f x y = return $ if f (vCast x) then x else y
+op2Logical f x y = do
+    vx <- fromVal x
+    if f (vCast vx)
+        then return vx
+        else fromVal y
 
 op2DefinedOr = undefined
 
@@ -489,10 +578,13 @@ op2Numeric f x y
     | (VRat x', VInt y') <- (x, y)  = return $ VRat $ f x' (y' % 1)
     | (VInt x', VRat y') <- (x, y)  = return $ VRat $ f (x' % 1) y'
     | (VRat x', VRat y') <- (x, y)  = return $ VRat $ f x' y'
-    | otherwise                     = return $ VNum $ f (vCast x) (vCast y)
+    | otherwise = do
+        x' <- fromVal x
+        y' <- fromVal y
+        return . VNum $ f x' y'
 
 primOp :: String -> String -> Params -> String -> Symbol
-primOp sym assoc prms ret = Symbol SOur name (Val sub)
+primOp sym assoc prms ret = SymVal SOur name sub
     where
     name | isAlpha (head sym)
          , fixity == "prefix"
@@ -513,10 +605,14 @@ primOp sym assoc prms ret = Symbol SOur name (Val sub)
     f    = case (arity :: Integer) of
         0 -> \x -> op0 symStr x
         1 -> \x     -> case x of
-            [x]   -> op1 symName x
-            [x,y] -> op2 symStr x y
-            x     -> op0 symStr x
-        2 -> \[x,y] -> op2 sym (vCast x) (vCast y)
+            [x]       -> op1 symName x
+            [x,y]     -> op2 symStr x y
+            [x,y,z]   -> op3 symStr x y z
+            [x,y,z,w] -> op4 symStr x y z w
+            x         -> op0 symStr x
+        2 -> \[x,y] -> op2 symStr x y
+        3 -> \[x,y,z] -> op3 symStr x y z
+        4 -> \[x,y,z,w] -> op4 symStr x y z w
         _ -> error (show arity)
     symName = if modify then assoc ++ ":" ++ symStr else symStr
     (arity, fixity, modify) = case assoc of
@@ -547,10 +643,17 @@ foldParam "List"    = doFoldParam "List" "*@?1"
 foldParam ('r':'w':'!':"List") = \ps -> ((buildParam "List" "" "@?0" (Val VUndef)) { isLValue = True }:ps)
 foldParam ('r':'w':'!':str) = \ps -> ((buildParam str "" "$?1" (Val VUndef)) { isLValue = True }:ps)
 foldParam ""        = id
-foldParam ('?':str) = \ps -> (buildParam "Num" "?" "$?1" (Val $ VNum (read def)):ps)
-    where
-    (_, ('=':def)) = break (== '=') str
-foldParam x         = doFoldParam x ""
+foldParam ('?':str)
+    | (typ, ('=':def)) <- break (== '=') str
+    = let readVal "Num" = Val . VNum . read
+          readVal "Int" = Val . VInt . read
+          readVal "Str" = Val . VStr . read
+          readVal x	= error $ "Unknown type: " ++ x
+      in \ps -> (buildParam typ "?" "$?1" (readVal typ def):ps)
+    | otherwise
+    = \ps -> (buildParam str "?" "$?1" (Val VUndef):ps)
+foldParam ('~':str) = \ps -> ((buildParam str "" "$?1" (Val VUndef)) { isThunk = True }:ps)
+foldParam x         = doFoldParam x []
 
 -- XXX -- Junctive Types -- XXX --
 
@@ -573,6 +676,7 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     list    (List)\
 \\n   Scalar    pre     scalar  (Scalar)\
 \\n   List      pre     reverse (List)\
+\\n   List      pre     sort    (List)\
 \\n   Int       spre    +^      (Int)\
 \\n   Int       spre    ~^      (Str)\
 \\n   Bool      spre    ?^      (Bool)\
@@ -584,12 +688,20 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Any       pre     undef   (rw!Any)\
 \\n   Str       pre     chop    (rw!Str)\
 \\n   Str       pre     chomp   (rw!Str)\
+\\n   Int       pre     index   (Str, Str, ?Int=0)\
+\\n   Int       pre     rindex  (Str, Str, ?Int)\
+\\n   Int       pre     substr  (rw!Str, Int, ?Int, ?Str)\
+\\n   Str       pre     lc      (Str)\
+\\n   Str       pre     lcfirst (Str)\
+\\n   Str       pre     uc      (Str)\
+\\n   Str       pre     ucfirst (Str)\
 \\n   Any       post    ++      (rw!Num)\
 \\n   Num       post    --      (rw!Num)\
 \\n   Any       spre    ++      (rw!Num)\
 \\n   Num       spre    --      (rw!Num)\
 \\n   Any       pre     not     ()\
 \\n   Bool      pre     not     (Bool)\
+\\n   Bool      pre     true    (Bool)\
 \\n   List      pre     map     (Code, List)\
 \\n   List      pre     grep    (Code, List)\
 \\n   List      pre     map     (Array: Code)\
@@ -606,8 +718,8 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Str       pre     perl    (List)\
 \\n   Any       pre     eval    (Str)\
 \\n   Any       pre     require (Str)\
-\\n   Any       pre     last    (?Num=1)\
-\\n   Any       pre     exit    (?Num=0)\
+\\n   Any       pre     last    (?Int=1)\
+\\n   Any       pre     exit    (?Int=0)\
 \\n   Num       pre     rand    (?Num=1)\
 \\n   Bool      pre     defined (Any)\
 \\n   Str       pre     ref     (Any)\
@@ -619,9 +731,10 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     die     (List)\
 \\n   Any       pre     do      (Str)\
 \\n   IO        pre     open    (Str)\
+\\n   List      pre     slurp   (Str)\
 \\n   Bool      pre     system  (Str)\
 \\n   Bool      pre     system  (Str: List)\
-\\n   Bool      pre     binmode (IO: ?Num=1)\
+\\n   Bool      pre     binmode (IO: ?Int=1)\
 \\n   Any       pre     return  (Any)\
 \\n   Junction  pre     any     (List)\
 \\n   Junction  pre     all     (List)\
@@ -645,10 +758,10 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     split   (Str, Str)\
 \\n   Str       spre    =       (IO)\
 \\n   List      spre    =       (IO)\
-\\n   Junction  list    |       (List)\
-\\n   Junction  list    &       (List)\
-\\n   Junction  list    ^       (List)\
-\\n   Junction  list    !       (List)\
+\\n   Junction  list    |       (Any)\
+\\n   Junction  list    &       (Any)\
+\\n   Junction  list    ^       (Any)\
+\\n   Junction  list    !       (Any)\
 \\n   Num       left    *       (Num, Num)\
 \\n   Num       left    /       (Num, Num)\
 \\n   Num       left    %       (Num, Num)\
@@ -686,24 +799,30 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      chain   le      (Str, Str)\
 \\n   Bool      chain   gt      (Str, Str)\
 \\n   Bool      chain   ge      (Str, Str)\
-\\n   Scalar    left    &&      (Bool, Bool)\
-\\n   Scalar    left    !!      (Bool, Bool)\
-\\n   Scalar    left    ||      (Bool, Bool)\
+\\n   Scalar    left    &&      (Bool, ~Bool)\
+\\n   Scalar    left    !!      (Bool, ~Bool)\
+\\n   Scalar    left    ||      (Bool, ~Bool)\
 \\n   Scalar    left    ^^      (Bool, Bool)\
-\\n   Scalar    left    //      (Bool, Bool)\
+\\n   Scalar    left    //      (Bool, ~Bool)\
 \\n   List      left    »+«     (Any, Any)\
 \\n   List      left    »*«     (Any, Any)\
 \\n   List      left    »/«     (Any, Any)\
 \\n   List      left    »x«     (Any, Any)\
 \\n   List      left    »xx«    (Any, Any)\
+\\n   List      left    >>+<<   (Any, Any)\
+\\n   List      left    >>*<<   (Any, Any)\
+\\n   List      left    >>/<<   (Any, Any)\
+\\n   List      left    >>x<<   (Any, Any)\
+\\n   List      left    >>xx<<  (Any, Any)\
 \\n   List      list    ,       (List)\
 \\n   List      list	¥		(Array)\
 \\n   List      list	Y		(Array)\
 \\n   List      spre    <==     (List)\
 \\n   List      left    ==>     (List, Code)\
-\\n   Scalar    left    and     (Bool, Bool)\
-\\n   Scalar    left    or      (Bool, Bool)\
+\\n   Scalar    left    and     (Bool, ~Bool)\
+\\n   Scalar    left    or      (Bool, ~Bool)\
+\\n   Scalar    left    nor     (Bool, ~Bool)\
 \\n   Scalar    left    xor     (Bool, Bool)\
-\\n   Scalar    left    err     (Bool, Bool)\
+\\n   Scalar    left    err     (Bool, ~Bool)\
 \\n   Any       list    ;       (Any)\
 \\n"

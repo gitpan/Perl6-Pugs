@@ -12,7 +12,6 @@
 
 module Shell where
 import Internals
-import AST
 
 #undef PUGS_HAVE_READLINE
 #include "pugs_config.h"
@@ -24,11 +23,14 @@ import qualified System.Console.Readline as Readline
 data Command
    = CmdLoad FilePath
    | CmdQuit
-   | CmdBrowse
    | CmdParse String
-   | CmdEval Bool String
-   | CmdType Exp
+   | CmdRun RunOptions String
    | CmdHelp
+   | CmdReset
+
+data RunOptions = RunOpts { runOptDebug :: Bool
+                          , runOptSeparately :: Bool
+                          , runOptShowPretty :: Bool}
 
 -- read some input from the user
 -- parse the input and return the corresponding command
@@ -47,13 +49,19 @@ doCommand (Just line)
         return $ parseCommandLine line
 
 parseCommandLine :: String -> Command 
-parseCommandLine ('?':str)      = CmdEval True str
+parseCommandLine ('?':str)      = CmdRun (RunOpts True True  True) str
+parseCommandLine ('!':str)      = CmdRun (RunOpts True False True) str
 parseCommandLine ('.':str)      = CmdParse str
 parseCommandLine (':':'q':_)    = CmdQuit
 parseCommandLine (':':'h':_)    = CmdHelp
--- parseCommandLine (':':'b':_)    = CmdBrowse
--- parseCommandLine (':':'l':str)  = CmdLoad . unwords . tail $ words str
-parseCommandLine str            = CmdEval False str
+parseCommandLine (':':'r':_)    = CmdReset
+parseCommandLine (':':'i':str)  = CmdRun (RunOpts False False False) str
+parseCommandLine (':':'l':str)
+    | [(fn, rest)] <- reads str :: [(String, String)]
+    , [("", "")] <- lex rest =
+        CmdLoad fn
+    | otherwise = CmdHelp
+parseCommandLine str            = CmdRun (RunOpts False False True) str
 
 initializeShell :: IO ()
 initializeShell

@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS -fglasgow-exts -O #-}
 
 {-
     Lexical analyzer.
@@ -74,21 +74,23 @@ ruleEndOfLine = choice [ do { char '\n'; return () }, eof ]
 symbol s
     | isWordAny (last s) = try $ do
         rv <- string s
-        choice [ eof >> return ' ', lookAhead (satisfy (not . isWordAny)) ]
+        choice [ eof >> return ' ', lookAhead (satisfy (aheadWord $ last s)) ]
         whiteSpace
         return rv
     | otherwise          = try $ do
         rv <- string s
         -- XXX Wrong - the correct solution is to lookahead as much as possible
         -- in the expression parser below
-        choice [ eof >> return ' ', lookAhead (satisfy (ahead $ last s)) ]
+        choice [ eof >> return ' ', lookAhead (satisfy (aheadSym $ last s)) ]
         whiteSpace
         return rv
-        where
-        ahead '-' '>' = False -- XXX hardcoke
-        ahead '!' '~' = False -- XXX hardcoke
-        ahead x   '=' = not (x `elem` "!~+-*/|")
-        ahead s   x   = x `elem` ";!" || x /= s
+    where
+    aheadWord x  '=' = not $ x `elem` (decodeUTF8 "xY¥")
+    aheadWord _  y   = not $ isWordAny y
+    aheadSym '-' '>' = False -- XXX hardcode
+    aheadSym '!' '~' = False -- XXX hardcode
+    aheadSym x   '=' = not (x `elem` "!~+-*&/|.")
+    aheadSym x   y   = y `elem` ";!" || x /= y
 
 stringLiteral = singleQuoted
 
@@ -106,7 +108,7 @@ interpolatingStringLiteral endchar interpolator = do
             lookAhead (char endchar)
             return []
           <|> do
-            parse <- interpolator
+            parse <- interpolator endchar
             rest  <- stringList
             return (parse:rest)
           <|> do
@@ -114,85 +116,6 @@ interpolatingStringLiteral endchar interpolator = do
             rest <- stringList
             return (Val (VStr [char]):rest)
         
-
-naturalOrRat  = natRat
-    <?> "number"
-    where
-    natRat = do
-            char '0'
-            zeroNumRat
-        <|> decimalRat
-                      
-    zeroNumRat = do
-            n <- hexadecimal <|> decimal <|> octalBad <|> octal <|> binary
-            return (Left n)
-        <|> decimalRat
-        <|> fractRat 0
-        <|> return (Left 0)                  
-                      
-    decimalRat = do
-        n <- decimalLiteral
-        option (Left n) (try $ fractRat n)
-
-    fractRat n = do
-            fract <- try fraction
-            expo  <- option (1%1) expo
-            return (Right $ ((n % 1) + fract) * expo) -- Right is Rat
-        <|> do
-            expo <- expo
-            if expo < 1
-                then return (Right $ (n % 1) * expo)
-                else return (Right $ (n % 1) * expo)
-
-    fraction = do
-            char '.'
-            try $ do { char '.'; unexpected "dotdot" } <|> return ()
-            digits <- many digit <?> "fraction"
-            return (digitsToRat digits)
-        <?> "fraction"
-        where
-        digitsToRat d = digitsNum d % (10 ^ length d)
-        digitsNum d = foldl (\x y -> x * 10 + (toInteger $ digitToInt y)) 0 d 
-
-    expo :: GenParser Char st Rational
-    expo = do
-            oneOf "eE"
-            f <- sign
-            e <- decimalLiteral <?> "exponent"
-            return (power (if f then e else -e))
-        <?> "exponent"
-        where
-        power e | e < 0      = 1 % (10^abs(e))
-                | otherwise  = (10^e) % 1
-
-    -- sign            :: CharParser st (Integer -> Integer)
-    sign            =   (char '-' >> return False) 
-                    <|> (char '+' >> return True)
-                    <|> return True
-
-{-
-    nat             = zeroNumber <|> decimalLiteral
-        
-    zeroNumber      = do{ char '0'
-                        ; hexadecimal <|> decimal <|> octalBad <|> octal <|> decimalLiteral <|> return 0
-                        }
-                      <?> ""       
--}
-
-    decimalLiteral         = number 10 digit        
-    hexadecimal     = do{ char 'x'; number 16 hexDigit }
-    decimal         = do{ char 'd'; number 10 digit }
-    octal           = do{ char 'o'; number 8 octDigit }
-    octalBad        = do{ many1 octDigit ; fail "0100 is not octal in perl6 any more, use 0o100 instead." }
-    binary          = do{ char 'b'; number 2 (oneOf "01")  }
-
-    -- number :: Integer -> CharParser st Char -> CharParser st Integer
-    number base baseDigit
-        = do{ digits <- many1 baseDigit
-            ; let n = foldl (\x d -> base*x + toInteger (digitToInt d)) 0 digits
-            ; seq n (return n)
-            }          
-
 
 singleQuoted = verbatimRule "literal string" $ do
     str <- between (char '\'') (char '\'' <?> "end of string") (many singleStrChar)
