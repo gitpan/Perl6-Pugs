@@ -1,17 +1,21 @@
 #!/usr/bin/perl
 
 use strict;
+use FindBin;
+use Config;
 use inc::Module::Install;
+
+chdir $FindBin::Bin;
 
 name            ('Perl6-Pugs');
 version_from    ('lib/Perl6/Pugs.pm');
 abstract_from   ('lib/Perl6/Pugs.pm');
 author          ('Autrijus Tang <autrijus@autrijus.org>');
 license         ('perl');
-install_script  ('pugs');
+install_script  ("pugs$Config{_exe}");
 build_requires  ('Test::More');
 
-can_run('ghc') or die << '.';
+(`ghc --version` =~ /Glasgow/) or die << '.';
 *** Cannot find a runnable 'ghc' from path.
 *** Please install GHC from http://haskell.org/ghc/.
 .
@@ -32,7 +36,27 @@ if ($^O =~ /darwin/i and not -e "/usr/local/include/readline/readline.h") {
 }
 
 
+open IN, '< lib/Perl6/Pugs.pm' or die $!;
 open FH, '> config.h' or die $!;
+
+while (<IN>) {
+    /version (\S+) .*\breleased (.*)\./ or next;
+    print FH << ".";
+
+#ifdef VERSION
+#undef VERSION
+#endif
+#define VERSION "$1"
+
+#ifdef DATE
+#undef DATE
+#endif
+#define DATE "$2"
+
+.
+    last;
+}
+
 if ($has_readline) {
     print FH "#define READLINE 1\n";
 }
