@@ -20,38 +20,42 @@ import Parser
 
 op0 :: Ident -> [Val] -> Val
 op0 ","  = VList . concatMap vCast
-op0 "!"  = VJunc JNone . mkSet
+op0 "!"  = VJunc . Junc JNone emptySet . mkSet
 op0 "&"  = opJuncAll
 op0 "^"  = opJuncOne
 op0 "|"  = opJuncAny
 op0 s    = \x -> VError ("unimplemented listOp: " ++ s) (Val $ VList x)
 
-op1 :: Ident -> Env -> (forall a. Context a => a) -> Val
-op1 "!"    _ = fmapVal not
-op1 "+"    _ = op1Numeric id
-op1 "-"    _ = op1Numeric negate
-op1 "~"    _ = VStr
-op1 "?"    _ = VBool
-op1 "*"    _ = VList
-op1 "**"   _ = VList . map (id $!)
-op1 "+^"   _ = VInt . (toInteger . (complement :: Word -> Word))
-op1 "~^"   _ = VStr . mapStr complement
-op1 "?^"   e = op1 "!" e
-op1 "\\"   _ = VRef
-op1 "..."  _ = op1Range
-op1 "not"  e = op1 "!" e
-op1 "any"  _ = opJuncAny
-op1 "all"  _ = opJuncAll
-op1 "one"  _ = opJuncOne
-op1 "none" _ = VJunc JNone
-op1 "perl" _ = \x -> VStr $ pretty (x :: Val)
-op1 "eval" e = opEval e
-op1 s      _ = \x -> VError ("unimplemented unaryOp: " ++ s) (Val x)
+op1 :: Ident -> Val -> Eval Val
+op1 "!"    = return . fmapVal not
+op1 "+"    = return . op1Numeric id
+op1 "-"    = return . op1Numeric negate
+op1 "~"    = return . VStr . vCast
+op1 "?"    = return . VBool . vCast
+op1 "*"    = return . VList . vCast
+op1 "**"   = return . VList . map (id $!) . vCast
+op1 "+^"   = return . VInt . (toInteger . (complement :: Word -> Word)) . vCast
+op1 "~^"   = return . VStr . mapStr complement . vCast
+op1 "?^"   = op1 "!"
+op1 "\\"   = return . VRef
+op1 "..."  = return . op1Range
+op1 "not"  = op1 "!"
+op1 "any"  = return . opJuncAny . vCast
+op1 "all"  = return . opJuncAll . vCast
+op1 "one"  = return . opJuncOne . vCast
+op1 "none" = return . VJunc . Junc JNone emptySet . mkSet . vCast
+op1 "perl" = return . VStr . (pretty :: Val -> VStr)
+op1 "eval" = opEval . vCast
+op1 "rand" = \v -> let (x :: VNum) = vCast v in return $ VNum $ unsafePerformIO $ getStdRandom (randomR (0, if x == 0 then 1 else x))
+op1 s      = return . (\x -> VError ("unimplemented unaryOp: " ++ s) (Val x))
 
-opEval :: Env -> String -> Val
-opEval env str = case ( runParser parseProgram () "" str ) of
-    Left err    -> VError (showErr err) (NonTerm $ errorPos err)
-    Right ast   -> (evl env) env ast
+opEval :: String -> Eval Val
+opEval str = do
+    env <- ask
+    let env' = runRule env id ruleProgram str
+    local (\_ -> env') $ do
+        evl <- asks envEval
+        evl (envBody env')
 
 mapStr :: (Word8 -> Word8) -> [Word8] -> String
 mapStr f = map (chr . fromEnum . f)
@@ -133,11 +137,18 @@ op2Range x (VRat n)  = VList $ map VRat [vCast x .. n]
 op2Range x y         = VList $ map VInt [vCast x .. vCast y]
 
 op2Divide x y
-    | VInt x' <- x, VInt y' <- y    = VRat $ x' % y'
-    | VInt x' <- x, VRat y' <- y    = VRat $ (x' % 1) / y'
-    | VRat x' <- x, VInt y' <- y    = VRat $ x' / (y' % 1)
-    | VRat x' <- x, VRat y' <- y    = VRat $ x' / y'
-    | otherwise                     = op2Num (/) x y
+    | VInt x' <- x, VInt y' <- y
+    = if y' == 0 then err else VRat $ x' % y'
+    | VInt x' <- x, VRat y' <- y
+    = if y' == 0 then err else VRat $ (x' % 1) / y'
+    | VRat x' <- x, VInt y' <- y
+    = if y' == 0 then err else VRat $ x' / (y' % 1)
+    | VRat x' <- x, VRat y' <- y
+    = if y' == 0 then err else VRat $ x' / y'
+    | otherwise
+    = op2Num (/) x y
+    where
+    err = VError ("Illegal division by zero: " ++ "/") (App "/" [] [Val x, Val y])
 
 op2ChainedList x y
     | VList xs <- x, VList ys <- y  = VList $ xs ++ ys
@@ -173,21 +184,23 @@ op2Numeric f x y
     | otherwise                     = VNum $ f (vCast x) (vCast y)
 
 primOp :: String -> String -> Params -> String -> Symbol
-primOp sym assoc prms ret = (name, sub)
+primOp sym assoc prms ret = Symbol SOur name sub
     where
     name = '&':'*':fixity ++ ':':sym
     sub  = VSub $ Sub { isMulti     = True
+                      , subName     = name
+                      , subPad      = []
                       , subType     = SubRoutine
                       , subAssoc    = assoc
                       , subParams   = prms
                       , subReturns  = ret
                       , subFun      = (Prim f)
                       }
-    f :: Env -> [Val] -> Val
+    f :: [Val] -> Eval Val
     f    = case arity of
-        0 -> \env (x:_) -> op0 sym (vCast x)
-        1 -> \env [x]   -> op1 sym env (vCast x)
-        2 -> \env [x,y] -> op2 sym (vCast x) (vCast y)
+        0 -> \(x:_) -> return $ op0 sym (vCast x)
+        1 -> \[x]   -> op1 sym (vCast x)
+        2 -> \[x,y] -> return $ op2 sym (vCast x) (vCast y)
         _ -> error (show arity)
     (arity, fixity) = case assoc of
         "pre"       -> (1, "prefix")
@@ -211,8 +224,9 @@ doFoldParam cxt [] (p:ps)   = (buildParam cxt "" (strInc $ paramName p) (Val VUn
 doFoldParam cxt (s:name) ps = (buildParam cxt [s] name (Val VUndef) : ps)
 
 foldParam :: String -> Params -> Params
-foldParam "List" = doFoldParam "List" "*@x"
-foldParam x      = doFoldParam x ""
+foldParam "List"    = doFoldParam "List" "*@x"
+foldParam "?Num=1"  = \ps -> (buildParam "Num" "?" "$x" (Val $ VNum 1):ps)
+foldParam x         = doFoldParam x ""
 
 -- XXX -- Junctive Types -- XXX --
 
@@ -232,6 +246,7 @@ initSyms = map primDecl . filter (not . null) . lines $ "\
 \\n   Bool      pre     not     (Bool)\
 \\n   Str       pre     perl    (List)\
 \\n   Any       pre     eval    (Str)\
+\\n   Num       pre     rand    (?Num=1)\
 \\n   Junction  pre     any     (List)\
 \\n   Junction  pre     all     (List)\
 \\n   Junction  pre     one     (List)\

@@ -11,7 +11,10 @@
 
 module Lexer where
 import Internals
+import AST
 import qualified Text.ParserCombinators.Parsec.Token as P
+
+type RuleParser a = GenParser Char Env a
 
 perl6Def  = javaStyle
           { P.commentStart   = "\n=begin\n"
@@ -20,38 +23,26 @@ perl6Def  = javaStyle
           , P.nestedComments = False
           , P.identStart     = wordAlpha
           , P.identLetter    = wordAny
-          , P.reservedNames  = words $
-                "if then else do while skip"
-          , P.reservedOpNames= words $
-                " . .+ .? .* .+ .() .[] .{} .<<>> .= " ++
-                " ++ -- **  ! + - ~ ? * ** +^ ~^ ?^ \\ " ++
-                " * / % x xx +& +< +> ~& ~<< ~>> " ++
-                " + - ~ +| +^ ~| ~^ " ++
-                " & | ^ " ++
-                " rand sleep abs " ++
-                " => but does cmp <=> .. ^.. ..^ ^..^ " ++
-                " != == < <= > >= ~~ !~ eq ne lt le gt ge =:= " ++
-                " && || ^^ // ?? :: = := ::= += **= xx= " ++
-                " , <== print push any all true not " ++
-                " ==> and or xor err ;"
-          , P.opLetter       = oneOf (concat (P.reservedOpNames perl6Def))
           , P.caseSensitive  = False
           }
 
-wordAlpha   = satisfy (\x -> (isAlpha x || x == '_')) <?> "alphabetic word character"
-wordAny     = satisfy (\x -> (isAlphaNum x || x == '_')) <?> "word character"
+wordAlpha   = satisfy isWordAlpha <?> "alphabetic word character"
+wordAny     = satisfy isWordAny <?> "word character"
+
+isWordAny x = (isAlphaNum x || x == '_')
+isWordAlpha x = (isAlpha x || x == '_')
 
 perl6Lexer = P.makeTokenParser perl6Def
-reservedOp = P.reservedOp perl6Lexer
-integer    = P.integer perl6Lexer
 whiteSpace = P.whiteSpace perl6Lexer
 parens     = P.parens perl6Lexer
-float      = P.float perl6Lexer
 lexeme     = P.lexeme perl6Lexer
 identifier = P.identifier perl6Lexer
 braces     = P.braces perl6Lexer
 brackets   = P.brackets perl6Lexer
-symbol     = P.symbol perl6Lexer
+symbol s
+    | isWordAny (last s) = try $ postSpace $ string s
+    | otherwise          = try $ lexeme $ string s
+
 stringLiteral = choice
     [ P.stringLiteral  perl6Lexer
     , singleQuoted
@@ -152,4 +143,51 @@ singleStrChar = try quotedQuote <|> noneOf "'"
 quotedQuote = do
     string "\\'"
     return '\''
+
+rule name action = (<?> name) $ lexeme $ action
+literalRule name action = (<?> name) $ postSpace $ action
+tryRule name action = (<?> name) $ lexeme $ try $ action
+
+ruleScope :: RuleParser Scope
+ruleScope = postSpace $ try $ do
+    scope <- choice $ map string scopes
+    return (readScope scope)
+    where
+    scopes = map (map toLower) $ map (tail . show) $ enumFrom ((toEnum 1) :: Scope)
+    readScope s
+        | (c:cs)    <- s
+        , [(x, _)]  <- reads ('S':toUpper c:cs)
+        = x
+        | otherwise
+        = SGlobal
+
+preSpace rule = try $ do
+    skipMany1 (satisfy isSpace)
+    rule
+
+postSpace rule = try $ do
+    rv <- rule
+    choice [skipMany1 (satisfy isSpace), eof <?> ""]
+    return rv
+
+ruleTrait trait = do
+    symbol "is"
+    symbol trait
+    identifier
+
+ruleBareTrait trait = do
+    choice [ ruleTrait trait
+           , do { symbol trait ; identifier }
+           ]
+
+ruleContext = literalRule "context" $ do
+    lead    <- upper
+    rest    <- many1 wordAny
+    return (lead:rest)
+
+ruleVarName = literalRule "variable name" $ do
+    sigil   <- oneOf "$@%&"
+    caret   <- option "" $ choice [ string "^", string "*" ]
+    name    <- many1 wordAny
+    return $ (sigil:caret) ++ name
 

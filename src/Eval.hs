@@ -19,122 +19,126 @@ import Junc
 import Bind
 import Prim
 import Context
+import Monads
+import Pretty
 
-emptyEnv = Env { cxt = "List"
-               , sym = initSyms
-               , cls = initTree
-               , evl = evaluate
-               }
+emptyEnv :: (MonadIO m) => m Env
+emptyEnv = do
+    ref  <- liftIO $ newIORef emptyFM
+    uniq <- liftIO $ newUnique
+    return $ Env
+        { envContext = "List"
+        , envPad     = initSyms
+        , envClasses = initTree
+        , envEval    = evaluate
+        , envCC      = return
+        , envDepth   = 0
+        , envID      = uniq
+        , envBody    = Val VUndef
+        , envDebug   = Just ref -- Set to "Nothing" to disable debugging
+        }
 
-addSym :: Env -> [(String, Val)] -> Env
-addSym env [] = env
-addSym env ((var, val):vs) = env{ sym = (var, val):(sym $ addSym env vs) }
+-- Evaluation ---------------------------------------------------------------
 
-evaluate :: Env -> Exp -> Val
-evaluate env@Env{ cxt = cxt, cls = cls } exp
-    | Val v <- val  = v
-    | otherwise     = VError "Invalid expression" exp
-    where
-    (env', val) = reduce env exp
-    isaContext = isaType cls cxt
+-- debug :: (Pretty a) => String -> String -> a -> Eval ()
+debug key fun str a = do
+    rv <- asks envDebug
+    case rv of
+        Nothing -> return ()
+        Just ref -> liftIO $ do
+            fm <- readIORef ref
+            let val = fun $ lookupWithDefaultFM fm "" key
+            writeIORef ref (addToFM fm key val)
+            putStrLn ("***" ++ val ++ str ++ ": " ++ pretty a)
 
--- OK... Now let's implement the hideously clever autothreading algorithm.
--- First pass - thread thru all() and none()
--- Second pass - thread thru any() and one()
+evaluate :: Exp -> Eval Val
+evaluate (Val val) = return val
+evaluate exp = do
+    debug "indent" (' ':) "Evl" exp
+    val <- local (\e -> e { envBody = exp }) reduce
+    debug "indent" (tail) " Ret" val
+    return $ case val of
+        Val v       -> v
+        otherwise   -> VError "Invalid expression" exp
 
-chainFun :: Env -> Params -> Exp -> Params -> Exp -> Env -> [Val] -> Val
-chainFun env p1 f1 p2 f2 env' (v1:v2:vs)
-    | VBool False <- applyFun env' (chainArgs p1 [v1, v2]) f1
-    = VBool False
-    | otherwise
-    = applyFun env (chainArgs p1 (v2:vs)) f2
-    where
-    chainArgs prms vals = map chainArg (prms `zip` vals)
-    chainArg (p, v) = ApplyArg (paramName p) v False
+evalEnv :: Exp -> Eval Val
+evalEnv exp = do
+    evl <- asks envEval
+    evl exp
 
-applyFun :: Env -> [ApplyArg] -> Exp -> Val
-applyFun env bound (Prim f) = f env [ argValue arg | arg <- bound, (argName arg !! 1) /= '_' ]
-applyFun env bound body
-    | Val val   <- exp          = val
-    | otherwise                 = VError "Invalid expression" exp
-    where
-    (fenv, exp) = reduce (env `addSym` formal) body
-    formal = filter (not . null . fst) $ map argNameValue bound
-    argNameValue (ApplyArg name val _) = (name, val)
+enterEvalContext cxt = enterContext cxt . evalEnv
 
-apply :: Env -> VSub -> [Exp] -> [Exp] -> ((Env -> Env), Exp)
-apply env@Env{ cls = cls } Sub{ subParams = prms, subFun = fun } invs args =
-    case bindParams prms invs args of
-        Left errMsg     -> retVal $ VError errMsg (Val VUndef)
-        Right bindings  -> retVal $ juncApply eval (reverse . fst $ foldl doBind ([],env) bindings)
-    where
-    eval bound = applyFun env bound fun
-    doBind :: ([ApplyArg], Env) -> (Param, Exp) -> ([ApplyArg], Env)
-    doBind (bs, env) (prm@Param{ paramName = name }, exp)
-        = let (val, coll) = expToVal env prm exp in
-        (((ApplyArg name val coll): bs), env `addSym` [(name, val)])
-    expToVal env Param{ isSlurpy = slurpy, paramContext = cxt } exp
-        = (evaluate env{ cxt = cxt } exp, slurpy || isCollapsed cxt)
-    isCollapsed cxt
-        | isaType cls "Bool" cxt        = True
-        | isaType cls "Junction" cxt    = True
-        | otherwise                     = False
+-- Reduction ---------------------------------------------------------------
 
-toGlobal name
-    | (sigil, identifier) <- break (\x -> isAlpha x || x == '_') name
-    , last sigil /= '*'
-    = sigil ++ ('*':identifier)
-    | otherwise = name
+reduce :: Eval Exp
+reduce = do
+    env@Env{ envBody = body } <- ask
+    doReduce env body
 
-retVal :: Val -> ((Env -> Env), Exp)
-retVal val = (id, Val val)
+retVal :: Val -> Eval Exp
+retVal val = return $ Val val
 
-isGlobalExp (Syn name _) = name `elem` map ("&infix:" ++) (words ":= ::=")
-isGlobalExp _ = False
+reduceStatements [] = retVal VUndef
+reduceStatements [exp] = do
+    val <- evalEnv exp
+    retVal val
+reduceStatements (exp:rest)
+    | Syn name [Var var _, exp'] <- exp
+    , (name == ":=" || name == "::=") = do
+        val <- enterContext (cxtOfSigil $ head var) (evalEnv exp)
+        case val of
+            VError _ _  -> retVal val
+            _           -> enterLex [Symbol SMy var val] $ reduceStatements rest
+    | otherwise = do
+        val <- enterContext "Any" $ evalEnv exp
+        case val of
+            VError _ _  -> retVal val
+            _           -> reduceStatements rest
 
-reduce :: Env -> Exp -> ((Env -> Env), Exp)
-reduce Env{ cxt = cxt } exp@(NonTerm _)
-    | cxt == "Bool"     = retVal $ VBool False
-    | cxt == "List"     = retVal $ VList []
-    | cxt == "Array"    = retVal $ VArray $ MkArray []
-    | cxt == "Hash"     = retVal $ VHash $ MkHash emptyFM
-    | otherwise         = retVal $ VUndef
+doReduce :: Env -> Exp -> Eval Exp
 
-reduce env@Env{ sym = sym } exp@(Var var _)
-    | Just val <- lookup var sym
+-- Reduction for variables
+doReduce Env{ envPad = pad } exp@(Var var _)
+    | Just val <- findSym var pad
     = retVal val
-    | Just val <- lookup (toGlobal var) sym
+    | Just val <- findSym (toGlobal var) pad
     = retVal val
     | otherwise
     = retVal $ VError ("Undefined variable " ++ var) exp
 
-reduce env@Env{ cxt = cxt } exp@(Syn name exps)
-    | name `isInfix` ";"
-    , [left, right]     <- exps
-    , (lead, final)     <- buildStatements exps
-    , (env', exp)       <- foldl (runStatement "Any") (env, Val VUndef) lead
-    , (env', exp)       <- runStatement cxt (env', exp) final
-    = (const env', exp)
-    | name `isInfix` ":="
-    , [Var var _, exp]  <- exps
-    , (fenv, Val val)   <- reduce env exp
-    = (combineEnv fenv var val, Val val)
-    | name `isInfix` "::="
-    , [Var var _, Val val]  <- exps
-    = (combineEnv id var val, Val VUndef)
-    | name `isInfix` "=>"
-    , [keyExp, valExp]  <- exps
-    , key               <- evaluate env keyExp
-    , val               <- evaluate env valExp
-    = retVal $ VPair key val
-    | name `isInfix` ","
-    = retVal $ VList $ concatMap (vCast . evaluate env{ cxt = "List" }) exps
-    | name `isInfix` "[]"
-    , (listExp:rangeExp:errs)   <- exps
-    , list      <- evaluate env{ cxt = "List" } listExp
-    , range     <- evaluate env{ cxt = "List" } rangeExp
-    , slice     <- unfoldr (doSlice errs $ vCast list) (map vCast $ vCast range)
-    = retVal $ VList slice
+-- Reduction for syntactic constructs
+doReduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
+    ";" -> do
+        let (global, local) = partition isGlobalExp exps
+        reduceStatements (global ++ local)
+    ":=" -> do
+        let [Var var _, exp] = exps
+        val     <- evalEnv exp
+        retVal val
+    "::=" -> do -- XXX wrong
+        let [Var var _, exp] = exps
+        val     <- evalEnv exp
+        retVal VUndef -- XXX wrong
+    "=>" -> do
+        let [keyExp, valExp] = exps
+        key     <- evalEnv keyExp
+        val     <- evalEnv valExp
+        retVal $ VPair key val
+    "," -> do
+        vals    <- mapM (enterEvalContext "List") exps
+        retVal $ VList vals
+    "[]" -> do
+        let (listExp:rangeExp:errs) = exps
+        list    <- enterEvalContext "List" listExp
+        range   <- enterEvalContext "List" rangeExp
+        let slice = unfoldr (doSlice errs $ vCast list) (map vCast $ vCast range)
+        retVal $ VList slice
+    "gather" -> do
+        val     <- enterEvalContext "List" exp
+        -- ignore val
+        retVal val
+    _ -> do
+        retVal $ VError "Unknown syntactic construct" exp
     where
     doSlice :: [Exp] -> [Val] -> [VInt] -> Maybe (Val, [VInt])
     doSlice errs vs (n:ns)
@@ -145,31 +149,11 @@ reduce env@Env{ cxt = cxt } exp@(Syn name exps)
         | otherwise
         = Nothing
     doSlice _ _ _ = Nothing
-    buildStatements exps
-        | ((Syn name' exps'):rest)  <- exps
-        , name' `isInfix` ";"
-        = buildStatements (exps' ++ rest)
-        | (global, local)   <- partition isGlobalExp exps
-        , stmts             <- global ++ local
-        = (init stmts, last stmts)
-    runStatement :: Cxt -> (Env, Exp) -> Exp -> (Env, Exp)
-    runStatement cxt (env, (Val val)) exp
-        | VError _ _    <- val
-        = (env, Val val)
-        | NonTerm _     <- exp
-        = (env, Val val)
-        | (fenv, exp)   <- reduce env{ cxt = cxt } exp
-        = (fenv env, exp)
-        | otherwise
-        = (env, Val $ VError "Unterminated statement" exp)
-    combineEnv f var val env = (f env) `addSym` [(var, val)]
-    isInfix name s = name == "&infix:" ++ s
 
-reduce env@Env{ cxt = cxt, cls = cls } exp@(App name invs args)
-    | Just sub <- findSub name
-    = applySub sub invs args
-    | otherwise
-    = retVal $ VError ("No compatible subroutine found: " ++ name) exp
+doReduce env@Env{ envClasses = cls, envContext = cxt, envPad = pad } exp@(App name invs args) = do
+    case findSub name of
+        Just sub    -> applySub sub invs args
+        otherwise   -> retVal $ VError ("No compatible subroutine found: " ++ name) exp
     where
     applySub sub invs args
         -- list-associativity
@@ -181,21 +165,21 @@ reduce env@Env{ cxt = cxt, cls = cls } exp@(App name invs args)
         -- fix subParams to agree with number of actual arguments
         | Sub{ subAssoc = "list", subParams = (p:_) }   <- sub
         , null invs
-        = apply env sub{ subParams = (length args) `replicate` p } [] args
+        = apply sub{ subParams = (length args) `replicate` p } [] args
         -- chain-associativity
         | Sub{ subAssoc = "chain", subFun = fun, subParams = prm }   <- sub
         , (App name' invs' args'):rest              <- args
         , Just sub'                                 <- findSub name'
         , Sub{ subAssoc = "chain", subFun = fun', subParams = prm' } <- sub'
         , null invs'
-        = applySub sub{ subFun = Prim $ chainFun env prm' fun' prm fun } [] (args' ++ rest)
+        = applySub sub{ subParams = prm ++ tail prm', subFun = Prim $ chainFun prm' fun' prm fun } [] (args' ++ rest)
         -- fix subParams to agree with number of actual arguments
         | Sub{ subAssoc = "chain", subParams = (p:_) }   <- sub
         , null invs
-        = apply env sub{ subParams = (length args) `replicate` p } [] args -- XXX Wrong
+        = apply sub{ subParams = (length args) `replicate` p } [] args -- XXX Wrong
         -- normal application
         | otherwise
-        = apply env sub invs args
+        = apply sub invs args
     findSub name
         | ((_, sub):_) <- sort (subs name)  = Just sub
         | otherwise                         = Nothing
@@ -203,9 +187,9 @@ reduce env@Env{ cxt = cxt, cls = cls } exp@(App name invs args)
         ( (isGlobal, subT, isMulti sub, bound, distance, order)
         , fromJust fun
         )
-        | ((n, val), order) <- sym env `zip` [0..]
+        | ((Symbol _ n val), order) <- pad `zip` [0..]
         , let sub@(Sub{ subType = subT, subReturns = ret, subParams = prms }) = vCast val
-        , n == name || n == toGlobal name
+        , (n ==) `any` [name, toGlobal name]
         , let isGlobal = '*' `elem` n
         , let fun = arityMatch sub (invs ++ args) -- XXX Wrong
         , isJust fun
@@ -219,8 +203,82 @@ reduce env@Env{ cxt = cxt, cls = cls } exp@(App name invs args)
     deltaFromScalar ('*':x) = deltaFromScalar x
     deltaFromScalar x       = deltaType cls x "Scalar"
 
-reduce env (Parens exp) = reduce env exp
-reduce env other = (id, other)
+doReduce env (Parens exp) = doReduce env exp
+doReduce _ other = return other
+
+-- OK... Now let's implement the hideously clever autothreading algorithm.
+-- First pass - thread thru all() and none()
+-- Second pass - thread thru any() and one()
+
+chainFun :: Params -> Exp -> Params -> Exp -> [Val] -> Eval Val
+chainFun p1 f1 p2 f2 (v1:v2:vs) = do
+    val <- applyFun (chainArgs p1 [v1, v2]) f1
+    case val of
+        VBool False -> return val
+        _           -> applyFun (chainArgs p2 (v2:vs)) f2
+    where
+    chainArgs prms vals = map chainArg (prms `zip` vals)
+    chainArg (p, v) = ApplyArg (paramName p) v False
+
+applyFun :: [ApplyArg] -> Exp -> Eval Val
+applyFun bound (Prim f)
+    = f [ argValue arg | arg <- bound, (argName arg !! 1) /= '_' ]
+applyFun bound body = do
+    -- XXX - resetT here
+    enterLex formal $ evalEnv body
+    where
+    formal = filter (not . null . symName) $ map argNameValue bound
+    argNameValue (ApplyArg name val _) = Symbol SMy name val
+
+apply :: VSub -> [Exp] -> [Exp] -> Eval Exp
+apply sub invs args = do
+    env <- ask
+    doApply env sub invs args
+
+-- XXX - faking application of lexical contexts
+-- XXX - what about defaulting that depends on a junction?
+doApply :: Env -> VSub -> [Exp] -> [Exp] -> Eval Exp
+doApply env@Env{ envClasses = cls } Sub{ subParams = prms, subFun = fun } invs args =
+    case bindParams prms invs args of
+        Left errMsg     -> retVal $ VError errMsg (Val VUndef)
+        Right bindings  -> do
+            bound <- doBind bindings
+            retVal =<< juncApply (`applyFun` fun) bound
+            -- juncApply eval (reverse . fst $ foldl doBind ([],env) bindings)
+    where
+    doBind :: [(Param, Exp)] -> Eval [ApplyArg]
+    doBind [] = return []
+    doBind ((prm, exp):rest) = do
+        (val, coll) <- expToVal prm exp
+        let name = paramName prm
+            arg = ApplyArg name val coll
+        restArgs <- enterLex [Symbol SMy name val] $ do
+            doBind rest
+        return (arg:restArgs)
+    expToVal Param{ isSlurpy = slurpy, paramContext = cxt } exp = do
+        val <- enterEvalContext cxt exp
+        return (val, (slurpy || isCollapsed cxt))
+    isCollapsed cxt
+        | isaType cls "Bool" cxt        = True
+        | isaType cls "Junction" cxt    = True
+        | isaType cls cxt "Any"         = True
+        | otherwise                     = False
+
+toGlobal name
+    | (sigil, identifier) <- break (\x -> isAlpha x || x == '_') name
+    , last sigil /= '*'
+    = sigil ++ ('*':identifier)
+    | otherwise = name
+
+isGlobalExp (Syn name _) = name `elem` (words ":= ::=")
+isGlobalExp _ = False
+
+findSym :: String -> Pad -> Maybe Val
+findSym name pad
+    | Just s <- find ((== name) . symName) pad
+    = Just $ symValue s
+    | otherwise
+    = Nothing
 
 arityMatch sub@Sub{ subAssoc = assoc, subParams = prms } args
     | assoc == "list"               = Just sub
