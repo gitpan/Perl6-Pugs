@@ -7,7 +7,9 @@ use Config;
 use inc::Module::Install;
 
 chdir $FindBin::Bin;
-my $pugs = File::Spec->catfile($FindBin::Bin, "pugs$Config{_exe}");
+my $pugs = "pugs$Config{_exe}";
+my $full_pugs = File::Spec->catfile($FindBin::Bin, $pugs);
+my $full_t = File::Spec->catdir($FindBin::Bin, 't');
 
 name            ('Perl6-Pugs');
 version_from    ('lib/Perl6/Pugs.pm');
@@ -16,25 +18,27 @@ author          ('Autrijus Tang <autrijus@autrijus.org>');
 license         ('perl');
 install_script  ($pugs);
 build_requires  ('Test::More');
+makemaker_args  ( test => { TESTS => join ' ', (glob("t/*.t"), glob("t/*/*.t")) } );
 
 (`ghc --version` =~ /Glasgow/) or die << '.';
 *** Cannot find a runnable 'ghc' from path.
 *** Please install GHC from http://haskell.org/ghc/.
 .
 
-clean_files(glob("src/*.hi"), glob("src/*.o*"), glob("pugs*"), "config.h");
+clean_files("src/*.hi", "src/*.o*", "pugs*", "config.h");
 
-my $has_readline = 1;
-$has_readline = 0 if $^O eq 'MSWin32';
+my $has_readline = eval {
+    require Term::ReadLine;
+    require Term::ReadLine::Gnu;
+    1
+};
 
-if ($^O =~ /darwin/i and not -e "/usr/local/include/readline/readline.h") {
+if (!$has_readline) {
     warn << '.';
-*** /usr/local/include/readline/readline.h not found.
-*** Readline support disabled.  If you want readling support,
-    please install Readline from the URL below and try again:
-    http://p4.elixus.org/snap/pugs/macosx-readline-5.0.005.pkg.tar.gz
+*** Readline support disabled.  If you want readline support,
+    please install Term::ReadLine::Gnu from CPAN, as well as
+    the GNU Readline headers and shared library.
 .
-    $has_readline = 0;
 }
 
 
@@ -59,11 +63,18 @@ while (<IN>) {
     last;
 }
 
-if ($has_readline) {
-    print FH "#define READLINE 1\n";
+if ($^O eq 'MSWin32') {
+    print FH "#undef PUGS_HAVE_POSIX\n";
 }
 else {
-    print FH "#undef READLINE\n";
+    print FH "#define PUGS_HAVE_POSIX 1\n";
+}
+
+if ($has_readline) {
+    print FH "#define PUGS_HAVE_READLINE 1\n";
+}
+else {
+    print FH "#undef PUGS_HAVE_READLINE\n";
 }
 close FH;
 
@@ -80,7 +91,10 @@ WriteAll( sign => 1 );
 # FIXUP
 open MAKEFILE, '< Makefile' or die $!;
 my $makefile = do { local $/; <MAKEFILE> };
-$makefile =~ s/\b(test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = '$pugs'; $1/;
+$full_pugs =~ s{\\}{\\\\}g; $full_pugs =~ s{'}{\\'}g;
+$full_t =~ s{\\}{\\\\}g; $full_t =~ s{'}{\\'}g;
+$makefile =~ s/\b(test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = q*$full_pugs*; ENV->{PERL6LIB} = q*$full_t*; $1/;
+$makefile =~ s/("-MExtUtils::Command::MM")/"-Iinc" $1/g;
 close MAKEFILE;
 open MAKEFILE, '> Makefile' or die $!;
 print MAKEFILE $makefile;

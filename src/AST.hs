@@ -21,7 +21,7 @@ class Value n where
     vCast :: Val -> n
     -- vCast (MVal v)      = vCast $ castV v
     vCast (VRef v)      = vCast v
-    vCast (VPair _ v)   = vCast v
+    vCast (VPair (_, v))   = vCast v
     vCast (VArray (MkArray v))    = vCast $ VList v
     vCast v             = doCast v
     castV :: n -> Val
@@ -31,18 +31,38 @@ class Value n where
     fmapVal :: (n -> n) -> Val -> Val
     fmapVal f = castV . f . vCast
 
-instance Value (Val, Val) where
-    castV (x, y)        = VPair x y
-    vCast (VPair x y)   = (x, y)
+instance Value VPair where
+    castV (x, y)        = VPair (x, y)
+    vCast (VPair (x, y))   = (x, y)
     vCast (VRef v)      = vCast v
     -- vCast (MVal v)      = vCast $ castV v
     vCast v             = case vCast v of
         [x, y]  -> (x, y)
-        other   -> error $ "cannot cast into (Val, Val): " ++ (show v)
+        other   -> error $ "cannot cast into VPair: " ++ (show v)
 
 instance Value VHash where
     castV = VHash
-    vCast x = MkHash $ listToFM (map vCast $ vCast x) 
+    vCast (VHash h) = h
+    vCast VUndef = MkHash emptyFM
+    vCast v = MkHash $ vCast v
+
+instance Value (FiniteMap Val Val) where
+    vCast (VHash (MkHash h)) = h
+    vCast VUndef = emptyFM
+    vCast (VPair p) = listToFM [p]
+    vCast x = listToFM $ vCast x
+
+instance Value [VPair] where
+    vCast VUndef = []
+    vCast (VHash (MkHash h)) = fmToList h
+    vCast (VPair p) = [p]
+    vCast (VList vs) =
+        let fromList [] = []
+            fromList ((VPair (k, v)):xs) = (k, v):fromList xs
+            fromList (k:v:xs) = (k, v):fromList xs
+            fromList [k] = [(k, VUndef)] -- XXX warning?
+        in fromList vs
+    vCast x = error $ "cannot cast into [VPair]: " ++ (show x)
 
 instance Value VSub where
     castV = VSub
@@ -87,6 +107,7 @@ instance Value VRat where
     castV = VRat
     doCast (VInt i)     = i % 1
     doCast (VRat r)     = r
+    doCast (VBool b)    = if b then 1 % 1 else 0 % 1
     doCast x            = approxRational (vCast x :: VNum) 1
 
 instance Value VNum where
@@ -99,8 +120,10 @@ instance Value VNum where
     doCast (VStr s)
         | ((n, _):_) <- reads s = n
         | otherwise             = 0
-    doCast (VList l)    = fromIntegral $ length l
-    doCast x            = error $ "cannot cast: " ++ (show x)
+    doCast (VList l)    = genericLength l
+    doCast (VArray (MkArray a))    = genericLength a
+    doCast (VHash (MkHash h))    = fromIntegral $ sizeFM h
+    doCast x            = error $ "cannot cast as Num: " ++ (show x)
 
 instance Value VComplex where
     castV = VComplex
@@ -117,8 +140,9 @@ instance Value VStr where
     vCast (VList l)     = unwords $ map vCast l
     vCast (VRef v)      = vCast v
     -- vCast (MVal v)      = vCast $ castV v
-    vCast (VPair k v)   = vCast k ++ "\t" ++ vCast v ++ "\n"
-    vCast x             = error $ "cannot cast: " ++ (show x)
+    vCast (VPair (k, v))= vCast k ++ "\t" ++ vCast v ++ "\n"
+    vCast (VArray (MkArray l))     = unwords $ map vCast l
+    vCast x             = error $ "cannot cast as Str: " ++ (show x)
 
 showNum x
     | (i, ".0") <- break (== '.') str
@@ -135,7 +159,7 @@ instance Value MVal where
     castV ref = error "bye~" --unsafePerformIO $ readIORef ref
     vCast (MVal x)      = x
     vCast (VRef v)      = vCast v
-    vCast (VPair _ y)   = vCast y
+    vCast (VPair (_, y))= vCast y
     vCast x             = error $ "cannot modify a constant item: " ++ show x
 
 {-
@@ -147,7 +171,9 @@ instance Value VJunc where
 instance Value VList where
     castV = VList
     vCast (VList l)     = l
-    vCast (VPair k v)   = [k, v]
+    vCast (VArray (MkArray l)) = l
+    vCast (VHash (MkHash h)) = map VPair $ fmToList h
+    vCast (VPair (k, v))   = [k, v]
     vCast (VRef v)      = vCast v
     -- vCast (MVal v)      = vCast $ castV v
     vCast (VUndef)      = []
@@ -172,7 +198,7 @@ type VScalar = Val
 
 instance Value VScalar where
     vCast = id
-    castV = id
+    castV = id -- XXX not really correct; need to referencify things
 
 strRangeInf s = (s:strRangeInf (strInc s))
 
@@ -210,6 +236,8 @@ type MVal = IORef Val
 newtype VArray = MkArray [Val] deriving (Show, Eq, Ord)
 newtype VHash  = MkHash (FiniteMap Val Val) deriving (Show, Eq, Ord)
 
+type VPair = (Val, Val)
+
 instance (Show a, Show b) => Show (FiniteMap a b) where
     show fm = show (fmToList fm)
 
@@ -225,7 +253,7 @@ data Val
     | VArray    VArray
     | VHash     VHash
     | VRef      Val
-    | VPair     Val Val
+    | VPair     VPair
     | VSub      VSub
     | VBlock    VBlock
     | VJunc     VJunc
@@ -257,6 +285,7 @@ data Param = Param
     , isSlurpy      :: Bool
     , isOptional    :: Bool
     , isNamed       :: Bool
+    , isLValue      :: Bool
     , paramName     :: String
     , paramContext  :: Cxt
     , paramDefault  :: Exp
@@ -287,6 +316,8 @@ instance Ord MVal where
     compare x y = LT -- compare (castV x) (castV y)
 instance Show MVal where
     show _ = "<mval>"
+instance Show (IORef Pad) where
+    show _ = "<pad>"
 instance Ord VHandle where
     compare x y = compare (show x) (show y)
 
@@ -303,7 +334,14 @@ data Exp
     | Var Var
     | Parens Exp
     | NonTerm SourcePos
+    | Parser (CharParser Env Exp)
     deriving (Show, Eq, Ord)
+
+instance Show (CharParser Env Exp) where
+    show _ = "<parser>"
+instance Eq (CharParser Env Exp)
+instance Ord (CharParser Env Exp) where
+    compare _ _ = LT
 
 extractExp :: Exp -> ([Exp], [String]) -> ([Exp], [String])
 extractExp exp (exps, vs) = (exp':exps, vs')
@@ -336,7 +374,7 @@ cxtOfSigil '@'  = "Array"
 cxtOfSigil '%'  = "Hash"
 cxtOfSigil '&'  = "Code"
 
-cxtOf '*' '$'   = "List"
+--- cxtOf '*' '$'   = "List"
 cxtOf '*' '@'   = "List"
 cxtOf _   _     = "Scalar"
 
@@ -345,6 +383,7 @@ buildParam cxt sigil name exp = Param
     , isSlurpy      = (sigil == "*")
     , isOptional    = (sigil ==) `any` ["?", "+"]
     , isNamed       = (null sigil || head sigil /= '+')
+    , isLValue      = False
     , paramName     = name
     , paramContext  = if null cxt then defaultCxt else cxt
     , paramDefault  = exp
@@ -358,8 +397,9 @@ defaultHashParam    = buildParam "" "*" "%_" (Val VUndef)
 defaultScalarParam  = buildParam "" "*" "$_" (Val VUndef)
 
 data Env = Env { envContext :: Cxt
+	       , envLValue  :: Bool
                , envLexical :: Pad
-               , envGlobal  :: Pad
+               , envGlobal  :: IORef Pad
                , envClasses :: ClassTree
                , envEval    :: Exp -> Eval Val
                , envCC      :: Val -> Eval Val

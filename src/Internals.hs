@@ -15,6 +15,7 @@
 
 module Internals (
     module Cont,
+    module Posix,
     module Data.Dynamic,
     module Data.Unique,
     module System.Environment,
@@ -23,6 +24,7 @@ module Internals (
     module System.IO.Unsafe,
     module System.Exit,
     module System.Time,
+    module System.Directory,
     module Control.Monad.RWS,
     module Control.Monad.Error,
     module Data.Bits,
@@ -39,12 +41,12 @@ module Internals (
     module Data.IORef,
     module Debug.Trace,
     module Text.ParserCombinators.Parsec,
-    module Text.ParserCombinators.Parsec.Expr,
     module Text.ParserCombinators.Parsec.Error,
     module Text.ParserCombinators.Parsec.Language,
 ) where
 
 import Cont
+import Posix
 import Data.Dynamic
 import System.Environment
 import System.Random
@@ -52,6 +54,7 @@ import System.Exit
 import System.Time
 import System.IO hiding (try)
 import System.IO.Unsafe
+import System.Directory
 import Control.Monad.RWS
 import Control.Monad.Error (MonadError(..))
 import qualified System.IO (try)
@@ -71,7 +74,6 @@ import Data.Tree
 import Data.IORef
 import Debug.Trace
 import Text.ParserCombinators.Parsec hiding (parse)
-import Text.ParserCombinators.Parsec.Expr
 import Text.ParserCombinators.Parsec.Error hiding (ParseError, errorPos)
 import Text.ParserCombinators.Parsec.Language
 

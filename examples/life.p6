@@ -1,4 +1,5 @@
 #!perl6
+use v6;
 
 # life.p6 adopted for perl6 after:
 #
@@ -11,7 +12,7 @@
 #
 # (c) 2002 by Leopold Toetsch
 
-# we don't have »is rw« or call string by refs, so
+# we don't have ï¿½is rwï¿½ or call string by refs, so
 # input / output are int arrays - slooow
 #
 sub Print(@world) {

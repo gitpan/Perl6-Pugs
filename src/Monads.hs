@@ -28,9 +28,15 @@ main = do
     print x
     return x
 
+askGlobal :: Eval Pad
+askGlobal = do
+    glob <- asks envGlobal
+    liftIO $ readIORef glob
+
 testEnv = Env { envContext = "List"
-          , envLexical = []
-          , envGlobal = []
+	  , envLValue = False
+          , envLexical = undefined
+          , envGlobal = undefined
           , envCaller = Nothing
           , envClasses = initTree
           , envEval = undefined
@@ -71,11 +77,11 @@ enterSub sub@Sub{ subType = typ } action
     | otherwise         = do
         cxt <- asks envContext
         resetT $ do
-            local (\e -> e{ envLexical = (ret cxt:subPad sub) }) $ do
+            local (\e -> e{ envLexical = (subRec:ret cxt:subPad sub) }) $ do
                 action
     where
-    doReturn [v] = do
-        shiftT $ \_ -> return v
+    doReturn [v] = shiftT $ \_ -> return v
+    subRec = Symbol SMy "&?prefix:SUB" (Val $ VSub sub)
     ret cxt = Symbol SMy "&prefix:return" (Val $ VSub $ retSub cxt)
     retSub cxt = Sub
         { isMulti = False
@@ -88,8 +94,9 @@ enterSub sub@Sub{ subType = typ } action
             , isSlurpy = True
             , isOptional = False
             , isNamed = False
+            , isLValue = False
             , paramName = "@?0"
-            , paramContext = "Any"
+            , paramContext = cxt
             , paramDefault = Val VUndef
             } ]
         , subReturns = cxt
