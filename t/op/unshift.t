@@ -67,7 +67,7 @@ is(+@unshift2, 2, 'we have 2 elements in the list');
 is(@unshift2[0], 200, '@unshift2.unshift(200) works');
 is(@unshift2[1], $val, 'unshift @list, $val worked');
 
-@unshift2.unshift 400;
+@unshift2.unshift(400);
 is(+@unshift2, 3, 'we have 3 elements in the list');
 is(@unshift2[0], 400, '@unshift2.unshift(400) works');
 is(@unshift2[1], 200, '@unshift2.unshift(200) works');
@@ -97,11 +97,11 @@ is(@unshift3[4], 3, 'got the expected element');
 my @unshift4;
 
 unshift @unshift4, 42;
-todo_is(+@unshift4, 1, 'we have 1 element in the list');
+is(+@unshift4, 1, 'we have 1 element in the list');
 is(@unshift4[0], 42, 'got the element expected');
 
 unshift @unshift4, 2000;
-todo_is(+@unshift4, 2, 'we have 1 element in the list');
+is(+@unshift4, 2, 'we have 1 element in the list');
 is(@unshift4[0], 2000, 'got the element expected');
 is(@unshift4[1], 42, 'got the element expected');
 

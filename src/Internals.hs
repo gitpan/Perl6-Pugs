@@ -1,7 +1,7 @@
 {-# OPTIONS -fglasgow-exts #-}
 
 {-
-    Internal utilities and libraries imports.
+    Internal utilities and library imports.
 
     Though here at journey's end I lie
     in darkness buried deep,
@@ -14,6 +14,7 @@
 -}
 
 module Internals (
+    module UTF8,
     module Cont,
     module Posix,
     module Rule.Pos,
@@ -30,6 +31,7 @@ module Internals (
     module System.Cmd,
     module Control.Monad.RWS,
     module Control.Monad.Error,
+    module GHC.Unicode,
     module Data.Bits,
     module Data.List,
     module Data.Either,
@@ -43,13 +45,17 @@ module Internals (
     module Data.FiniteMap,
     module Data.IORef,
     module Debug.Trace,
-    internalError
+    internalError,
+    split,
+    decodeUTF8,
+    encodeUTF8,
 ) where
 
+import UTF8
 import Cont
 import Posix
 import Data.Dynamic
-import System.Environment
+import System.Environment (getArgs, withArgs, getProgName)
 import System.Random hiding (split)
 import System.Exit
 import System.Time
@@ -70,14 +76,15 @@ import Data.Either
 import Data.List (
     (\\), find, genericLength, insert, sortBy, intersperse,
     partition, group, sort, genericReplicate, isPrefixOf,
-    genericTake, genericDrop, unfoldr
+    genericTake, genericDrop, unfoldr, nub, nubBy, transpose
     )
 import Data.Unique
 import Data.Ratio
 import Data.Word
-import Data.Char
+import Data.Char (chr, ord, digitToInt)
 import Data.Set (
-    Set, elementOf, setToList, mapSet, mkSet, emptySet, unionManySets, union
+    Set, elementOf, setToList, mapSet, mkSet,
+    emptySet, unionManySets, union, cardinality
     )
 import Data.Ratio
 import Data.Complex
@@ -86,6 +93,7 @@ import Data.Tree
 import Data.IORef
 import Debug.Trace
 import Rule.Pos
+import GHC.Unicode
 
 -- Instances.
 instance Show Unique where
@@ -100,5 +108,23 @@ instance Show (IORef (FiniteMap String String)) where
     show _ = "{ n/a }"
 
 internalError :: String -> a
-internalError s = error $ "Internal error: " ++ s ++ " please file a bug report."
+internalError s = error $ 
+    "Internal error: " ++ s ++ " please file a bug report."
 
+split :: (Eq a) => [a] -> [a] -> [[a]]
+split [] str = map (: []) str
+split sep str = p : (if again then split sep ps else []) where
+   (p, ps, again) = split1 sep str
+   split1 _ [] = ([], [], False)
+   split1 sep str =
+      if isPrefixOf sep str then ([], drop (length sep) str, True) else
+      let (pre, post, x) = split1 sep (tail str) in ((head str) : pre, post, x)
+
+encodeUTF8 :: String -> String
+encodeUTF8 = map (chr . fromEnum) . encode
+
+decodeUTF8 :: String -> String
+decodeUTF8 str = fst $ decode bytes
+    where
+    bytes = map (toEnum . ord) str
+    

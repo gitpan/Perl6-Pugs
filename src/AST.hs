@@ -18,14 +18,24 @@ import Rule
 
 type Ident = String
 
+ifContextIsa c trueM falseM = do
+    env <- ask
+    if isaType (envClasses env) c (envContext env)
+        then trueM
+        else falseM
+
+doFromValue v = do
+    rv <- liftIO $ catchJust errorCalls (return . Right $ vCast v) $
+        \str -> return (Left str)
+    case rv of
+        Right v -> return v
+        Left e  -> retError e (Val v) -- XXX: not working yet
+
+fromMVal = (>>= fromValue) . readMVal
+
 class Value n where
     fromValue :: Val -> Eval n
-    fromValue v = do
-        rv <- liftIO $ catchJust errorCalls (return . Right $ vCast v) $
-            \str -> return (Left str)
-        case rv of
-            Right v -> return v
-            Left e  -> retError e (Val v) -- XXX: not working yet
+    fromValue = doFromValue
     vCast :: Val -> n
     -- vCast (MVal v)      = vCast $ castV v
     vCast (VRef v)      = vCast v
@@ -51,17 +61,17 @@ instance Value VPair where
 instance Value VHash where
     castV = VHash
     vCast (VHash h) = h
-    vCast VUndef = MkHash emptyFM
+    -- vCast VUndef = MkHash emptyFM
     vCast v = MkHash $ vCast v
 
 instance Value (FiniteMap Val Val) where
     vCast (VHash (MkHash h)) = h
-    vCast VUndef = emptyFM
+    -- vCast VUndef = emptyFM
     vCast (VPair p) = listToFM [p]
     vCast x = listToFM $ vCast x
 
 instance Value [VPair] where
-    vCast VUndef = []
+    -- vCast VUndef = []
     vCast (VHash (MkHash h)) = fmToList h
     vCast (VPair p) = [p]
     vCast (VList vs) =
@@ -111,7 +121,7 @@ instance Value VInt where
     doCast (VStr s)
         | ((n, _):_) <- reads s = n
         | otherwise             = 0
-    doCast x            = round (vCast x :: VNum)
+    doCast x            = truncate (vCast x :: VNum)
 
 instance Value VRat where
     castV = VRat
@@ -144,6 +154,15 @@ instance Value VComplex where
 
 instance Value VStr where
     castV = VStr
+    fromValue (VHash (MkHash h)) = do
+        ls <- mapM strPair $ fmToList h
+        return $ unlines ls
+        where
+        strPair (k, v) = do
+            k' <- fromMVal k
+            v' <- fromMVal v
+            return $ k' ++ "\t" ++ v'
+    fromValue v = doFromValue v
     vCast VUndef        = ""
     vCast (VStr s)      = s
     vCast (VBool b)     = if b then "1" else ""
@@ -154,7 +173,8 @@ instance Value VStr where
     vCast (VRef v)      = vCast v
     -- vCast (MVal v)      = vCast $ castV v
     vCast (VPair (k, v))= vCast k ++ "\t" ++ vCast v ++ "\n"
-    vCast (VArray (MkArray l))     = unwords $ map vCast l
+    vCast (VArray (MkArray l))   = unwords $ map vCast l
+    vCast (VHash (MkHash h))     = unlines $ map (\(k, v) -> (vCast k ++ "\t" ++ vCast v)) $ fmToList h
     vCast (VSub s)      = "<" ++ show (subType s) ++ "(" ++ subName s ++ ")>"
     vCast (VJunc j)     = show j
     vCast x             = error $ "cannot cast as Str: " ++ (show x)
@@ -172,7 +192,11 @@ instance Value VArray where
     vCast x = MkArray (vCast x) 
 
 instance Value MVal where
-    castV _ = error "Cannot cast MVal into Value!"
+    castV _ = error "Cannot cast MVal into Value"
+    fromValue (MVal x) = return x
+    fromValue (VRef v) = fromValue v
+    fromValue (VPair (_, v)) = fromValue v
+    fromValue v = retError "cannot modify constant item" $ Val v
     vCast (MVal x)      = x
     vCast (VRef v)      = vCast v
     vCast (VPair (_, y))= vCast y
@@ -415,9 +439,9 @@ extract ((Syn n exps), vs) = (Syn n exps', vs')
 extract ((Var name), vs)
     | (sigil:'^':identifer) <- name
     , name' <- (sigil : identifer)
-    = (Var name', insert name' vs)
+    = (Var name', nub (name':vs))
     | name == "$_"
-    = (Var name, insert name vs)
+    = (Var name, nub (name:vs))
     | otherwise
     = (Var name, vs)
 extract ((Parens ex), vs) = ((Parens ex'), vs')
@@ -483,6 +507,31 @@ data Scope = SGlobal | SMy | SOur | SLet | STemp | SState
     deriving (Show, Eq, Ord, Read, Enum)
 
 type Eval x = ContT Val (ReaderT Env IO) x
+
+findSym :: String -> Pad -> Maybe Exp
+findSym name pad
+    | Just s <- find ((== name) . symName) pad
+    = Just $ symExp s
+    | otherwise
+    = Nothing
+
+writeMVal l (MVal r)     = writeMVal l =<< liftIO (readIORef r)
+writeMVal (MVal l) r     = liftIO $ writeIORef l r
+writeMVal (VError s e) _ = retError s e
+writeMVal _ (VError s e) = retError s e
+writeMVal x _            = retError "Can't write a constant item" (Val x)
+
+askGlobal :: Eval Pad
+askGlobal = do
+    glob <- asks envGlobal
+    liftIO $ readIORef glob
+
+readVar name = do
+    glob <- askGlobal
+    case find ((== name) . symName) glob of
+        Just Symbol{ symExp = Val ref } -> readMVal ref
+        Just _  -> internalError "readVar failed on non-value bindings"
+        Nothing -> return VUndef
 
 retError :: VStr -> Exp -> Eval a
 retError str exp = do

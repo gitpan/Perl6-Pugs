@@ -9,8 +9,8 @@ use inc::Module::Install;
 chdir $FindBin::Bin; # XXX Why is this here?
 
 my $pugs = "pugs$Config{_exe}";
-my $version_h = "src/pugs_version.h";
-my @srcdirs = ("src", grep(-d, glob "src/*"));
+my $version_h = nativize("src/pugs_version.h");
+my @srcdirs = ("src", map nativize($_), grep(-d, glob "src/*"));
 
 deny_cygwin     ();
 
@@ -20,49 +20,33 @@ abstract_from   ('lib/Perl6/Pugs.pm');
 author          ('Autrijus Tang <autrijus@autrijus.org>');
 license         ('perl');
 install_script  ($pugs);
+install_script  (glob('script/*'));
 build_requires  ('Test::More');
 include         ('Module::Install::Makefile::Name');
 include         ('Module::Install::Makefile::Version');
-build_subdirs   ('ext/Kwid');
+build_subdirs   (map nativize($_), grep -e "$_/Makefile.PL", glob("ext/*"));
 makemaker_args  (
     test => { TESTS => join ' ', (glob("t/*.t"), glob("t/*/*.t")) },
     MAN1PODS => {},
 );
-clean_files     (
+clean_files     (map nativize($_),
     "pugs*", "src/pugs_config.h", "src/pugs_version.h", 
-    'src/Config.hs',
+    'src/Config.hs', 'blib6',
     map {("$_/*.hi", "$_/*.o*")} @srcdirs
 );
 
+setup_perl6_install();
 svn_revision    ();
 assert_ghc      ();
 create_config_h ();
 set_postamble   ();
-
-# WritePugs       (sign => 1); # XXX Not working yet.
-WriteAll        (sign => 1);
-pugs_fix_makefile();
+no_index        (directory => 'inc', 'examples');
+WritePugs       (sign => 1);
 
 ################################################################################
 # XXX Try to be tidy!
 # Pretty stuff goes above. Ugly stuff goes below.
 # Maybe we can refactor this ugly stuff into a Module::Install::Plugin.
-
-sub deny_cygwin {
-    if ($^O eq 'cygwin') {
-	die << "."
-** Cygwin currently unsupported on Win32; please use ActivePerl or MinGW Perl
-   instead, with the .msi installer of GHC.
-.
-    }
-}
-
-sub assert_ghc {
-    (`ghc --version` =~ /Glasgow/) or die << '.';
-*** Cannot find a runnable 'ghc' from path.
-*** Please install GHC from http://haskell.org/ghc/.
-.
-}
 
 sub svn_revision {
     my $svn_entries = File::Spec->catfile(".svn", "entries");
@@ -149,16 +133,41 @@ sub create_config_h {
 }
 
 sub set_postamble {
-    my @srcfiles = map glob("$_/*.hs"), @srcdirs;
-    postamble(<< ".");
-src/Config.hs :
-	$Config{perlpath} util/generate_config > src/Config.hs
+    my @srcfiles = map glob("$_/*.*hs"), @srcdirs;
+
+    # turning off unused imports and deprecations for GHC6.4.
+    my $ghc_flags = "-static -Wall -fno-warn-deprecations -fno-warn-missing-signatures -fno-warn-name-shadowing";
+
+    postamble(nativize(<< "."));
+src/Config.hs : util/PugsConfig.pm
+	$Config{perlpath} -Iutil -MPugsConfig -e "PugsConfig->write_config_module" > src/Config.hs
+
+profiled :: src/Config.hs @srcfiles $version_h
+	ghc -auto-all -prof --make $ghc_flags -o pugs src/Main.hs -isrc
+
+optimized :: src/Config.hs @srcfiles $version_h
+	ghc -O2 --make $ghc_flags -o pugs src/Main.hs -isrc
 
 $pugs : src/Config.hs @srcfiles $version_h
-	ghc --make -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -o pugs src/Main.hs -isrc
+	ghc --make $ghc_flags -o pugs src/Main.hs -isrc
 
 tags :
 	hasktags -c src
+
+INST6_ARCHLIB = ${\ File::Spec->catfile('blib6', 'arch')}
+INST6_SCRIPT = ${\ File::Spec->catfile('blib6', 'script')}
+INST6_BIN = ${\ File::Spec->catfile('blib6', 'bin')}
+INST6_LIB = ${\ File::Spec->catfile('blib6', 'lib')}
+INST6_MAN1DIR = ${\ File::Spec->catfile('blib6', 'man1')}
+INST6_MAN3DIR = ${\ File::Spec->catfile('blib6', 'man3')}
+
+pure_site_install ::
+	\$(NOECHO) \$(MOD_INSTALL) \\
+		\$(INST6_LIB) \$(DESTINSTALLPRIVLIB) \\
+		\$(INST6_ARCHLIB) \$(DESTINSTALLARCHLIB) \\
+		\$(INST6_BIN) \$(DESTINSTALLBIN) \\
+		\$(INST6_SCRIPT) \$(DESTINSTALLSCRIPT) \\
+		\$(INST6_MAN1DIR) \$(DESTINSTALLMAN1DIR) \\
+		\$(INST6_MAN3DIR) \$(DESTINSTALLMAN3DIR)
 .
 }
-

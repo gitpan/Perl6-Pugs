@@ -1,0 +1,48 @@
+#!/usr/bin/perl
+
+use Cwd;
+use Config;
+use FindBin;
+use File::Copy;
+use File::Basename;
+
+if (!@ARGV) {
+    die "Usage: $0 [ source[.p6] | -e oneliner ]\n";
+}
+
+my $base = cwd();
+if (!-e "src/Main.hs") {
+    $base = "$FindBin::Bin/..";
+    if (!-e "$base/src/Main.hs") {
+	die "$0: This script must be invoked in the Pugs source tree directory."
+    }
+}
+
+$ENV{PATH} .= $Config{path_sep} . $base;
+
+my $out = 'a';
+if (@ARGV and -e $ARGV[0]) {
+    $out = basename($ARGV[0]);
+    $out =~ s{\..*}{};
+}
+$out .= ($^O eq 'MSWin32') ? ".exe" : ".out";
+
+unlink "dump.ast";
+
+system("pugs", -C => @ARGV);
+exit 1 unless -e "dump.ast";
+
+copy ("$base/src/Main.hs" => "$base/src/MainCc.hs");
+
+open FH, '>>', "$base/src/MainCC.hs";
+open AST, "dump.ast" or die $!;
+print FH "\nmainCC = runAST \$ ";
+print FH <AST>;
+close AST;
+close FH;
+
+unlink "dump.ast";
+
+system("ghc", "-v0", "-o", $out, "--make", "-main-is", "mainCC", "-i$base/src", "$base/src/MainCC.hs");
+unlink "$base/src/MainCC.hs";
+print "Generated output: $out\n";

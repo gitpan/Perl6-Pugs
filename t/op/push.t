@@ -69,7 +69,7 @@ is(@push2[0], $val, 'push @list, $val worked');
 is(+@push2, 2, 'we have 2 elements in the list');
 is(@push2[1], 200, '@push2.push(200) works');
 
-@push2.push 400;
+@push2.push(400);
 is(+@push2, 3, 'we have 3 elements in the list');
 is(@push2[2], 400, '@push2.push(400) works');
 
@@ -94,11 +94,11 @@ is(@push3[4], 5, 'got the expected element');
 my @push4;
 
 push @push4, 42;
-todo_is(+@push4, 1, 'we have 1 element in the list');
-todo_is(@push4[0], 42, 'got the element expected');
+is(+@push4, 1, 'we have 1 element in the list');
+is(@push4[0], 42, 'got the element expected');
 
 push @push4, 2000;
-todo_is(+@push4, 2, 'we have 1 element in the list');
-todo_is(@push4[0], 42, 'got the element expected');
-todo_is(@push4[1], 2000, 'got the element expected');
+is(+@push4, 2, 'we have 1 element in the list');
+is(@push4[0], 42, 'got the element expected');
+is(@push4[1], 2000, 'got the element expected');
 

@@ -81,6 +81,7 @@ evaluate (Val val) = do
     lv  <- asks envLValue
     v   <- if lv then return val else readMVal val
     return $ case cxt of
+        _ | VSub _ <- v -> v -- XXX Work around a bug: (Val VSub) evaluated with bad context
         "List"  -> VList (vCast v)
         "Array" -> VArray (vCast v)
         "Hash"  -> VHash (vCast v)
@@ -127,12 +128,6 @@ newMVal val = do
     mval <- liftIO $ newIORef val
     return $ MVal mval
 
-writeMVal l (MVal r)     = writeMVal l =<< liftIO (readIORef r)
-writeMVal (MVal l) r     = liftIO $ writeIORef l r
-writeMVal (VError s e) _ = retError s e
-writeMVal _ (VError s e) = retError s e
-writeMVal x _            = retError "Can't write a constant item" (Val x)
-
 -- readMVal (MVal mv) =  liftIO $ readIORef mv
 
 addGlobalSym sym = do
@@ -141,52 +136,55 @@ addGlobalSym sym = do
         syms <- readIORef glob
         writeIORef glob (sym:syms)
 
-reduceStatements :: ([(Exp, SourcePos)], Exp) -> Eval Val
-reduceStatements ([], exp) = reduceExp exp
-reduceStatements (((exp, pos):rest), lastVal)
-    | Syn "sym" (Sym sym@(Symbol _ _ vexp@(Syn "sub" [_])):other) <- exp = do
+-- XXX This is a mess. my() and our() etc should not be statement level!
+reduceStatements :: [(Exp, SourcePos)] -> Exp -> Eval Val
+reduceStatements [] = reduceExp
+reduceStatements ((exp, pos):rest)
+    | Syn ";" exps <- exp = do
+        reduceStatements $ (exps `zip` repeat pos) ++ rest
+    | Syn "sym" (Sym sym@(Symbol _ _ vexp@(Syn "sub" [_])):other) <- exp = \v -> do
         (VSub sub) <- enterEvalContext "Code" vexp
         lex <- asks envLexical
-        reduceStatements (((Syn "sym" (other ++ [Sym sym{ symExp = Val $ VSub sub{ subPad = lex } }]), pos):rest), lastVal)
-    | Syn "sym" (Sym sym@(Symbol _ name (Syn "mval" [_, vexp])):other) <- exp = do
+        reduceStatements ((Syn "sym" (other ++ [Sym sym{ symExp = Val $ VSub sub{ subPad = lex } }]), pos):rest) v
+    | Syn "sym" (Sym sym@(Symbol _ name (Syn "mval" [_, vexp])):other) <- exp = \_ -> do
         val <- enterEvalContext (cxtOfSigil $ head name) vexp
         mval <- newMVal val
-        reduceStatements (((Syn "sym" (other ++ [Sym sym{ symExp = Val mval }]), pos):rest), Val mval)
-    | Syn "sym" [Sym sym@(Symbol SGlobal _ vexp)] <- exp = do
+        reduceStatements ((Syn "sym" (other ++ [Sym sym{ symExp = Val mval }]), pos):rest) $ Val mval
+    | Syn "sym" [Sym sym@(Symbol SGlobal _ vexp)] <- exp = \_ -> do
         addGlobalSym sym
-        reduceStatements (rest, vexp)
-    | Syn "sym" [Sym sym@(Symbol SOur _ vexp)] <- exp = do
+        reduceStatements rest vexp
+    | Syn "sym" [Sym sym@(Symbol SOur _ vexp)] <- exp = \_ -> do
         addGlobalSym sym -- XXX Wrong
-        reduceStatements (rest, vexp)
-    | Syn "sym" syms <- exp = do
+        reduceStatements rest vexp
+    | Syn "sym" syms <- exp = \_ -> do
         enterLex [ sym | Sym sym@(Symbol SMy _ _) <- syms] $ do
-            reduceStatements (rest, (Syn "sym" syms))
+            reduceStatements rest $ Syn "sym" syms
     | Syn syn [Var name, vexp] <- exp
-    , (syn == ":=" || syn == "::=") = do
+    , (syn == ":=" || syn == "::=") = \_ -> do
         lex <- asks envLexical
         case findSym name lex of
             Just _  -> do
                 let sym = (Symbol SMy name vexp)
                 enterLex [sym] $ do
-                    reduceStatements (rest, vexp)
+                    reduceStatements rest vexp
             Nothing -> do
                 addGlobalSym $ Symbol SGlobal name vexp
-                reduceStatements (rest, vexp)
+                reduceStatements rest vexp
     | Syn "sub" [Val (VSub sub)] <- exp
     , subType sub >= SubBlock = do
         -- bare Block in statement level; run it!
         let app = Syn "()" [exp, Syn "invs" [], Syn "args" []]
-        reduceStatements ((app, pos):rest, lastVal)
-    | null rest = do
+        reduceStatements $ (app, pos):rest
+    | null rest = \_ -> do
         _   <- asks envContext
         val <- enterLex (posSyms pos) $ reduceExp exp
         retVal val
-    | otherwise = do
+    | otherwise = \_ -> do
         val <- enterContext "Void" $ do
             enterLex (posSyms pos) $ do
                 reduceExp exp
         processVal val $ do
-            reduceStatements (rest, Val val)
+            reduceStatements rest $ Val val
     where 
     processVal val action = case val of
         VError str exp  -> retError str exp
@@ -196,22 +194,23 @@ posSyms pos = [ Symbol SMy n (Val v) | (n, v) <- syms ]
     where
     file = sourceName pos
     line = show $ sourceLine pos
-    col  = show $ sourceColumn pos
     syms =
         [ ("$?FILE", castV file)
         , ("$?LINE", castV line)
-        , ("$?POSITION", castV $ file ++ " at line " ++ line ++ ", column " ++ col)
+        , ("$?POSITION", castV $ pretty pos)
         ]
 
 evalVar name = do
     _   <- ask
-    val <- local (\e -> e{ envLValue = True }) $ do
+    val <- enterLValue $ do
         rv <- findVar name
         enterEvalContext (cxtOfSigil $ head name) $ case rv of
             Nothing -> (Val $ VError ("Undefined variable " ++ name) (Val VUndef))
             Just (Val val)  -> (Val val)
             Just exp        -> exp -- XXX Wrong
     return val
+
+enterLValue = local (\e -> e{ envLValue = True })
 
 breakOnGlue _ [] = ([],[])
 breakOnGlue glue rest@(x:xs)
@@ -268,7 +267,7 @@ reduce _ exp@(Var name) = do
 
 reduce _ (Statements stmts) = do
     let (global, local) = partition isGlobalExp stmts
-    reduceStatements (global ++ local, Val VUndef)
+    reduceStatements (global ++ local) $ Val VUndef
     where
     isGlobalExp (Syn name _, _) = name `elem` (words "::=")
     isGlobalExp _ = False
@@ -292,11 +291,13 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
         let [list, body] = exps
         vlist <- enterEvalContext "List" list
         vsub  <- enterEvalContext "Code" body
-        let vals = concatMap vCast $ vCast vlist
+        let arity = length (subParams $ vCast vsub)
+            vals = concatMap vCast $ vCast vlist
             runBody [] = retVal VUndef
-            runBody (v:vs) = do
-                doApply env (vCast vsub) [] [Val v]
-                runBody vs
+            runBody (vs) = do
+                let (these, rest) = arity `splitAt` vs
+                doApply env (vCast vsub) [] $ map Val these
+                runBody rest
         runBody vals
     "loop" -> do
         let [pre, cond, post, body] = exps
@@ -316,6 +317,12 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
     "until" -> doWhileUntil not
     "=" -> do
         case exps of
+            [lhsExp@(Syn "," lhs), exp] -> do
+                val'     <- enterEvalContext "List" exp
+                -- start distribution with slurpy logic and return the lhs
+                mapM_ evalExp [ Syn "=" [l, Val v] | l <- lhs | v <- vCast val' ]
+                lhsVal   <- enterLValue $ enterEvalContext "List" lhsExp
+                retVal lhsVal
             [Var name, exp] -> do
                 val     <- evalVar name
                 val'    <- enterEvalContext (cxtOfSigil $ head name) exp
@@ -325,20 +332,35 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
                 listMVal <- evalVar name
                 listVal  <- readMVal listMVal
                 indexVal <- evalExp indexExp
-                val' <- enterEvalContext "List" exp
-                let index   = (vCast indexVal :: Integer) -- XXX slicing
-                    list    = concatMap vCast (vCast listVal)
-                    pre     = genericTake index (list ++ repeat VUndef)
-                    post    = genericDrop (index + 1) list
-                writeMVal listMVal $ VList (pre ++ [val'] ++ post)
+                -- XXX Wrong -- the Context here should be "cxtFromExp exp"
+                -- so that @x[1,] imposes List context by @x[1] imposes Scalar.
+                val'     <- enterEvalContext "List" exp
+                valList  <- mapM newMVal $ vCast val'
+                let indexes = (map vCast $ vCast indexVal :: [VInt])
+                    list = concatMap vCast $ case listVal of
+                        VUndef  -> [] -- autovivification
+                        _       -> vCast listVal
+                    assignTo curr (index, val) = do
+                        pre <- preM
+                        return $ pre ++ [val] ++ genericDrop (index + 1) curr
+                        where
+                        preM    = do   
+                            let currM = map return curr ++ repeat (newMVal VUndef)
+                            sequence $ genericTake index currM
+                newList  <- foldM assignTo list $ indexes `zip` valList
+                writeMVal listMVal $ VList newList
                 retVal val'
             [Syn "{}" [Var name, indexExp], exp] -> do
                 hashMVal  <- evalVar name
                 hashVal   <- readMVal hashMVal
                 indexMVal <- evalExp indexExp
                 indexVal  <- readMVal indexMVal
-                val' <- enterEvalContext "Scalar" exp
-                let hash    = addToFM (vCast hashVal) indexVal val'
+                val'      <- enterEvalContext "Scalar" exp
+                valScalar <- newMVal val'
+                let hash = addToFM fm indexVal valScalar
+                    fm = case hashVal of
+                            VUndef  -> emptyFM -- autovivification
+                            _       -> vCast hashVal
                 writeMVal hashMVal $ VHash $ MkHash hash
                 retVal val'
             _ -> do
@@ -356,6 +378,21 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
         key     <- enterEvalContext "Scalar" keyExp
         val     <- evalExp valExp
         retVal $ VPair (key, val)
+    "*" -> do -- first stab at an implementation
+        vals <- case exps of
+            [Val v] | valType v == "Array" -> do
+                val <- enterEvalContext "List" $ head exps
+                fromValue val
+            _ -> mapM (enterEvalContext "List") exps         
+        cls  <- asks envClasses
+        if isaType cls "Scalar" cxt          
+            then do
+                let slice = case (doSlice [] vals $ 0:[]) of {
+                    (Just (val, _)) -> val ;
+                    Nothing         -> vCast VUndef
+                }
+                retVal $ vCast slice
+            else retVal $ VList $ concatMap vCast vals
     "," -> do
         vals    <- mapM (enterEvalContext "List") exps
         retVal $ VList $ concatMap vCast vals
@@ -366,17 +403,18 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
         enterEvalContext (vCast cxt) (Val val) -- force casting
     "[]" -> do
         let (listExp:rangeExp:errs) = exps
-        list    <- enterEvalContext "List" listExp
         range   <- enterEvalContext "List" rangeExp
+        listVal <- enterEvalContext "List" listExp
+        list    <- readMVal listVal
         let slice = unfoldr (doSlice errs $ vCast list) (map vCast $ vCast range)
-        cls     <- asks envClasses
-        if isaType cls "Scalar" cxt
-            then retVal $ last (VUndef:slice)
-            else retVal $ VList slice
+        ifContextIsa "Scalar"
+            (retVal $ last (VUndef:slice))
+            (retVal $ VList slice)
     "{}" -> do
         let [listExp, rangeExp] = exps
-        hash     <- enterEvalContext "Hash" listExp
         range   <- enterEvalContext "List" rangeExp
+        hashVal  <- enterEvalContext "Hash" listExp
+        hash    <- readMVal hashVal
         cls     <- asks envClasses
         let slice = map (lookupWithDefaultFM (vCast hash) VUndef) ((map vCast $ vCast range) :: [Val])
         if isaType cls "Scalar" cxt
@@ -386,10 +424,17 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
         let [subExp, Syn "invs" invs, Syn "args" args] = exps
         sub     <- enterEvalContext "Code" subExp
         apply (vCast sub) invs args
+    "try" -> do
+        val <- resetT $ evalExp (head exps)
+        retEvalResult False val
     "gather" -> do
         val     <- enterEvalContext "List" exp
         -- ignore val
         retVal val
+    syn | last syn == '=' -> do
+        let [lhs, exp] = exps
+            op = "&infix:" ++ init syn
+        evalExp $ Syn "=" [lhs, App op [lhs, exp] []]
     _ -> retError "Unknown syntactic construct" exp
     where
     doSlice :: [Exp] -> [Val] -> [VInt] -> Maybe (Val, [VInt])
@@ -410,15 +455,21 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
     -- XXX This treatment of while/until loops probably needs work
     doWhileUntil f = do
         let [ cond, body] = exps
-        let runBody = do
+        let ret val = shiftT $ \_ -> return val
+            runBody = do
             vbool <- enterEvalContext "Bool" cond
             case f $ vCast vbool of
                 True -> do
-                    reduce env body
-                    runBody
-                _ -> shiftT $ \_ -> return $ vbool
+                    rv <- reduce env body
+                    case rv of
+                        VError _ _  -> ret rv
+                        _           -> runBody
+                _ -> ret vbool
         val <- resetT runBody
         retVal val
+
+reduce env (App name [Syn "," invs] args) = reduce env (App name invs args)
+reduce env (App name invs [Syn "," args]) = reduce env (App name invs args)
 
 reduce Env{ envClasses = cls, envContext = cxt, envLexical = lex, envGlobal = glob } exp@(App name invs args) = do
     syms    <- liftIO $ readIORef glob
@@ -439,18 +490,18 @@ reduce Env{ envClasses = cls, envContext = cxt, envLexical = lex, envGlobal = gl
         listMVal <- evalVar name
         listVal  <- readMVal listMVal
         return $ length (vCast listVal :: [Val])
+    argSlurpLen (Syn "," list) =  return $ length list
     argSlurpLen _ = return 1 -- XXX
     applySub subSyms sub invs args
         -- list-associativity
         | Sub{ subAssoc = "list" }      <- sub
-        , (App name' invs' args'):rest  <- args
+        , (App name' invs' []):rest  <- invs
         , name == name'
-        , null invs'
-        = applySub subSyms sub [] (args' ++ rest)
+        = applySub subSyms sub (invs' ++ rest)  []
         -- fix subParams to agree with number of actual arguments
         | Sub{ subAssoc = "list", subParams = (p:_) }   <- sub
-        , null invs
-        = apply sub{ subParams = (length args) `replicate` p } [] args
+        , null args
+        = apply sub{ subParams = (length invs) `replicate` p } invs []
         -- chain-associativity
         | Sub{ subAssoc = "chain" }   <- sub
         , (App _ _ []):_              <- invs
@@ -547,14 +598,16 @@ doApply Env{ envClasses = cls } sub@Sub{ subParams = prms, subFun = fun, subType
     case bindParams prms invs args of
         Left errMsg     -> retError errMsg (Val VUndef)
         Right bindings  -> do
-            local fixEnv $ enterScope $ do
+            enterScope $ do
                 bound <- doBind bindings
                 -- trace (show bound) $ return ()
-                val <- (`juncApply` bound) $ \realBound -> do
-                    enterSub sub $ do
-                        applyExp realBound fun
+                val <- local fixEnv $ do
+                    (`juncApply` bound) $ \realBound -> do
+                        enterSub sub $ do
+                            applyExp realBound fun
                 retVal val
     where
+    enterScope :: Eval Val -> Eval Val
     enterScope
         | typ >= SubBlock = id
         | otherwise      = resetT
@@ -565,7 +618,9 @@ doApply Env{ envClasses = cls } sub@Sub{ subParams = prms, subFun = fun, subType
     doBind [] = return []
     doBind ((prm, exp):rest) = do
         -- trace ("<== " ++ (show (prm, exp))) $ return ()
-        (val, coll) <- expToVal prm exp
+        (val, coll) <- case exp of
+            Parens exp  -> local fixEnv $ expToVal prm exp -- default
+            _           -> expToVal prm exp
         -- trace ("==> " ++ (show val)) $ return ()
         let name = paramName prm
             arg = ApplyArg name val coll
@@ -588,13 +643,6 @@ toGlobal name
     = sigil ++ ('*':identifier)
     | otherwise = name
 
-
-findSym :: String -> Pad -> Maybe Exp
-findSym name pad
-    | Just s <- find ((== name) . symName) pad
-    = Just $ symExp s
-    | otherwise
-    = Nothing
 
 arityMatch sub@Sub{ subAssoc = assoc, subParams = prms } argLen argSlurpLen
     | assoc == "list" || assoc == "chain"

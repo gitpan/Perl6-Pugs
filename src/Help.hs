@@ -15,11 +15,12 @@
 #include "pugs_config.h"
 #include "pugs_version.h"
 
-module Help (printHelp, banner, versnum, version, 
+module Help (printInteractiveHelp, printCommandLineHelp,
+             banner, versnum, version, 
              copyright, disclaimer, intro) where
 
-printHelp :: IO ()
-printHelp
+printInteractiveHelp :: IO ()
+printInteractiveHelp
    = do putStrLn "Commands available from the prompt:"
         putStrLn ":h              = show this help message"
         putStrLn ":q              = quit"
@@ -30,6 +31,17 @@ printHelp
         putStrLn ":l <filename>   = load a pugs file (need quotes around the name)" 
         putStrLn ":r              = reload the current file"
 -}
+
+{- FIXME: Somebody with more UI skillz should make this nicer -}
+printCommandLineHelp :: IO ()
+printCommandLineHelp
+   = do putStrLn "Command-line flags:"
+        putStrLn "-e               executes it's argument"
+        putStrLn "-h or --help     gives this message"
+        putStrLn "-V               long configuration information & version"
+        putStrLn "-v or --version  version"
+        putStrLn "-c               parses the file or -e, but does not run it"
+        putStrLn "-l -d and -w are ignored for compatability with perl 5"
 
 name       = "Perl6 User's Golfing System"
 versnum    = PUGS_VERSION
@@ -56,12 +68,17 @@ versionFill n = fill ++ vstr
 
 banner :: IO ()
 banner = putStrLn $ unlines
-    [ ".=====. __  __  ____   ___    _________________________________________"
-    , "||   || ||  || ||  || ||__'   Pugs 6: Based on the Perl 6 Synopses     "
-    , "||====' ||__|| ||__||  __||   " ++ copyright
-    , "||      `===='  ___|| `==='   World Wide Web: http://autrijus.org/pugs "
-    , "||             `===='         Report bugs to: autrijus@autrijus.org    "
-    , "==" ++ versionFill 27 ++        " ====================================="
+    [ "   ______                                                            "                                                             
+    , " /\\   __ \\                                                           "
+    , " \\ \\  \\/\\ \\ __  __  ______  ______     (P)erl6                       "
+    , "  \\ \\   __//\\ \\/\\ \\/\\  __ \\/\\  ___\\    (U)ser's                      "
+    , "   \\ \\  \\/ \\ \\ \\_\\ \\ \\ \\/\\ \\ \\___  \\   (G)olfing                     "
+    , "    \\ \\__\\  \\ \\____/\\ \\____ \\/\\_____\\  (S)ystem                      "
+    , "     \\/__/   \\/___/  \\/___/\\ \\/____/                                 "
+    , "                       /\\____/   " ++ versionFill 27
+    , "                       \\/___/    " ++ copyright       
+    , "--------------------------------------------------------------------"
+    , " Web: http://pugscode.org/           Email: perl6-compiler@perl.org "
     ]
 
 intro :: IO ()

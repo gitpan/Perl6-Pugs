@@ -17,6 +17,8 @@ import Rule.Language
 import qualified Rule.Token as P
 
 type RuleParser a = GenParser Char Env a
+data ParensOption = ParensMandatory | ParensOptional
+    deriving (Show, Eq)
 
 perl6Def  = javaStyle
           { P.commentStart   = [] -- "=pod"
@@ -63,6 +65,10 @@ balanced   = P.balanced perl6Lexer
 balancedDelim = P.balancedDelim perl6Lexer
 decimal    = P.decimal perl6Lexer
 
+ruleWhiteSpaceLine = do
+    many $ satisfy (\x -> isSpace x && x /= '\n')
+    ruleEndOfLine
+   
 ruleEndOfLine = choice [ do { char '\n'; return () }, eof ]
 
 symbol s
@@ -80,7 +86,8 @@ symbol s
         return rv
         where
         ahead '-' '>' = False -- XXX hardcoke
-        ahead x   '=' = not (x `elem` "!~+-*/")
+        ahead '!' '~' = False -- XXX hardcoke
+        ahead x   '=' = not (x `elem` "!~+-*/|")
         ahead s   x   = x `elem` ";!" || x /= s
 
 stringLiteral = singleQuoted
@@ -252,7 +259,9 @@ verbatimRule name action = (<?> name) $ action
 
 literalRule name action = (<?> name) $ postSpace $ action
 
-tryRule name action = (<?> name) $ lexeme $ try $ action
+tryRule name action = (<?> name) $ lexeme $ try action
+
+tryVerbatimRule name action = (<?> name) $ try action
 
 ruleScope :: RuleParser Scope
 ruleScope = tryRule "scope" $ do
