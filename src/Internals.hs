@@ -16,11 +16,14 @@
 module Internals (
     module System.Environment,
     module System.IO,
+    module Control.Monad.Error,
     module Data.Bits,
     module Data.List,
+    module Data.Either,
     module Data.Word,
     module Data.Ratio,
     module Data.Char,
+    module Data.Set,
     module Data.Tree,
     module Data.Maybe,
     module Data.Complex,
@@ -33,13 +36,16 @@ module Internals (
 
 import System.Environment
 import System.IO hiding (try)
+import Control.Monad.Error
 import qualified System.IO (try)
 import Data.Bits
 import Data.Maybe
-import Data.List
+import Data.Either
+import Data.List hiding (intersect, union)
 import Data.Ratio
 import Data.Word
 import Data.Char
+import Data.Set
 import Data.Ratio
 import Data.Complex
 import Data.FiniteMap

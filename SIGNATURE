@@ -1,12 +1,12 @@
 This file contains message digests of all files listed in MANIFEST,
-signed via the Module::Signature module, version 0.41.
+signed via the Module::Signature module, version 0.44.
 
 To verify the content in this distribution, first make sure you have
 Module::Signature installed, then type:
 
     % cpansign -v
 
-It would check each file's integrity, as well as the signature's
+It will check each file's integrity, as well as the signature's
 validity.  If "==> Signature verified OK! <==" is not displayed,
 the distribution may already have been compromised, and you should
 not run its Makefile.PL or Build.PL.
@@ -14,12 +14,12 @@ not run its Makefile.PL or Build.PL.
 -----BEGIN PGP SIGNED MESSAGE-----
 Hash: SHA1
 
-SHA1 2f0f500dc56682ae8f34ac777a2201e090894b88 AUTHORS
-SHA1 1efea7a6e075f09e17c59755091eb188c115c328 ChangeLog
-SHA1 aa93a33e27520de780199a40189073b09f623737 MANIFEST
+SHA1 4469e33e72ea2b142b21417f664eb91f308f770e AUTHORS
+SHA1 d30df61427e9cd8b63f17d5649fc6b12fc97e917 ChangeLog
+SHA1 fc5a83775f624fa9b2aa0272b67443a4d10caca1 MANIFEST
 SHA1 5ef33844a5330d760d62f7675631adba60728258 MANIFEST.SKIP
 SHA1 1891ff34a50c1c86dd3d36745cca43880e32d065 META.yml
-SHA1 99ffd5debf21d40896559ff6e378d5ea24f43092 Makefile.PL
+SHA1 993ca28a33ae46242c16cde27c13d5b0b2181093 Makefile.PL
 SHA1 4e5fde124baa2f5bad22869683369adefe88650d README
 SHA1 06d883487127fa0026311904e7c4867e850c505c inc/Module/Install.pm
 SHA1 2771d5c5033e94c4789c66a0aad4e21c62985ce9 inc/Module/Install/Base.pm
@@ -30,23 +30,24 @@ SHA1 6fca1d05c6b9a8f10865de5be4fefb9bfa7a52e9 inc/Module/Install/Metadata.pm
 SHA1 2e6f5004ac895a26c41f043bf8fa5efb4f5b21c4 inc/Module/Install/Scripts.pm
 SHA1 6b051a6d3ed824df40343a7ff09b66282e1783c3 inc/Module/Install/Win32.pm
 SHA1 77f82ce7c623e05304ac9aae05bcd1a5558fadbb inc/Module/Install/WriteAll.pm
-SHA1 dfcc2b6cf84ecc7fc291c62c83e34309174bc217 lib/Perl6/Pugs.pm
-SHA1 64c0322207193eb30016e9c81b240996f739b6d6 src/AST.hs
+SHA1 68ca1e3ec6ea8af4352de73d2a827aa5f8c82a77 lib/Perl6/Pugs.pm
+SHA1 d8f7ec6275242543b1f563404f05254ffd66f83a src/AST.hs
+SHA1 c483286b26ae412a867841b144e2b51f4d63cab9 src/Bind.hs
 SHA1 31d5da7503d8e2e52a3f521967a0b0466487d9ab src/Context.hs
-SHA1 ec697c05e61a39b50c8e0ab19c4e0e88a7c12cb9 src/Eval.hs
+SHA1 83df1c30fc4be7ed23777838737c33f87fb7b0ed src/Eval.hs
 SHA1 d04db238f56e37788e261710dc1529bda5e3b9e7 src/Help.hs
-SHA1 8db7054d4b4f79be3fa66ea5a2fccba19e216953 src/Internals.hs
-SHA1 2ecb6a0ba66381a33b3c46c3d8c29c14df229039 src/Lexer.hs
+SHA1 ab7cd8a324940ad00793369bdf55f6817ae9436f src/Internals.hs
+SHA1 e778d485a3c1b2bbaa81ab15c2118be36afeddf2 src/Lexer.hs
 SHA1 965c99f72da9e908d12e37ee84d8b90ef7107230 src/Main.hs
-SHA1 c45172e307d530ef9e08b42144fd675109ba5bfa src/Parser.hs
-SHA1 95d189fe5ddaeffdbbc37449983a9de3fbe4429c src/Pretty.hs
-SHA1 915c2d15d861db978b800183454840348af0a0bd src/Prim.hs
+SHA1 8990eabb647a36157fad74bb0100ab5503979386 src/Parser.hs
+SHA1 f36c0aa6b3d754352f27c66203359d354e17a735 src/Pretty.hs
+SHA1 f0b621989aec722628fc33084c02063632512bbf src/Prim.hs
 SHA1 42f79d680924efbc89e4d7102ab3392acbb83dea src/Shell.hs
 SHA1 8ab1f727511f8ca8606bf1aea29e353d755e7102 t/01basic.t
 -----BEGIN PGP SIGNATURE-----
 Version: GnuPG v1.2.6 (FreeBSD)
 
-iD8DBQFCCZgBtLPdNzw1AaARAsZWAJ49o2pPCqxzBLsyxnyrACEGgXlemQCfXp/x
-datNUgLGlxKBmJewI0/YLDQ=
-=rV94
+iD8DBQFCDQYutLPdNzw1AaARAugpAKCDgbdNXIkGnt4+vt4q+n2HaFom8QCeIB6n
+KN6MAipW6cBj5RL8FHwYB/o=
+=HAlp
 -----END PGP SIGNATURE-----

@@ -22,7 +22,7 @@ class (Show a) => Pretty a where
 instance Pretty Val where
     pretty (VJunc j l) = "(" ++ joinList mark items ++ ")"
         where
-        items = map pretty l
+        items = map pretty $ setToList l
         mark  = case j of
             JAny  -> " | "
             JAll  -> " & "
@@ -41,6 +41,8 @@ instance Pretty Val where
     pretty (VSub x) = "sub {...}"
     pretty (VBlock x) = "{...}"
     pretty (VError x y) = "*** Error: " ++ x ++ "\n    in " ++ show y
+    pretty (VArray (MkArray x)) = pretty (VList x)
+    pretty (VHash (MkHash x)) = show x
     pretty VUndef = "undef"
 
 joinList x y = concat $ intersperse x y

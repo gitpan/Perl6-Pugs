@@ -66,7 +66,7 @@ else {
 close FH;
 
 postamble(<< ".");
-pugs: @{[glob("src/*.hs")]}
+pugs$Config{_exe}: @{[glob("src/*.hs")]}
 	ghc --make -o pugs -O src/Main.hs -isrc
 
 tags ::
