@@ -19,6 +19,7 @@ type Ident = String
 
 class Value n where
     vCast :: Val -> n
+    -- vCast (MVal v)      = vCast $ castV v
     vCast (VRef v)      = vCast v
     vCast (VPair _ v)   = vCast v
     vCast (VArray (MkArray v))    = vCast $ VList v
@@ -34,6 +35,7 @@ instance Value (Val, Val) where
     castV (x, y)        = VPair x y
     vCast (VPair x y)   = (x, y)
     vCast (VRef v)      = vCast v
+    -- vCast (MVal v)      = vCast $ castV v
     vCast v             = case vCast v of
         [x, y]  -> (x, y)
         other   -> error $ "cannot cast into (Val, Val): " ++ (show v)
@@ -45,6 +47,7 @@ instance Value VHash where
 instance Value VSub where
     castV = VSub
     doCast (VSub b) = b
+    doCast v = error ("Cannot cast into VSub: " ++ (show v))
 
 instance Value VBool where
     castV = VBool
@@ -68,6 +71,9 @@ juncToBool (Junc JOne  ds vs)
     = False
     | otherwise
     = (1 ==) . length . filter vCast $ setToList vs
+
+readMVal (MVal mv) = readMVal =<< liftIO (readIORef mv)
+readMVal v         = return v
 
 instance Value VInt where
     castV = VInt
@@ -104,12 +110,13 @@ instance Value VStr where
     castV = VStr
     vCast VUndef        = ""
     vCast (VStr s)      = s
-    vCast (VBool b)     = if b then "1" else "0"
+    vCast (VBool b)     = if b then "1" else ""
     vCast (VInt i)      = show i
     vCast (VRat r)      = showNum $ realToFrac r
     vCast (VNum n)      = showNum n
     vCast (VList l)     = unwords $ map vCast l
     vCast (VRef v)      = vCast v
+    -- vCast (MVal v)      = vCast $ castV v
     vCast (VPair k v)   = vCast k ++ "\t" ++ vCast v ++ "\n"
     vCast x             = error $ "cannot cast: " ++ (show x)
 
@@ -124,6 +131,13 @@ instance Value VArray where
     castV = VArray
     vCast x = MkArray (vCast x) 
 
+instance Value MVal where
+    castV ref = error "bye~" --unsafePerformIO $ readIORef ref
+    vCast (MVal x)      = x
+    vCast (VRef v)      = vCast v
+    vCast (VPair _ y)   = vCast y
+    vCast x             = error $ "cannot modify a constant item: " ++ show x
+
 {-
 instance Value VJunc where
     castV = JAny . castV
@@ -135,8 +149,14 @@ instance Value VList where
     vCast (VList l)     = l
     vCast (VPair k v)   = [k, v]
     vCast (VRef v)      = vCast v
+    -- vCast (MVal v)      = vCast $ castV v
     vCast (VUndef)      = []
     vCast v             = [v]
+
+instance Value VHandle where
+    castV = VHandle
+    doCast (VHandle x) = x
+    doCast x            = error $ "cannot cast into a handle: " ++ show x
 
 instance Value (Maybe a) where
     vCast VUndef        = Nothing
@@ -185,6 +205,8 @@ type VNum  = Double
 type VComplex = Complex VNum
 type VStr  = String
 type VList = [Val]
+type VHandle = Handle
+type MVal = IORef Val
 newtype VArray = MkArray [Val] deriving (Show, Eq, Ord)
 newtype VHash  = MkHash (FiniteMap Val Val) deriving (Show, Eq, Ord)
 
@@ -205,9 +227,18 @@ data Val
     | VRef      Val
     | VPair     Val Val
     | VSub      VSub
-    | VBlock    Exp
+    | VBlock    VBlock
     | VJunc     VJunc
     | VError    VStr Exp
+    | VHandle   VHandle
+    | MVal    MVal
+    | VControl  VControl
+    deriving (Show, Eq, Ord)
+
+type VBlock = Exp
+data VControl
+    = ControlLeave (Env -> Eval Bool) Val
+    | ControlExit ExitCode
     deriving (Show, Eq, Ord)
 
 data VJunc = Junc { juncType :: JuncType
@@ -218,7 +249,7 @@ data VJunc = Junc { juncType :: JuncType
 data JuncType = JAny | JAll | JNone | JOne
     deriving (Show, Eq, Ord)
 
-data SubType = SubMethod | SubRoutine | SubBlock
+data SubType = SubMethod | SubRoutine | SubBlock | SubPrim
     deriving (Show, Eq, Ord)
 
 data Param = Param
@@ -246,32 +277,30 @@ data VSub = Sub
     }
     deriving (Show, Eq, Ord)
 
-data Trait
-    = TScalar   Val
-    | TArray    Val
-    | THash     Val
-
-{-
-data JuncType = JAll | JAny | JOne | JNone
-    deriving (Show, Eq, Ord)
--}
-
 instance (Ord a) => Ord (Set a) where
     compare x y = compare (setToList x) (setToList y)
 instance (Show a) => Show (Set a) where
     show x = show $ setToList x
 instance Ord VComplex where {- ... -}
 instance (Ord a, Ord b) => Ord (FiniteMap a b)
+instance Ord MVal where
+    compare x y = LT -- compare (castV x) (castV y)
+instance Show MVal where
+    show _ = "<mval>"
+instance Ord VHandle where
+    compare x y = compare (show x) (show y)
 
 type Var = String
+-- type MVal = IORef Val
 
 data Exp
     = App String [Exp] [Exp]
     | Syn String [Exp]
-    | Sym Scope Var
+    | Sym Symbol
     | Prim ([Val] -> Eval Val)
+--  | MVal MVal
     | Val Val
-    | Var Var SourcePos
+    | Var Var
     | Parens Exp
     | NonTerm SourcePos
     deriving (Show, Eq, Ord)
@@ -289,14 +318,14 @@ extract ((App n invs args), vs) = (App n invs' args', vs'')
 extract ((Syn n exps), vs) = (Syn n exps', vs')
     where
     (exps', vs') = foldr extractExp ([], vs) exps
-extract ((Var name pos), vs)
+extract ((Var name), vs)
     | (sigil:'^':identifer) <- name
     , name' <- (sigil : identifer)
-    = (Var name' pos, insert name' vs)
+    = (Var name', insert name' vs)
     | name == "$_"
-    = (Var name pos, insert name vs)
+    = (Var name, insert name vs)
     | otherwise
-    = (Var name pos, vs)
+    = (Var name, vs)
 extract ((Parens exp), vs) = ((Parens exp'), vs')
     where
     (exp', vs') = extract (exp, vs)
@@ -329,10 +358,12 @@ defaultHashParam    = buildParam "" "*" "%_" (Val VUndef)
 defaultScalarParam  = buildParam "" "*" "$_" (Val VUndef)
 
 data Env = Env { envContext :: Cxt
-               , envPad     :: Pad
+               , envLexical :: Pad
+               , envGlobal  :: Pad
                , envClasses :: ClassTree
                , envEval    :: Exp -> Eval Val
                , envCC      :: Val -> Eval Val
+               , envCaller  :: Maybe Env
                , envBody    :: Exp
                , envDepth   :: Int
                , envID      :: Unique
@@ -342,7 +373,7 @@ data Env = Env { envContext :: Cxt
 type Pad = [Symbol]
 data Symbol = Symbol { symScope :: Scope
                      , symName  :: String
-                     , symValue :: Val
+                     , symExp   :: Exp
                      } deriving (Show, Eq, Ord)
 
 data Scope = SGlobal | SMy | SOur | SLet | STemp | SState

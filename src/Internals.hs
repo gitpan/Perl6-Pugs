@@ -21,6 +21,8 @@ module Internals (
     module System.Random,
     module System.IO,
     module System.IO.Unsafe,
+    module System.Exit,
+    module System.Time,
     module Control.Monad.RWS,
     module Control.Monad.Error,
     module Data.Bits,
@@ -46,6 +48,8 @@ import Cont
 import Data.Dynamic
 import System.Environment
 import System.Random
+import System.Exit
+import System.Time
 import System.IO hiding (try)
 import System.IO.Unsafe
 import Control.Monad.RWS
@@ -75,7 +79,7 @@ import Text.ParserCombinators.Parsec.Language
 instance Show Unique where
     show = show . hashUnique
 instance Show (a -> b) where
-    show f = "sub { ... }"
+    show f = "(->)"
 instance Eq (a -> b) where
     _ == _ = False
 instance Ord (a -> b) where

@@ -39,6 +39,8 @@ distanceType tree x y
 
 castOk _ _ = True
 
+compareList [] _ = 0
+compareList _ [] = 0
 compareList l1 l2
     | last l1 `elem` l2 =   length(l2 \\ l1) + 1
     | last l2 `elem` l1 = - length(l1 \\ l2) - 1
@@ -89,10 +91,13 @@ initTree = Node "Any"
                 ]
             , Node "Rule" []
             , Node "Junction" []
+            , Node "LValue" [] -- XXX Wrong
             ]
         ]
     , Node "Grammar" []
     , Node "Package"
         [ Node "Module"
             [ Node "Class" [] ] ]
+    , Node "Action" []
+    , Node "Void" []
     ]

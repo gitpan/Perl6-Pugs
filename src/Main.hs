@@ -23,51 +23,97 @@ import Parser
 import Help
 import Pretty
 
-main = getArgs >>= run
-
-run (('-':'e':str@(_:_)):args) = doRun str args
-run ("-e":str:args) = doRun str args
-run ("-h":_)        = printHelp
-run (file:args)     = readFile file >>= (`doRun` args)
-run []              = do
+main :: IO ()
+main = do
     hSetBuffering stdout NoBuffering 
+    args <- getArgs
+    run $ concatMap procArg args
+    where
+    procArg ('-':'e':prog@(_:_)) = ["-e", prog]
+    procArg ('-':'d':rest@(_:_)) = ["-d", ('-':rest)]
+    procArg x = [x]
+
+run :: [String] -> IO ()
+run ("-l":rest)                 = run rest
+run ("-d":rest)                 = run rest
+run ("-w":rest)                 = run rest
+run (('-':'l':xs):rest)            = run (('-':xs):rest)
+run (('-':'w':xs):rest)            = run (('-':xs):rest)
+run (('-':'d':xs):rest)            = run (('-':xs):rest)
+run (('-':'e':prog@(_:_)):args) = doRun "-" args prog
+run ("-e":prog:args)            = doRun "-" args prog
+run ("-h":_)                    = printHelp
+run ("-":args)                  = do
+    prog <- getContents
+    doRun "-" [] prog
+run (file:args)                 = readFile file >>= doRun file args
+run []                          = do
     isTTY <- hIsTerminalDevice stdin
     if isTTY
         then banner >> repLoop
-        else do
-            str <- getContents
-            doRun str []
+        else run ["-"]
 
 repLoop :: IO ()
 repLoop
    = do command <- getCommand
         case command of
-           CmdQuit     -> putStrLn "Leaving pugs."
-           CmdLoad fn  -> load fn
-           CmdEval str -> doEval str [] >> repLoop
-           CmdParse str-> doParse str >> repLoop
+           CmdQuit      -> putStrLn "Leaving pugs."
+           CmdLoad fn   -> load fn
+           CmdEval prog -> doEval [] prog >> repLoop
+           CmdParse prog-> doParse prog >> repLoop
            CmdHelp     -> printHelp >> repLoop
 
-load fn = do
-    return ()
+load fn = return ()
 
-doParse = parse
-parse str = do
+parse = doParse
+eval prog = doEval [] prog
+
+doParse prog = do
     env <- emptyEnv
-    runRule env (putStrLn . pretty) ruleProgram str
+    runRule env (putStrLn . pretty) ruleProgram prog
 
-eval str = doEval str []
+doEval :: [String] -> String -> IO ()
+doEval = do
+    runProgramWith id (putStrLn . pretty) "<interactive>"
 
-doEval str args = do
+doRun :: String -> [String] -> String -> IO ()
+doRun = do
+    runProgramWith (\e -> e{ envDebug = Nothing }) end
+    where
+    end v@(VError str exp)  = do
+        hPutStrLn stderr str
+        hPutStrLn stderr (show exp)
+        exitFailure
+    end _               = return ()
+
+runProgramWith :: (Env -> Env) -> (Val -> IO ()) -> VStr -> [VStr] -> String -> IO ()
+runProgramWith fenv f name args prog = do
     env <- emptyEnv
-    let env' = runRule env id ruleProgram str
-    rv <- (`runReaderT` env') $ do
-        (`runContT` return) $ evaluate (envBody env')
-    putStrLn $ pretty rv
+    str <- return "" -- getContents
+    let env' = runRule (prepare str $ fenv env) id ruleProgram prog
+    val <- (`runReaderT` env') $ do
+        (`runContT` return) $ resetT $ do
+            evaluate (envBody env')
+    f val
+    where
+    prepare str e = e{ envGlobal =
+        [ Symbol SGlobal "@*ARGS" (Val $ VList $ map VStr args)
+        , Symbol SGlobal "$*PROGNAME" (Val $ VStr name)
+        , Symbol SGlobal "$*STDIN" (Val $ VStr str)
+        ] ++ envGlobal e }
 
-doRun str args = do
-    env <- emptyEnv
-    let env' = runRule env id ruleProgram str
-    rv <- (`runReaderT` runRule env id ruleProgram str) $ do
-        (`runContT` return) $ evaluate (envBody env')
-    putStr . concatMap vCast . vCast $ rv
+{-
+main = do
+    -- (optsIO, rest, errs) <- return . getOpt Permute options $ procArgs args
+
+options :: [OptDescr (Opts -> Opts)]
+options =
+    [ reqArg "e" ["eval"]           "command"       "Command-line program"
+        (\s o -> o { encodings          = split "," s })
+    , noArg  "d" ["debug"]                          "Turn on debugging"
+        (\s o -> o { inputFile          = s })
+    , noArg  "h" ["help"]                           "Show help"
+        (\o   -> o { showHelp           = usage "" })
+    ]
+-}
+

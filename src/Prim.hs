@@ -29,6 +29,17 @@ op0 s    = \x -> VError ("unimplemented listOp: " ++ s) (Val $ VList x)
 op1 :: Ident -> Val -> Eval Val
 op1 "!"    = return . fmapVal not
 op1 "+"    = return . op1Numeric id
+op1 "++"   = \mv -> do
+    val <- readMVal mv
+    liftIO $ writeIORef (vCast mv) $ case val of
+        (VStr str)  -> VStr $ strInc str
+        _           -> op1Numeric (\x -> x + 1) (vCast val)
+    return val
+op1 "--"   = \mv -> do
+    val <- liftIO $ readIORef (vCast mv)
+    liftIO $ writeIORef (vCast mv) $
+        op1Numeric (\x -> x - 1) (vCast val)
+    return val
 op1 "-"    = return . op1Numeric negate
 op1 "~"    = return . VStr . vCast
 op1 "?"    = return . VBool . vCast
@@ -46,16 +57,81 @@ op1 "one"  = return . opJuncOne . vCast
 op1 "none" = return . VJunc . Junc JNone emptySet . mkSet . vCast
 op1 "perl" = return . VStr . (pretty :: Val -> VStr)
 op1 "eval" = opEval . vCast
-op1 "rand" = \v -> let (x :: VNum) = vCast v in return $ VNum $ unsafePerformIO $ getStdRandom (randomR (0, if x == 0 then 1 else x))
+op1 "last" = \v -> do
+    shiftT $ \_ -> return VUndef
+op1 "return" = \v -> return (VError "cannot return outside a subroutine" (Val v))
+
+-- Side-effectful function: how far into Monadic IO shall we go?
+op1 "time"  = \v -> do
+    clkt <- liftIO getClockTime
+    return $ VInt $ toInteger $ tdSec $ diffClockTimes clkt epochClkT
+    where
+    epochClkT = toClockTime epoch
+    epoch = CalendarTime 1970 January 1 0 0 0 0 Thursday 0 "UTC" 0 False
+op1 "rand"  = \v -> do
+    let x = vCast v
+    rand <- liftIO $ randomRIO (0, if x == 0 then 1 else x)
+    return $ VNum rand
+op1 "print" = \v -> do
+    v <- readMVal v
+    vals <- mapM readMVal (vCast v)
+    liftIO . putStr . concatMap vCast $ vals
+    return $ VBool True
+op1 "say" = \v -> do
+    op1 "print" v
+    liftIO $ putStrLn ""
+    return $ VBool True
+op1 "die" = \v -> do
+    return $ VError (concatMap vCast . vCast $ v) (Val v)
+op1 "exit" = \v -> do
+    if vCast v
+        then liftIO $ exitWith (ExitFailure $ vCast v)
+        else liftIO $ exitWith ExitSuccess
+-- handle timely destruction
+op1 "open" = \v -> do
+    fh <- liftIO $ openFile (vCast v) ReadMode
+    return $ VHandle fh
+op1 "close" = \v -> do
+    liftIO $ hClose (vCast v)
+    return $ VBool True
+op1 "<>" = \v -> do
+    str <- readFrom v
+    cxt <- asks envContext
+    return $ if ((cxt ==) `any` ["Array", "List"]) -- XXX use isaType here
+        then VList $ map VStr $ lines str
+        else VStr str
+    where
+    readFrom VUndef = do
+        -- ARGS etc
+        glob <- asks envGlobal
+        strs <- liftIO $ sequence $ case find ((== "@*ARGS") . symName) glob of
+            Nothing     -> [getStdin glob]
+            Just sym    -> case symExp sym of
+                Val (VList [])  -> [getStdin glob]
+                Val (VList xs)  -> map ((hGetContents =<<) . (`openFile` ReadMode) . vCast) xs
+                _               -> error "not handled"
+        return $ concat strs
+    readFrom v = do
+        liftIO $ hGetContents $ vCast v
+    getStdin glob = do
+        case find ((== "$*STDIN") . symName) glob of
+            Just sym | (Val v) <- symExp sym -> return $ vCast v
+            _                                -> error "impossible"
+
+op1 ""     = return . (\x -> VError ("unimplemented unaryOp: " ++ "") (Val x))
+
 op1 s      = return . (\x -> VError ("unimplemented unaryOp: " ++ s) (Val x))
 
 opEval :: String -> Eval Val
 opEval str = do
     env <- ask
     let env' = runRule env id ruleProgram str
-    local (\_ -> env') $ do
+    val <- resetT $ local (\_ -> env') $ do
         evl <- asks envEval
         evl (envBody env')
+    case val of
+        VError _ _  -> return VUndef
+        _           -> return val
 
 mapStr :: (Word8 -> Word8) -> [Word8] -> String
 mapStr f = map (chr . fromEnum . f)
@@ -169,6 +245,8 @@ op2Ord f x y = VInt $ case f x `compare` f y of
 
 op1Numeric :: (forall a. (Num a) => a -> a) -> Val -> Val
 op1Numeric f VUndef     = VInt $ f 0
+-- op1Numeric f (MVal x)   = op1Numeric f (castV x)
+op1Numeric f (VRef x)   = op1Numeric f x
 op1Numeric f (VInt x)   = VInt $ f x
 op1Numeric f l@(VList _)= VInt $ f (vCast l)
 op1Numeric f (VRat x)   = VRat $ f x
@@ -184,13 +262,13 @@ op2Numeric f x y
     | otherwise                     = VNum $ f (vCast x) (vCast y)
 
 primOp :: String -> String -> Params -> String -> Symbol
-primOp sym assoc prms ret = Symbol SOur name sub
+primOp sym assoc prms ret = Symbol SOur name (Val sub)
     where
     name = '&':'*':fixity ++ ':':sym
     sub  = VSub $ Sub { isMulti     = True
-                      , subName     = name
+                      , subName     = sym
                       , subPad      = []
-                      , subType     = SubRoutine
+                      , subType     = SubPrim
                       , subAssoc    = assoc
                       , subParams   = prms
                       , subReturns  = ret
@@ -219,13 +297,13 @@ primDecl str = primOp sym assoc (reverse $ foldr foldParam [] prms) ret
     takeWord = takeWhile isAlphaNum . dropWhile (not . isAlphaNum)
     prms = map takeWord prms'
 
-doFoldParam cxt [] []       = [buildParam cxt "" "$a" (Val VUndef)]
+doFoldParam cxt [] []       = [buildParam cxt "" "$?1" (Val VUndef)]
 doFoldParam cxt [] (p:ps)   = (buildParam cxt "" (strInc $ paramName p) (Val VUndef):p:ps)
 doFoldParam cxt (s:name) ps = (buildParam cxt [s] name (Val VUndef) : ps)
 
 foldParam :: String -> Params -> Params
-foldParam "List"    = doFoldParam "List" "*@x"
-foldParam "?Num=1"  = \ps -> (buildParam "Num" "?" "$x" (Val $ VNum 1):ps)
+foldParam "List"    = doFoldParam "List" "*@?0"
+foldParam "?Num=1"  = \ps -> (buildParam "Num" "?" "$?1" (Val $ VNum 1):ps)
 foldParam x         = doFoldParam x ""
 
 -- XXX -- Junctive Types -- XXX --
@@ -243,10 +321,22 @@ initSyms = map primDecl . filter (not . null) . lines $ "\
 \\n   Bool      pre     ?^      (Bool)\
 \\n   Ref       pre     \\      (Any)\
 \\n   List      pre     ...     (Str|Num)\
+\\n   Any       post    ++      (LValue)\
+\\n   Num       post    --      (LValue)\
 \\n   Bool      pre     not     (Bool)\
 \\n   Str       pre     perl    (List)\
 \\n   Any       pre     eval    (Str)\
+\\n   Any       pre     last    (Num)\
+\\n   Any       pre     exit    (Num)\
 \\n   Num       pre     rand    (?Num=1)\
+\\n   Num       pre     time    ()\
+\\n   Action    pre     print   (List)\
+\\n   Action    pre     say     (List)\
+\\n   Action    pre     die     (List)\
+\\n   Any       pre     do      (Str)\
+\\n   IO        pre     open    (Str)\
+\\n   Any       pre     return  (Any)\
+\\n   Any       pre     <>      ()\
 \\n   Junction  pre     any     (List)\
 \\n   Junction  pre     all     (List)\
 \\n   Junction  pre     one     (List)\

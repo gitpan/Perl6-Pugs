@@ -17,8 +17,8 @@ import qualified Text.ParserCombinators.Parsec.Token as P
 type RuleParser a = GenParser Char Env a
 
 perl6Def  = javaStyle
-          { P.commentStart   = "\n=begin\n"
-          , P.commentEnd     = "\n=cut\n"
+          { P.commentStart   = "=pod"
+          , P.commentEnd     = "=cut"
           , P.commentLine    = "#"
           , P.nestedComments = False
           , P.identStart     = wordAlpha
@@ -39,9 +39,19 @@ lexeme     = P.lexeme perl6Lexer
 identifier = P.identifier perl6Lexer
 braces     = P.braces perl6Lexer
 brackets   = P.brackets perl6Lexer
+angles     = P.angles perl6Lexer
+
 symbol s
-    | isWordAny (last s) = try $ postSpace $ string s
-    | otherwise          = try $ lexeme $ string s
+    | isWordAny (last s) = try $ do
+        rv <- string s
+        choice [ eof >> return ' ', lookAhead (satisfy (not . isWordAny)) ]
+        whiteSpace
+        return rv
+    | otherwise          = try $ do
+        rv <- string s
+        choice [ eof >> return ' ', lookAhead (satisfy (\x -> x == ';' || x /= (last s))) ]
+        whiteSpace
+        return rv
 
 stringLiteral = choice
     [ P.stringLiteral  perl6Lexer
@@ -145,12 +155,14 @@ quotedQuote = do
     return '\''
 
 rule name action = (<?> name) $ lexeme $ action
+
 literalRule name action = (<?> name) $ postSpace $ action
+
 tryRule name action = (<?> name) $ lexeme $ try $ action
 
 ruleScope :: RuleParser Scope
-ruleScope = postSpace $ try $ do
-    scope <- choice $ map string scopes
+ruleScope = tryRule "scope" $ do
+    scope <- choice $ map symbol scopes
     return (readScope scope)
     where
     scopes = map (map toLower) $ map (tail . show) $ enumFrom ((toEnum 1) :: Scope)
@@ -161,13 +173,10 @@ ruleScope = postSpace $ try $ do
         | otherwise
         = SGlobal
 
-preSpace rule = try $ do
-    skipMany1 (satisfy isSpace)
-    rule
-
 postSpace rule = try $ do
     rv <- rule
-    choice [skipMany1 (satisfy isSpace), eof <?> ""]
+    notFollowedBy wordAny
+    whiteSpace
     return rv
 
 ruleTrait trait = do
@@ -191,3 +200,4 @@ ruleVarName = literalRule "variable name" $ do
     name    <- many1 wordAny
     return $ (sigil:caret) ++ name
 
+tryChoice = choice . map try
