@@ -70,5 +70,5 @@ $a = undef;
 ok ($a++ eq '0');
 
 $a = undef;
-todo_ok(eval '!defined($a--)');
+ok(eval '!defined($a--)');
 

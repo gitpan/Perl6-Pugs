@@ -3,7 +3,13 @@
 use v6;
 require Test;
 
-plan 6;
+=kwid
+
+Block tests
+
+=cut
+
+plan 9; # from outer space
 
 my $anon_sub = sub { 1 };
 is($anon_sub(), 1, 'sub { } works');
@@ -22,3 +28,12 @@ is($pointy_block_w_arg(3), 4, '-> $arg {} <"pointy" block w/args> works');
 
 my $pointy_block_w_multiple_args = -> $arg1, $arg2 { $arg1 + $arg2 };
 is($pointy_block_w_multiple_args(3, 4), 7, '-> $arg1, $arg2 {} <"pointy" block w/multiple args> works');
+
+my $foo;
+eval '{$foo = "blah"};';
+is($foo, "blah", "lone block actually executes it's content");
+
+my ($one, $two);
+eval '{$one = 1} {$two = 2}';
+todo_is($one, 1, "ditto for two blocks: first block, no semicolon after");
+is($two, 2, "... second block");

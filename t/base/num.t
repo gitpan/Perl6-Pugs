@@ -3,7 +3,13 @@
 use v6;
 require Test;
 
-plan 15;
+=kwid
+
+basic Number tests
+
+=cut
+
+plan 16;
 
 my $a = 1; "$a";
 is($a, "1", '1 stringification works');
@@ -37,6 +43,9 @@ is($a, "4", '0b100 (binary) stringification works');
 
 my $a = 0x100; "$a";
 is($a, "256", '0x100 (hex) stringification works');
+
+my $a = 0o100; "$a";
+is($a, "64", '0o100 (octal) stringification works');
 
 my $a = 1; "$a"; 
 is($a + 1, 2, 'basic addition works');

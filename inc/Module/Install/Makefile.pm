@@ -1,4 +1,4 @@
-#line 1 "inc/Module/Install/Makefile.pm - /usr/local/lib/perl5/site_perl/5.8.5/Module/Install/Makefile.pm"
+#line 1 "inc/Module/Install/Makefile.pm - /Users/ingy/local/lib/perl5/site_perl/5.8.6/Module/Install/Makefile.pm"
 package Module::Install::Makefile;
 use Module::Install::Base; @ISA = qw(Module::Install::Base);
 
@@ -21,6 +21,28 @@ sub makemaker_args {
     my $args = ($self->{makemaker_args} ||= {});
     %$args = ( %$args, @_ ) if @_;
     $args;
+}
+
+sub blib_depth {
+    my $self = shift;
+    my $depth = shift;
+    die "blib_depth must be a positive integer\n"
+      unless $depth =~ /^\d+$/ and $depth;
+    my $prefix = join '/', ('..') x $depth;
+    $self->makemaker_args->{INST_LIB} = "$prefix/blib/lib";
+    $self->makemaker_args->{INST_ARCHLIB} = "$prefix/blib/arch";
+    $self->makemaker_args->{INST_SCRIPT} = "$prefix/blib/script";
+    $self->makemaker_args->{INST_BIN} = "$prefix/blib/bin";
+    $self->makemaker_args->{INST_MAN1DIR} = "$prefix/blib/man1";
+    $self->makemaker_args->{INST_MAN3DIR} = "$prefix/blib/man3";
+}
+
+sub build_subdirs {
+    my $self = shift;
+    my $subdirs = $self->makemaker_args->{DIR} ||= [];
+    for my $subdir (@_) {
+        push @$subdirs, $subdir;  
+    }
 }
 
 sub clean_files {

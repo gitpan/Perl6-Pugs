@@ -3,7 +3,13 @@
 use v6;
 require Test;
 
-plan 15;
+=kwid
+
+Tests for Synopsis 3
+
+=cut
+
+plan 30;
 
 my $str1 = "foo";
 my $str2 = "bar";
@@ -16,6 +22,8 @@ my $bar = "";
 ($str3 eq $str4) ?? $bar = 1 :: $bar = 0;
 
 ok($bar, "?? ::");
+
+todo_is(eval '(($str3 eq $str4) ?? 1 :: 2)', 1, "?? :: in parens");
 
 my $five = 5;
 my $four = 4;
@@ -38,3 +46,42 @@ ok(!($five != (2 + 3)), "== (sum on rhs)");
 is(2 + 3, $five, "== (sum on lhs)");
 ok((2 + 3) == 5, "== (sum on lhs)");
 ok(!((2 + 3) != $five), "== (sum on lhs)");
+
+# String Operations
+is("text " ~ "stitching", "text stitching", 'concationation with ~ operator');
+
+# Bit Stitching
+
+is(2 || 3, 2, "|| returns first true value");
+todo_is(eval '2 ?| 3', 1, "boolean or (?|) returns 0 or 1");
+ok(!(defined( 0 || undef)), "|| returns last false value of list?");
+todo_is(eval '0 ?| undef', 0, "boolean or (?|) returns 0 or 1");
+
+#junctions
+
+ok((all((4|5|6) + 3) == one(7|8|9)), "all elements in junction are incremented");
+ok((any(1..6) == one(1|2|3|4|5|6)), "any elements will match via junction");
+
+
+ok( 7 > any(4..12), "any test against scalar" );
+
+
+my @oldval  = (5, 8, 12);
+
+my @newval1 = (17, 15, 14); # all greater
+my @newval2 = (15, 7,  20); # some less some greater
+my @newval3 = (3, 1, 4);    # all less
+my @newval4 = (1,2,40);     
+
+ok( any(@newval4) > any(@oldval), "any test array against any array" );
+ok( any(@newval4) > all(@oldval), "any test array against all array" );
+ok( all(@newval2) > any(@oldval), "all test array against any array" );
+ok( all(@newval1) > all(@oldval), "all test array against all array" );
+
+ok(42 > 12 & 20 & 32, "test the all infix operator");
+
+
+# Hyper ops
+
+skip("waiting for hyper operators");
+#is_deeply eval '(1,2,3,4) >>+<< (1,2,3,4)' , (2,4,6,8), 'hyper-add';

@@ -15,7 +15,7 @@
 
 module Main where
 import Internals
-
+import Config 
 import AST
 import Eval
 import Shell
@@ -44,12 +44,13 @@ run (('-':'d':xs):rest)         = run (('-':xs):rest)
 run (('-':'e':prog@(_:_)):args) = doRun "-" args prog
 run ("-e":prog:args)            = doRun "-" args prog
 run ("-h":_)                    = printHelp
+run ("-V":_)                    = printConfigInfo
 run ("-v":_)                    = banner
 run ("--version":_)             = banner
 run ("-c":"-e":prog:_)          = doParse prog
 run ("-ce":prog:_)              = doParse prog
 run ("-c":file:_)               = readFile file >>= doParse
-run ("-":args)                  = do
+run ("-":_)                     = do
     prog <- getContents
     doRun "-" [] prog
 run (file:args)                 = readFile file >>= doRun file args
@@ -68,8 +69,9 @@ repLoop
            CmdEval prog -> doEval [] prog >> repLoop
            CmdParse prog-> doParse prog >> repLoop
            CmdHelp      -> printHelp >> repLoop
+           _            -> internalError "repLoop unimplemented command: "
 
-load fn = return ()
+load _ = return ()
 
 parse = doParse
 eval prog = doEval [] prog
@@ -86,7 +88,7 @@ doRun :: String -> [String] -> String -> IO ()
 doRun = do
     runProgramWith (\e -> e{ envDebug = Nothing }) end
     where
-    end v@(VError str exp)  = do
+    end (VError str exp)  = do
         hPutStrLn stderr str
         hPutStrLn stderr (show exp)
         exitFailure
@@ -101,10 +103,10 @@ runProgramWith fenv f name args prog = do
     environ <- getEnvironment
     let envFM = listToFM $ [ (VStr k, VStr v) | (k, v) <- environ ]
         p6lib = maybeToList $ lookup "PERL6LIB" environ
-        p5lib = map fixLib $ catMaybes [lookup "PERL5LIB" environ, lookup "PERLLIB" environ]
+    p5libs  <- mapM fixLib $ catMaybes [lookup "PERL5LIB" environ, lookup "PERLLIB" environ]
     progSV  <- newMVal $ VStr name
     endAV   <- newMVal $ VList []
-    incAV   <- newMVal $ VList (map VStr $ p6lib ++ p5lib ++ incs)
+    incAV   <- newMVal $ VList (map VStr $ p6lib ++ concat p5libs ++ incs)
     argsAV  <- newMVal $ VList (map VStr args)
     inGV    <- newMVal $ VHandle stdin
     outGV   <- newMVal $ VHandle stdout
@@ -118,6 +120,10 @@ runProgramWith fenv f name args prog = do
         , Symbol SGlobal "$*OUT"        $ Val outGV
         , Symbol SGlobal "$*ERR"        $ Val errGV
         , Symbol SGlobal "%*ENV" (Val . VHash . MkHash $ envFM)
+        , Symbol SGlobal "%=POD"        (Val . VHash . MkHash $ emptyFM) -- wrong: pkg
+        , Symbol SGlobal "@=POD"        (Val . VArray . MkArray $ [])
+        , Symbol SGlobal "$=POD"        (Val . VStr $ "")
+        , Symbol SGlobal "$?OS"         (Val . VStr $ config_osname)
         ]
 --    str <- return "" -- getContents
     let env' = runRule (fenv env) id ruleProgram name prog
@@ -126,8 +132,24 @@ runProgramWith fenv f name args prog = do
             evaluateMain (envBody env')
     f val
     where
-    fixLib = ((++) "/Perl6/lib")
-    incs = ["./lib/Perl6/lib", "../lib/Perl6/lib", "."]
+    fixLib str = do
+        let path = str ++ "/Perl6/lib"
+        exists <- doesDirectoryExist path
+        return $ if exists then [path] else []
+
+incs = [ "./lib/Perl6/lib"
+       , "../lib/Perl6/lib"
+       , "../../lib/Perl6/lib"
+       , config_archlib
+       , config_privlib
+       , config_sitearch
+       , config_sitelib
+       , "."
+       ]
+
+printConfigInfo :: IO ()
+printConfigInfo = putStrLn $ unlines $
+    [ "@*INC:" ] ++ incs
 
 {-
 main = do

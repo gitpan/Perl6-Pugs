@@ -1,6 +1,7 @@
-#line 1 "inc/Module/Install.pm - /usr/local/lib/perl5/site_perl/5.8.5/Module/Install.pm"
+#line 1 "inc/Module/Install.pm - /Users/ingy/local/lib/perl5/site_perl/5.8.6/Module/Install.pm"
 package Module::Install;
 $VERSION = '0.36';
+use FindBin;
 
 die << "." unless $INC{join('/', inc => split(/::/, __PACKAGE__)).'.pm'};
 Please invoke ${\__PACKAGE__} with:
@@ -75,6 +76,7 @@ sub new {
     $args{prefix}   ||= 'inc';
     $args{author}   ||= '.author';
     $args{bundle}   ||= 'inc/BUNDLES';
+    $args{base}     ||= $FindBin::Bin;
 
     $class =~ s/^\Q$args{prefix}\E:://;
     $args{name}     ||= $class;
@@ -84,7 +86,7 @@ sub new {
         $args{path}  = $args{name};
         $args{path}  =~ s!::!/!g;
     }
-    $args{file}     ||= "$args{prefix}/$args{path}.pm";
+    $args{file}     ||= "$args{base}/$args{prefix}/$args{path}.pm";
 
     bless(\%args, $class);
 }
@@ -105,9 +107,10 @@ sub call {
 sub load {
     my ($self, $method) = @_;
 
-    $self->load_extensions(
-        "$self->{prefix}/$self->{path}", $self
-    ) unless $self->{extensions};
+    my $extensions = $self->{extensions} || [];
+    unless (@$extensions) {
+        $self->load_extensions("$self->{prefix}/$self->{path}", $self);
+    }
 
     foreach my $obj (@{$self->{extensions}}) {
         return $obj if $obj->can($method);
@@ -128,6 +131,7 @@ END
 
 sub load_extensions {
     my ($self, $path, $top_obj) = @_;
+    $path = "$self->{base}/$path";
 
     unshift @INC, $self->{prefix}
         unless grep { $_ eq $self->{prefix} } @INC;

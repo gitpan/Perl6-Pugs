@@ -39,10 +39,10 @@ ruleBlock = rule "block" $ braces $ do
 
 ruleStatementList :: RuleParser [(Exp, SourcePos)]
 ruleStatementList = rule "statements" $ choice
-    [ nonSep  ruleDeclaration
+    [ rulePodBlock
+    , nonSep  ruleDeclaration
     , nonSep  ruleConstruct
     , semiSep ruleExpression
-    , ruleEndMarker
     ]
     where
     nonSep = doSep many
@@ -54,11 +54,38 @@ ruleStatementList = rule "statements" $ choice
         rest        <- option [] $ try $ do { count (symbol ";"); ruleStatementList }
         return ((statement, pos):rest)
 
-ruleEndMarker = rule "END marker" $ do
-    string "\n=begin END\n"
-    many anyChar
-    return []
-    
+ruleBeginOfLine = do
+    pos <- getPosition
+    unless (sourceColumn pos == 1) $ fail ""
+    return ()
+
+rulePodIntroducer = (<?> "intro") $ do
+    ruleBeginOfLine
+    char '='
+
+rulePodCut = (<?> "cut") $ do
+    rulePodIntroducer
+    string "cut"
+    many (satisfy (\x -> isSpace x && x /= '\n'))
+    ruleEndOfLine
+    return ()
+
+rulePodBlock = (<?> "block") $ do
+    try $ do
+        rulePodIntroducer
+        literalIdentifier
+    many (satisfy (\x -> isSpace x && x /= '\n'))
+    many1 newline
+    rulePodBody
+    whiteSpace
+    option [] ruleStatementList
+
+rulePodBody = (try rulePodCut) <|> eof <|> do
+    many $ satisfy  (/= '\n')
+    many1 newline -- XXX - paragraph mode
+    rulePodBody
+    return ()
+   
 -- Declarations ------------------------------------------------
 
 ruleDeclaration :: RuleParser Exp
@@ -102,7 +129,7 @@ ruleSubDeclaration = rule "subroutine declaration" $ do
         ]
     formal  <- option Nothing $ return . Just =<< parens ruleSubParameters
     cxt2    <- option cxt1 $ try $ ruleBareTrait "returns"
-    traits  <- many $ ruleTrait
+    _       <- many $ ruleTrait -- traits; not yet used
     body    <- ruleBlock
     let (fun, names) = extract (body, [])
         params = map nameToParam names ++ (maybe [defaultArrayParam] id formal) 
@@ -139,10 +166,10 @@ ruleSubParameters = rule "subroutine parameters" $ do
 ruleParamList parse = rule "parameter list" $ do
     formal <- maybeParens ((parse `sepEndBy` symbol ",") `sepEndBy` symbol ":")
     case formal of
-        []                  -> return [[], []]
-        [args]              -> return [[], args]
-        [invocants,args]    -> return formal
-        _                   -> fail "Only one invocant list allowed"
+        []     -> return [[], []]
+        [args] -> return [[], args]
+        [_,_]  -> return formal
+        _      -> fail "Only one invocant list allowed"
 
 ruleFormalParam = rule "formal parameter" $ do
     cxt     <- option "" $ ruleContext
@@ -187,7 +214,7 @@ ruleUseVersion = rule "use version" $ do
     return $ Val VUndef
 
 ruleUsePackage = rule "use package" $ do
-    package <- identifier -- XXX - ::
+    _ <- identifier -- package -- XXX - ::
     return $ Val VUndef
 
 ruleRequireDeclaration = tryRule "require declaration" $ do
@@ -197,8 +224,8 @@ ruleRequireDeclaration = tryRule "require declaration" $ do
 
 ruleModuleDeclaration = rule "module declaration" $ do
     symbol "module"
-    name <- identifier
-    version <- option "" $ do
+    _ <- identifier -- name - XXX
+    _ <- option "" $ do -- version - XXX
         char '-'
         many1 (choice [ digit, char '.' ])
     return $ Val VUndef -- XXX
@@ -219,7 +246,7 @@ ruleClosureTrait = rule "closure trait" $ do
                   , subParams     = []
                   , subFun        = fun
                   }
-    return $ App "&unshift" [] [Syn "," [Var "@*END", Syn "sub" [Val $ VSub sub]]]
+    return $ App "&unshift" [Var "@*END"] [Syn "sub" [Val $ VSub sub]]
 
 rulePackageDeclaration = rule "package declaration" $ fail ""
 
@@ -358,7 +385,7 @@ tightOperators = do
     [ methOps  " . .+ .? .* .+ .() .[] .{} .<<>> .= "   -- Method postfix
     , postOps  " ++ -- " ++ preOps " ++ -- "            -- Auto-Increment
     , rightOps " ** "                                   -- Exponentiation
-    , preOps   " ! + - ~ ? * ** +^ ~^ ?^ \\ "           -- Symbolic Unary
+    , preOps   " = ! + - ~ ? * ** +^ ~^ ?^ \\ "         -- Symbolic Unary
     , leftOps  " * / % x xx +& +< +> ~& ~< ~> "         -- Multiplicative
     , leftOps  " + - ~ +| +^ ~| ~^ "                    -- Additive
     , leftOps  " & ! "                                  -- Junctive And
@@ -374,7 +401,7 @@ tightOperators = do
     , leftOps  " && !! "                                -- Tight And
     , leftOps  " || ^^ // "                             -- Tight Or
     , ternOps  [("??", "::")]                           -- Ternary
-    , rightSyn " = := ::= += **= xx= ||= &&= //= "      -- Assignment
+    , rightSyn " = := ::= ~= += **= xx= ||= &&= //= "   -- Assignment
     ]
 
 looseOperators = do
@@ -426,6 +453,7 @@ parseName str
 
 currentListFunctions = do
     return []
+{-
     funs <- currentFunctions
     return $ unwords [
         name | f@Symbol{ symExp = Val (VSub sub) } <- funs
@@ -434,6 +462,7 @@ currentListFunctions = do
         , let name = parseName $ symName f
         ]
     -- " not <== any all one none perl eval "
+-}
 
 parseOp = do
     ops <- operators
@@ -652,9 +681,9 @@ qqInterpolator = do
           <|> ruleBlock
 
 qqLiteral = do
-    ch <- getDelim
+    ch   <- getDelim
     expr <- interpolatingStringLiteral (balancedDelim ch) qqInterpolator
-    ch <- char (balancedDelim ch)
+    _    <- char (balancedDelim ch)
     return expr
         where getDelim = try $ do string "qq"
                                   notFollowedBy alphaNum
@@ -683,7 +712,7 @@ methOps _ = []
 ternOps _ = []
 
 runRule :: Env -> (Env -> a) -> RuleParser Env -> FilePath -> String -> a
-runRule env f p name str = f $ case ( runParser ruleProgram env name str ) of
+runRule env f p name str = f $ case ( runParser p env name str ) of
     Left err    -> env { envBody = Val $ VError (showErr err) (NonTerm $ errorPos err) }
     Right env'  -> env'
 

@@ -12,8 +12,8 @@
 #define PUGS_VERSION "6"
 #define PUGS_DATE ""
 #define PUGS_SVN_REVISION "0"
-#include "config.h"
-#include "version.h"
+#include "pugs_config.h"
+#include "pugs_version.h"
 
 module Help (printHelp, banner, versnum, version, 
              copyright, disclaimer, intro) where
@@ -37,7 +37,7 @@ date	   = PUGS_DATE
 version    = name ++ ", version " ++ versnum ++ ", " ++ date ++ revision
 copyright  = "Copyright 2005 by Autrijus Tang"
 revision
-    | rev <- show(PUGS_SVN_REVISION)
+    | rev <- show(PUGS_SVN_REVISION :: Integer)
     , rev /= "0"
     = " (r" ++ rev ++ ")"
     | otherwise

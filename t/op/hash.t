@@ -3,13 +3,13 @@
 use v6;
 require Test;
 
-=pod
+=kwid
 
 Hash tests
 
 =cut
 
-plan 34;
+plan 42;
 
 # basic lvalue assignment
 
@@ -19,9 +19,6 @@ is(%hash1{"one"}, 5, 'lvalue hash assignment works (w/ double quoted keys)');
 
 %hash1{'one'} = 4; 
 is(%hash1{'one'}, 4, 'lvalue hash re-assignment works (w/ single quoted keys)');
-
-eval '%hash1{two} = 2'; 
-todo_is(%hash1{"two"}, 2, 'lvalue hash assignment works (w/ un-quoted keys)');
 
 my %hash1; 
 %hash1<three> = 3; 
@@ -58,6 +55,21 @@ is(+@slice2, 2, 'got the right amount of values from the %hash<> slice');
 is(@slice2[0], 3, '%hash<> slice was successful');
 is(@slice2[1], 1, '%hash<> slice was successful');
 
+# slice assignment
+
+eval '%hash5{"one", "three"} = (5, 10)';
+todo_is(%hash5<one>, 5, 'value was changed successfully with slice assignment');
+todo_is(%hash5<three>, 10, 'value was changed successfully with slice assignment');
+
+eval '%hash5<one three> = (3, 1)';
+todo_is(%hash5<one>, 3, 'value was changed successfully with slice assignment');
+todo_is(%hash5<three>, 1, 'value was changed successfully with slice assignment');
+
+eval '%hash<one three> = [3, 1]';
+todo_is(%hash5<one>[0], 3, 'value assigned successfully with arrayref in list context');
+todo_is(%hash5<one>[1], 1, 'value assigned successfully with arrayref in list context');
+todo_ok(!defined(%hash5<three>), '"three" assumed value undef from slice assignment');
+
 # keys 
 
 my %hash6 = ("one", 1, "two", 2, "three", 3);
@@ -78,13 +90,13 @@ is(@keys2[2], 'two', 'got the right key');
 
 my %hash7 = ("one", 1, "two", 2, "three", 3);
 
-my @values1 = values %hash6;
+my @values1 = values %hash7;
 is(+@values1, 3, 'got the right number of values');
 is(@values1[0], 1, 'got the right values');
 is(@values1[1], 3, 'got the right values');
 is(@values1[2], 2, 'got the right values');
 
-my @values1 = %hash6.values;
+my @values1 = %hash7.values;
 is(+@values1, 3, 'got the right number of values');
 is(@values1[0], 1, 'got the right values');
 is(@values1[1], 3, 'got the right values');
@@ -97,4 +109,12 @@ eval '%hash8 = (:one, :key<value>, :three(3))';
 todo_is %hash8{'one'}, 1, 'colonpair :one';
 todo_is %hash8{'key'}, 'value', 'colonpair :key<value>';
 todo_is %hash8{'three'}, 3, 'colonpair :three(3)';
+
+# kv method
+
+my $key;
+my $val;
+eval 'my %hash9 = (1, 2); for %hash9.kv -> $k,$v { $key = $k; $val = $v; }';
+todo_is($key, 1, "\%hash.kv gave us our key");
+todo_is($val, 2, "\%hash.kv gave us our val");
 

@@ -19,8 +19,8 @@ import qualified Rule.Token as P
 type RuleParser a = GenParser Char Env a
 
 perl6Def  = javaStyle
-          { P.commentStart   = "=pod"
-          , P.commentEnd     = "=cut"
+          { P.commentStart   = [] -- "=pod"
+          , P.commentEnd     = [] -- "=cut"
           , P.commentLine    = "#"
           , P.nestedComments = False
           , P.identStart     = wordAlpha
@@ -28,6 +28,11 @@ perl6Def  = javaStyle
           , P.caseSensitive  = False
           }
 
+literalIdentifier = do
+    c <- wordAlpha
+    cs <- many wordAny
+    return (c:cs)
+    
 wordAlpha   = satisfy isWordAlpha <?> "alphabetic word character"
 wordAny     = satisfy isWordAny <?> "word character"
 
@@ -47,40 +52,7 @@ getVar = do
     error ""    
 
 perl6Lexer = P.makeTokenParser perl6Def
-whiteSpace = choice
-    [ rulePodBlock
-    , P.whiteSpace perl6Lexer
-    ]
-
-ruleBeginOfLine = do
-    pos <- getPosition
-    unless (sourceColumn pos == 1) $ fail ""
-    return ()
-
-rulePodIntroducer = (<?> "intro") $ do
-    ruleBeginOfLine
-    char '='
-
-rulePodCut = (<?> "cut") $ do
-    rulePodIntroducer
-    string "cut"
-    choice [ do { char '\n'; return () }, eof ]
-    return ()
-
-rulePodBlock = (<?> "block") $ do
-    rulePodIntroducer
-    identifier
---    newline
-    anyChar
-    rulePodBody
-
-rulePodBody = (try rulePodCut) <|> eof <|> do
-    many $ satisfy  (/= '\n')
-    newline
---    newline
-    rulePodBody
-    return ()
-
+whiteSpace = P.whiteSpace perl6Lexer
 parens     = P.parens perl6Lexer
 lexeme     = P.lexeme perl6Lexer
 identifier = P.identifier perl6Lexer
@@ -90,6 +62,8 @@ angles     = P.angles perl6Lexer
 balanced   = P.balanced perl6Lexer
 balancedDelim = P.balancedDelim perl6Lexer
 decimal    = P.decimal perl6Lexer
+
+ruleEndOfLine = choice [ do { char '\n'; return () }, eof ]
 
 symbol s
     | isWordAny (last s) = try $ do
@@ -106,7 +80,7 @@ symbol s
         return rv
         where
         ahead '-' '>' = False -- XXX hardcoke
-        ahead '!' '=' = False
+        ahead x   '=' = not (x `elem` "!~+-*/")
         ahead s   x   = x `elem` ";!" || x /= s
 
 stringLiteral = singleQuoted
@@ -117,7 +91,7 @@ interpolatingStringLiteral endchar interpolator = do
     where
         homogenConcat :: [Exp] -> Exp
         homogenConcat []             = Val (VStr "")
-        homogenConcat [x]            = x
+        homogenConcat [x]            = App "&infix:~" [x, Val (VStr "")] []
         homogenConcat (Val (VStr x):Val (VStr y):xs) = homogenConcat (Val (VStr (x ++ y)) : xs)
         homogenConcat (x:y:xs)       = App "&infix:~" [x, homogenConcat (y:xs)] []
         
@@ -143,7 +117,7 @@ naturalOrRat  = natRat
         <|> decimalRat
                       
     zeroNumRat = do
-            n <- hexadecimal <|> decimal <|> octal <|> binary
+            n <- hexadecimal <|> decimal <|> octalBad <|> octal <|> binary
             return (Left n)
         <|> decimalRat
         <|> fractRat 0
@@ -189,17 +163,20 @@ naturalOrRat  = natRat
                     <|> (char '+' >> return True)
                     <|> return True
 
+{-
     nat             = zeroNumber <|> decimalLiteral
         
     zeroNumber      = do{ char '0'
-                        ; hexadecimal <|> decimal <|> octal <|> decimalLiteral <|> return 0
+                        ; hexadecimal <|> decimal <|> octalBad <|> octal <|> decimalLiteral <|> return 0
                         }
                       <?> ""       
+-}
 
     decimalLiteral         = number 10 digit        
     hexadecimal     = do{ char 'x'; number 16 hexDigit }
     decimal         = do{ char 'd'; number 10 digit }
-    octal           = do{ char 'o'; number 8 octDigit  }
+    octal           = do{ char 'o'; number 8 octDigit }
+    octalBad        = do{ many1 octDigit ; fail "0100 is not octal in perl6 any more, use 0o100 instead." }
     binary          = do{ char 'b'; number 2 (oneOf "01")  }
 
     -- number :: Integer -> CharParser st Char -> CharParser st Integer
@@ -424,6 +401,8 @@ buildExpressionParser operators simpleExpr
             AssocNone  -> (rassoc,lassoc,op:nassoc,prefix,postfix)
             AssocLeft  -> (rassoc,op:lassoc,nassoc,prefix,postfix)
             AssocRight -> (op:rassoc,lassoc,nassoc,prefix,postfix)
+            _          -> internalError "splitOp: unimplemented assoc type."
+            -- FIXME: add two new assoc types here.
             
       splitOp (Prefix op) (rassoc,lassoc,nassoc,prefix,postfix)
         = (rassoc,lassoc,nassoc,op:prefix,postfix)

@@ -15,7 +15,7 @@ import Internals
 import AST
 
 #undef PUGS_HAVE_READLINE
-#include "config.h"
+#include "pugs_config.h"
 
 #ifdef PUGS_HAVE_READLINE
 import qualified System.Console.Readline as Readline
@@ -74,9 +74,8 @@ readline prompt
 #endif
 
 addHistory :: String -> IO ()
-addHistory str
 #ifdef PUGS_HAVE_READLINE
-   = Readline.addHistory str
+addHistory str = Readline.addHistory str
 #else
-   = return ()
+addHistory _ = return ()
 #endif 

@@ -19,6 +19,7 @@ module Internals (
     module Rule.Pos,
     module Data.Dynamic,
     module Data.Unique,
+    module Control.Exception,
     module System.Environment,
     module System.Random,
     module System.IO,
@@ -26,6 +27,7 @@ module Internals (
     module System.Exit,
     module System.Time,
     module System.Directory,
+    module System.Cmd,
     module Control.Monad.RWS,
     module Control.Monad.Error,
     module Data.Bits,
@@ -41,30 +43,42 @@ module Internals (
     module Data.FiniteMap,
     module Data.IORef,
     module Debug.Trace,
+    internalError
 ) where
 
 import Cont
 import Posix
 import Data.Dynamic
 import System.Environment
-import System.Random
+import System.Random hiding (split)
 import System.Exit
 import System.Time
-import System.IO hiding (try)
+import System.Cmd
+import System.IO (
+    Handle, stdin, stdout, hClose, hGetLine, hGetContents,
+    openFile, hPutStr, hPutStrLn, IOMode(..), stderr,
+    hSetBuffering, BufferMode(..), hIsTerminalDevice
+    )
 import System.IO.Unsafe
 import System.Directory
+import Control.Exception (catchJust, errorCalls)
 import Control.Monad.RWS
 import Control.Monad.Error (MonadError(..))
-import qualified System.IO (try)
 import Data.Bits hiding (shift)
 import Data.Maybe
 import Data.Either
-import Data.List hiding (intersect, union)
+import Data.List (
+    (\\), find, genericLength, insert, sortBy, intersperse,
+    partition, group, sort, genericReplicate, isPrefixOf,
+    genericTake, genericDrop, unfoldr
+    )
 import Data.Unique
 import Data.Ratio
 import Data.Word
 import Data.Char
-import Data.Set
+import Data.Set (
+    Set, elementOf, setToList, mapSet, mkSet, emptySet, unionManySets, union
+    )
 import Data.Ratio
 import Data.Complex
 import Data.FiniteMap
@@ -77,10 +91,14 @@ import Rule.Pos
 instance Show Unique where
     show = show . hashUnique
 instance Show (a -> b) where
-    show f = "(->)"
+    show _ = "(->)"
 instance Eq (a -> b) where
     _ == _ = False
 instance Ord (a -> b) where
     compare _ _ = LT
 instance Show (IORef (FiniteMap String String)) where
-    show f = "{ n/a }"
+    show _ = "{ n/a }"
+
+internalError :: String -> a
+internalError s = error $ "Internal error: " ++ s ++ " please file a bug report."
+

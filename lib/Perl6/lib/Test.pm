@@ -22,7 +22,7 @@ sub proclaim (Bool $cond, Str ?$desc, Str ?$context) returns Bool {
     return $cond;
 }
 
-sub ok ($cond, Str ?$desc) returns Bool is export {
+sub ok (Bool $cond, Str ?$desc) returns Bool is export {
     proclaim($cond, $desc);
     if (!$cond) {
         $*ERR.say("#     Failed test (", $?CALLER::POSITION, ")");
@@ -101,3 +101,82 @@ END {
         $*ERR.say("# Looks like you failed ", $failed, " tests of ", $loop);
     }
 }
+
+=kwid
+
+= NAME
+
+Test - Test support module for perl6
+
+= SYNOPSIS
+
+  use v6;
+  require Test;
+  
+  plan 8;
+  
+  ok(2 + 2 == 4, '2 and 2 make 4');
+  is(2 + 2, 4, '2 and 2 make 4');
+  
+  todo_ok(2 + 2 == 5, '2 and 2 make 5');
+  todo_is(2 + 2, 5, '2 and 2 make 5');  
+  
+  pass('This test passed');
+  fail('This test failed');
+
+  skip('skip this test for now');
+  
+  todo_fail('this fails, but might work soon');
+  
+  diag('some misc comments and documentation');
+
+= DESCRIPTION
+
+= FUNCTIONS
+
+* `plan (Int $number_of_tests) returns Int`
+
+* `ok (Bool $cond, Str ?$desc) returns Bool`
+
+* `is (Str $got, Str $expected, Str ?$desc) returns Bool`
+
+* `todo_ok (Bool $cond, Str ?$desc) returns Bool`
+
+* `todo_is (Str $got, Str $expected, Str ?$desc) returns Bool`
+
+* `skip (Str ?$reason) returns Bool`
+
+* `pass (Str ?$desc) returns Bool`
+
+* `fail (Str ?$desc) returns Bool`
+
+* `todo_fail (Str ?$desc) returns Bool`
+
+* `diag (Str $diag)`
+
+= SEE ALSO
+
+= AUTHORS
+
+Aurtrijus Tang <autrijus@autrijus.org>
+
+Benjamin Smith
+
+Norman Nunley
+
+Steve Peters
+
+Stevan Little <stevan@iinteractive.com>
+
+Brian Ingerson <ingy@cpan.org>
+
+= COPYRIGHT
+
+Copyright (c) 2005. Autrijus Tang. All rights reserved.
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+
+See http://www.perl.com/perl/misc/Artistic.html
+
+=cut
