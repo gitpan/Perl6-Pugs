@@ -40,7 +40,6 @@ testEnv = Env { envContext = "List"
           , envCaller = Nothing
           , envClasses = initTree
           , envEval = undefined
-          , envCC = return
           , envBody = undefined
           , envDepth = 0
           , envID = undefined
@@ -53,10 +52,11 @@ askDump str = do
     liftIO $ putStrLn $ "Current scope: " ++ str ++ " - Env: " ++ env
 
 
+{-
 enterScope f = do
     uniq <- liftIO $ newUnique
     rv <- callCC $ \cc -> resetT $ do
-        local (\e -> e{ envCaller = Just e, envCC = cc, envDepth = 1 + envDepth e, envID = uniq } ) f
+        local (\e -> e{ envCaller = Just e, envDepth = 1 + envDepth e, envID = uniq } ) f
     liftIO $ print (rv)
     -- here we trigger error handler of various sorts
     case rv of
@@ -71,18 +71,27 @@ enterScope f = do
     -- detect for abnormal return
     return rv
     -}
-
+-}
+  
 enterSub sub@Sub{ subType = typ } action
-    | typ >= SubPrim    = action
-    | otherwise         = do
+    | typ >= SubPrim = action -- primitives just happen
+    | otherwise     = do
         cxt <- asks envContext
-        resetT $ do
-            local (\e -> e{ envLexical = (subRec:ret cxt:subPad sub) }) $ do
-                action
+        pad <- asks envLexical
+        if typ >= SubBlock
+            then local (fixEnv undefined pad cxt) action
+            else resetT $ callCC $ \cc -> local (fixEnv cc pad cxt) action
     where
     doReturn [v] = shiftT $ \_ -> return v
-    subRec = Symbol SMy "&?prefix:SUB" (Val $ VSub sub)
-    ret cxt = Symbol SMy "&prefix:return" (Val $ VSub $ retSub cxt)
+    doCC cc [v] = cc v
+    subRec = [ Symbol SMy "&?SUB" (Val $ VSub sub)
+             , Symbol SMy "$?SUBNAME" (Val $ VStr $ subName sub)]
+    blockRec = Symbol SMy "&?BLOCK" (Val $ VSub sub)
+    ret cxt = Symbol SMy "&return" (Val $ VSub $ retSub cxt)
+    callerCC cc cxt = Symbol SMy "&?CALLER_CONTINUATION" (Val $ VSub $ ccSub cc cxt)
+    fixEnv cc pad cxt env
+        | typ >= SubBlock = env{ envLexical = (blockRec:subPad sub) ++ pad }
+        | otherwise      = env{ envLexical = subRec ++ (ret cxt:callerCC cc cxt:subPad sub) }
     retSub cxt = Sub
         { isMulti = False
         , subName = "return"
@@ -101,6 +110,25 @@ enterSub sub@Sub{ subType = typ } action
             } ]
         , subReturns = cxt
         , subFun = Prim doReturn
+        }
+    ccSub cc cxt = Sub
+        { isMulti = False
+        , subName = "CALLER_CONTINUATION"
+        , subType = SubPrim
+        , subPad = []
+        , subAssoc = "pre"
+        , subParams = [ Param
+            { isInvocant = False
+            , isSlurpy = True
+            , isOptional = False
+            , isNamed = False
+            , isLValue = False
+            , paramName = "@?0"
+            , paramContext = cxt
+            , paramDefault = Val VUndef
+            } ]
+        , subReturns = cxt
+        , subFun = Prim $ doCC cc
         }
 
 {-
@@ -147,7 +175,8 @@ blah = do
     dumpLex ">init"
     rv <- enterLex [Symbol SMy "$x" $ Val $ VInt 1] $ do
         dumpLex ">lex"
-        rv <- enterScope outer
+        -- rv <- enterScope outer
+        rv <- outer
         dumpLex "<lex"
         return rv
     dumpLex "<init"
@@ -164,7 +193,8 @@ outer = enterLex [Symbol SMy "$outer" $ Val $ VInt 2] $ do
 callerCC :: Int -> Val -> Eval Val
 callerCC n v = do
     env <- caller n
-    (envCC env) v
+    -- (envCC env) v
+    return undefined
 
 caller :: Int -> Eval Env
 caller n = do

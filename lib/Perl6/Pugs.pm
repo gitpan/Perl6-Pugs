@@ -1,15 +1,15 @@
 package Perl6::Pugs;
-$Pugs::VERSION = '6.0.8';
+$Pugs::VERSION = '6.0.9';
 
 use strict;
 
 =head1 NAME
 
-Perl6::Pugs - A Perl6 Interpreter
+Perl6::Pugs - A Perl6 Implementation
 
 =head1 VERSION
 
-This document describes version 6.0.8 of Pugs, released February 21, 2005.
+This document describes version 6.0.9 of Pugs, released February 28, 2005.
 
 =head1 SYNOPSIS
 
@@ -18,37 +18,13 @@ This document describes version 6.0.8 of Pugs, released February 21, 2005.
 
 =head1 DESCRIPTION
 
-Pugs is an interpreter for Perl 6, written in Haskell. It aims to implement the
-full Perl6 specification, as detailed in the Synopses.
+Pugs is an implementation of Perl 6, written in Haskell. It aims to support
+the full Perl6 specification, as detailed in the Synopses.
 
-The Pugs project was started on February 1st 2005.  It is under active development
-on IRC (irc.freenode.net #perl6).
+The Pugs project was started on February 1st 2005.  It is under active
+development on IRC (irc.freenode.net #perl6).
 
-=head2 Release Plans
-
-The major/minor version numbers of Pugs converges to 2*pi; each significant
-digit in the minor version represents a milestone.  The third digit is
-incremented for each release.
-
-The current milestones are:
-
-=over 4
-
-=item 6.0: Initial release.
-
-=item 6.2: Basic IO and control flow elements; mutable variables; assignment.
-
-=item 6.28: Classes and traits.
-
-=item 6.283: Rules and Grammars.
-
-=item 6.2831: Role composition and other runtime features.
-
-=item 6.28318: Macros.
-
-=item 6.283185: Rewrite in Perl6.
-
-=back
+Please read the Pugs Apocrypha in the F<docs/> directory for more details.
 
 =head1 SEE ALSO
 
@@ -68,7 +44,13 @@ Please submit bug reports to E<lt>bug-perl6-pugs@rt.cpan.orgE<gt>.
 
 Copyright 2005 by Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>.
 
-This program is free software; you can redistribute it and/or modify it
-under the same terms as Pugs itself.
+This code is free software; you can redistribute it and/or modify it under
+the terms of either:
+
+    a) the GNU General Public License, version 2, or
+    b) the Artistic License, version 2.0beta5.
+
+For the full license text, please see the "GPL-2" and "Artistic-2" files under
+the LICENSE/ directory of the Pugs distribution.
 
 =cut

@@ -22,6 +22,7 @@ import Shell
 import Parser
 import Help
 import Pretty
+import Posix
 
 main :: IO ()
 main = do
@@ -37,12 +38,17 @@ run :: [String] -> IO ()
 run ("-l":rest)                 = run rest
 run ("-d":rest)                 = run rest
 run ("-w":rest)                 = run rest
-run (('-':'l':xs):rest)            = run (('-':xs):rest)
-run (('-':'w':xs):rest)            = run (('-':xs):rest)
-run (('-':'d':xs):rest)            = run (('-':xs):rest)
+run (('-':'l':xs):rest)         = run (('-':xs):rest)
+run (('-':'w':xs):rest)         = run (('-':xs):rest)
+run (('-':'d':xs):rest)         = run (('-':xs):rest)
 run (('-':'e':prog@(_:_)):args) = doRun "-" args prog
 run ("-e":prog:args)            = doRun "-" args prog
 run ("-h":_)                    = printHelp
+run ("-v":_)                    = banner
+run ("--version":_)             = banner
+run ("-c":"-e":prog:_)          = doParse prog
+run ("-ce":prog:_)              = doParse prog
+run ("-c":file:_)               = readFile file >>= doParse
 run ("-":args)                  = do
     prog <- getContents
     doRun "-" [] prog
@@ -50,7 +56,7 @@ run (file:args)                 = readFile file >>= doRun file args
 run []                          = do
     isTTY <- hIsTerminalDevice stdin
     if isTTY
-        then banner >> repLoop
+        then do banner >> intro >> repLoop
         else run ["-"]
 
 repLoop :: IO ()
@@ -61,7 +67,7 @@ repLoop
            CmdLoad fn   -> load fn
            CmdEval prog -> doEval [] prog >> repLoop
            CmdParse prog-> doParse prog >> repLoop
-           CmdHelp     -> printHelp >> repLoop
+           CmdHelp      -> printHelp >> repLoop
 
 load fn = return ()
 
@@ -70,7 +76,7 @@ eval prog = doEval [] prog
 
 doParse prog = do
     env <- emptyEnv []
-    runRule env (putStrLn . pretty) ruleProgram prog
+    runRule env (putStrLn . pretty) ruleProgram "<interactive>" prog
 
 doEval :: [String] -> String -> IO ()
 doEval = do
@@ -92,19 +98,36 @@ runFile file = do
 
 runProgramWith :: (Env -> Env) -> (Val -> IO ()) -> VStr -> [VStr] -> String -> IO ()
 runProgramWith fenv f name args prog = do
+    environ <- getEnvironment
+    let envFM = listToFM $ [ (VStr k, VStr v) | (k, v) <- environ ]
+        p6lib = maybeToList $ lookup "PERL6LIB" environ
+        p5lib = map fixLib $ catMaybes [lookup "PERL5LIB" environ, lookup "PERLLIB" environ]
+    progSV  <- newMVal $ VStr name
+    endAV   <- newMVal $ VList []
+    incAV   <- newMVal $ VList (map VStr $ p6lib ++ p5lib ++ incs)
+    argsAV  <- newMVal $ VList (map VStr args)
+    inGV    <- newMVal $ VHandle stdin
+    outGV   <- newMVal $ VHandle stdout
+    errGV   <- newMVal $ VHandle stderr
     env <- emptyEnv
-        [ Symbol SGlobal "@*ARGS" (Val $ VList $ map VStr args)
-        , Symbol SGlobal "@*INC" (Val $ VList [])
-        , Symbol SGlobal "$*PROGNAME" (Val $ VStr name)
---        , Symbol SGlobal "$*STDIN" (Val $ VStr str)
-        , Symbol SGlobal "$*END" (Val VUndef)
+        [ Symbol SGlobal "@*ARGS"       $ Val argsAV
+        , Symbol SGlobal "@*INC"        $ Val incAV
+        , Symbol SGlobal "$*PROGNAME"   $ Val progSV
+        , Symbol SGlobal "@*END"        $ Val endAV
+        , Symbol SGlobal "$*IN"         $ Val inGV
+        , Symbol SGlobal "$*OUT"        $ Val outGV
+        , Symbol SGlobal "$*ERR"        $ Val errGV
+        , Symbol SGlobal "%*ENV" (Val . VHash . MkHash $ envFM)
         ]
 --    str <- return "" -- getContents
-    let env' = runRule (fenv env) id ruleProgram prog
+    let env' = runRule (fenv env) id ruleProgram name prog
     val <- (`runReaderT` env') $ do
         (`runContT` return) $ resetT $ do
             evaluateMain (envBody env')
     f val
+    where
+    fixLib = ((++) "/Perl6/lib")
+    incs = ["./lib/Perl6/lib", "../lib/Perl6/lib", "."]
 
 {-
 main = do

@@ -1,13 +1,22 @@
+#!/usr/bin/pugs
+
 use v6;
+require Test;
 
-say "1..7";
+=pod
 
-if ('a' x 3 eq 'aaa')       { say "ok 1" } else { say "not ok 1" }
-if ('ab' x 4 eq 'abababab') { say "ok 2" } else { say "not ok 2" }
-if (1 x 5 eq '11111')       { say "ok 3" } else { say "not ok 3" }
-if ('' x 6 eq '')           { say "ok 4" } else { say "not ok 4" }
+Repeat operators for strings and lists
+
+=cut
+
+plan(7);
+
+is ('a' x 3, 'aaa', 'string repeat operator works on single character');
+is ('ab' x 4, 'abababab', 'string repeat operator works on multiple character');
+is (1 x 5, '11111', 'number repeat operator works on number and creates string');
+is ('' x 6, '', 'repeating an empty string creates an empty string');
 
 my @foo = 'x' xx 10;
-if (@foo[0] eq 'x') { say "ok 5" } else { say "not ok 5" }
-if (@foo[9] eq 'x') { say "ok 6" } else { say "not ok 6" }
-if (+@foo == 10)    { say "ok 7" } else { say "not ok 7 # TODO" }
+is (@foo[0], 'x', 'list repeat operator created correct list');
+is (@foo[9], 'x', 'list repeat operator created correct list');
+is (+@foo, 10, 'list repeat operator created list of the right size');

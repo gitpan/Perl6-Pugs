@@ -1,22 +1,57 @@
+#!/usr/bin/pugs
+
 use v6;
+require Test;
 
-say "1..5";
+plan(16);
 
-my $pair1 = 'foo' => 'bar';
+my $pair = 'foo' => 'bar';
+ok (ref $pair eq 'Pair');
 
-my $foo = $pair1.key;
-my $bar = $pair1.value;
+my $foo = $pair.key;
+my $bar = $pair.value;
 
-if ($foo eq 'foo') { say "ok 1" } else { say "not ok 1" }
-if ($bar eq 'bar') { say "ok 2" } else { say "not ok 2" }
+ok ($foo eq 'foo');
+ok ($bar eq 'bar');
 
-my @pair1 = $pair1.kv;
+my @pair1 = $pair.kv;
 
-if (@pair1[0] eq 'foo') { say "ok 3" } else { say "not ok 3" }
-if (@pair1[1] eq 'bar') { say "ok 4" } else { say "not ok 4" }
+ok (@pair1[0] eq 'foo');
+ok (@pair1[1] eq 'bar');
 
 my $quux = eval '(quux => "xyzzy").key';
 
-if ($quux eq 'quux') { say "ok 5" } else { say "not ok 5 # TODO => lhs quotes" }
+todo_ok ($quux eq 'quux', "lhs quotes" );
 
+#Pair with a numeric value
+my $pair = 'foo' => 2;
+ok (ref $pair eq 'Pair');
 
+my $two = $pair.value;
+ok ($two == 2);
+
+#Pair with a Pair value
+my $pair = "foo" => ("bar" => "baz");
+ok (ref $pair eq 'Pair');
+my $pair2 = $pair.value;
+ok (ref $pair2 eq 'Pair');
+
+#Pair with a Pair key
+$pair = ("foo" => "bar") => "baz";
+ok (ref $pair eq 'Pair');
+my $key = $pair.key;
+ok (ref $key eq 'Pair');
+
+#Pair list a la http://www.nntp.perl.org/group/perl.perl6.language/19360
+my $list = 1 => 2 => 3 => 4;
+ok(ref $list eq 'Pair');
+$key = $list.key;
+ok($key == 1);
+$pair2 = $list.value;
+ok(ref $pair2 eq 'Pair');
+
+# lvalue Pair assignments from S06 and thread starting with
+# http://www.nntp.perl.org/group/perl.perl6.language/19425
+my $val;
+eval '("foo" => $val) = "baz"';
+todo_ok($val eq "baz", "lvalue lists");

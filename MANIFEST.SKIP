@@ -7,10 +7,11 @@
 ^_darcs/
 ^blib/
 ^etc/
-^docs/
 ^pm_to_blib
 ^blibdirs
 \.sw\w$
 \.hi$
 \.o.*$
 ^config.h
+\.svn
+version\.h$

@@ -12,7 +12,9 @@
 module Lexer where
 import Internals
 import AST
-import qualified Text.ParserCombinators.Parsec.Token as P
+import Rule
+import Rule.Language
+import qualified Rule.Token as P
 
 type RuleParser a = GenParser Char Env a
 
@@ -32,14 +34,62 @@ wordAny     = satisfy isWordAny <?> "word character"
 isWordAny x = (isAlphaNum x || x == '_')
 isWordAlpha x = (isAlpha x || x == '_')
 
+setVar :: String -> Val -> RuleParser ()
+setVar = do
+    -- env <- getState
+    -- let lex = envLexical env
+    -- setState env{ envLexical = lex' }
+    error ""
+
+getVar :: String -> RuleParser Val
+getVar = do
+    -- env <- getState
+    error ""    
+
 perl6Lexer = P.makeTokenParser perl6Def
-whiteSpace = P.whiteSpace perl6Lexer
+whiteSpace = choice
+    [ rulePodBlock
+    , P.whiteSpace perl6Lexer
+    ]
+
+ruleBeginOfLine = do
+    pos <- getPosition
+    unless (sourceColumn pos == 1) $ fail ""
+    return ()
+
+rulePodIntroducer = (<?> "intro") $ do
+    ruleBeginOfLine
+    char '='
+
+rulePodCut = (<?> "cut") $ do
+    rulePodIntroducer
+    string "cut"
+    choice [ do { char '\n'; return () }, eof ]
+    return ()
+
+rulePodBlock = (<?> "block") $ do
+    rulePodIntroducer
+    identifier
+--    newline
+    anyChar
+    rulePodBody
+
+rulePodBody = (try rulePodCut) <|> eof <|> do
+    many $ satisfy  (/= '\n')
+    newline
+--    newline
+    rulePodBody
+    return ()
+
 parens     = P.parens perl6Lexer
 lexeme     = P.lexeme perl6Lexer
 identifier = P.identifier perl6Lexer
 braces     = P.braces perl6Lexer
 brackets   = P.brackets perl6Lexer
 angles     = P.angles perl6Lexer
+balanced   = P.balanced perl6Lexer
+balancedDelim = P.balancedDelim perl6Lexer
+decimal    = P.decimal perl6Lexer
 
 symbol s
     | isWordAny (last s) = try $ do
@@ -49,25 +99,42 @@ symbol s
         return rv
     | otherwise          = try $ do
         rv <- string s
-	-- XXX Wrong - the correct solution is to lookahead as much as possible
-	-- in the expression parser below
-        choice [ eof >> return ' ', lookAhead (satisfy (\x -> x `elem` ";!" || x /= (last s))) ]
+        -- XXX Wrong - the correct solution is to lookahead as much as possible
+        -- in the expression parser below
+        choice [ eof >> return ' ', lookAhead (satisfy (ahead $ last s)) ]
         whiteSpace
         return rv
+        where
+        ahead '-' '>' = False -- XXX hardcoke
+        ahead '!' '=' = False
+        ahead s   x   = x `elem` ";!" || x /= s
 
-stringLiteral = choice
-    [ P.stringLiteral  perl6Lexer
-    , singleQuoted
-    ]
+stringLiteral = singleQuoted
 
-naturalOrRat  = do
-        b <- lexeme sign
-        n <- lexeme natRat
-        return $ if b
-            then n
-            else case n of
-                Left x -> Left $ -x
-                Right y -> Right $ -y
+interpolatingStringLiteral endchar interpolator = do
+        list <- stringList
+        return $ Syn "cxt" [Val (VStr "Str"), homogenConcat list]
+    where
+        homogenConcat :: [Exp] -> Exp
+        homogenConcat []             = Val (VStr "")
+        homogenConcat [x]            = x
+        homogenConcat (Val (VStr x):Val (VStr y):xs) = homogenConcat (Val (VStr (x ++ y)) : xs)
+        homogenConcat (x:y:xs)       = App "&infix:~" [x, homogenConcat (y:xs)] []
+        
+        stringList = do
+            lookAhead (char endchar)
+            return []
+          <|> do
+            parse <- interpolator
+            rest  <- stringList
+            return (parse:rest)
+          <|> do
+            char <- anyChar
+            rest <- stringList
+            return (Val (VStr [char]):rest)
+        
+
+naturalOrRat  = natRat
     <?> "number"
     where
     natRat = do
@@ -76,14 +143,14 @@ naturalOrRat  = do
         <|> decimalRat
                       
     zeroNumRat = do
-            n <- hexadecimal <|> octal <|> binary
+            n <- hexadecimal <|> decimal <|> octal <|> binary
             return (Left n)
         <|> decimalRat
         <|> fractRat 0
         <|> return (Left 0)                  
                       
     decimalRat = do
-        n <- decimal
+        n <- decimalLiteral
         option (Left n) (try $ fractRat n)
 
     fractRat n = do
@@ -110,7 +177,7 @@ naturalOrRat  = do
     expo = do
             oneOf "eE"
             f <- sign
-            e <- decimal <?> "exponent"
+            e <- decimalLiteral <?> "exponent"
             return (power (if f then e else -e))
         <?> "exponent"
         where
@@ -122,15 +189,16 @@ naturalOrRat  = do
                     <|> (char '+' >> return True)
                     <|> return True
 
-    nat             = zeroNumber <|> decimal
+    nat             = zeroNumber <|> decimalLiteral
         
     zeroNumber      = do{ char '0'
-                        ; hexadecimal <|> octal <|> decimal <|> return 0
+                        ; hexadecimal <|> decimal <|> octal <|> decimalLiteral <|> return 0
                         }
                       <?> ""       
 
-    decimal         = number 10 digit        
+    decimalLiteral         = number 10 digit        
     hexadecimal     = do{ char 'x'; number 16 hexDigit }
+    decimal         = do{ char 'd'; number 10 digit }
     octal           = do{ char 'o'; number 8 octDigit  }
     binary          = do{ char 'b'; number 2 (oneOf "01")  }
 
@@ -142,21 +210,68 @@ naturalOrRat  = do
             }          
 
 
-singleQuoted = lexeme (
-                      do{ str <- between (char '\'')
-                                         (char '\'' <?> "end of string")
-                                         (many singleStrChar)
-                        ; return (foldr (id (:)) "" str)
-                        }
-                      <?> "literal string")
+singleQuoted = verbatimRule "literal string" $ do
+    str <- between (char '\'') (char '\'' <?> "end of string") (many singleStrChar)
+    return (foldr (id (:)) "" str)
 
 singleStrChar = try quotedQuote <|> noneOf "'"
+
+-- backslahed nonalphanumerics (except for ^) translate into themselves
+escapeCode      = charEsc <|> charNum <|> charAscii <|> charControl <|> anyChar
+                <?> "escape code"
+
+-- charControl :: CharParser st Char
+charControl     = do{ char '^'
+                    ; code <- upper
+                    ; return (toEnum (fromEnum code - fromEnum 'A'))
+                    }
+
+-- charNum :: CharParser st Char                    
+charNum         = do{ code <- decimal 
+                              <|> do{ char 'o'; number 8 octDigit }
+                              <|> do{ char 'x'; number 16 hexDigit }
+                              <|> do{ char 'd'; number 10 digit }
+                    ; return (toEnum (fromInteger code))
+                    }
+
+number base baseDigit
+    = do{ digits <- many1 baseDigit
+        ; let n = foldl (\x d -> base*x + toInteger (digitToInt d)) 0 digits
+        ; seq n (return n)
+        }          
+
+charEsc         = choice (map parseEsc escMap)
+                where
+                  parseEsc (c,code)     = do{ char c; return code }
+                  
+charAscii       = choice (map parseAscii asciiMap)
+                where
+                  parseAscii (asc,code) = try (do{ string asc; return code })
+
+
+-- escape code tables
+escMap          = zip ("abfnrtv\\\"\'") ("\a\b\f\n\r\t\v\\\"\'")
+asciiMap        = zip (ascii3codes ++ ascii2codes) (ascii3 ++ ascii2) 
+
+ascii2codes     = ["BS","HT","LF","VT","FF","CR","SO","SI","EM",
+                   "FS","GS","RS","US","SP"]
+ascii3codes     = ["NUL","SOH","STX","ETX","EOT","ENQ","ACK","BEL",
+                   "DLE","DC1","DC2","DC3","DC4","NAK","SYN","ETB",
+                   "CAN","SUB","ESC","DEL"]
+
+ascii2          = ['\BS','\HT','\LF','\VT','\FF','\CR','\SO','\SI',
+                   '\EM','\FS','\GS','\RS','\US','\SP']
+ascii3          = ['\NUL','\SOH','\STX','\ETX','\EOT','\ENQ','\ACK',
+                   '\BEL','\DLE','\DC1','\DC2','\DC3','\DC4','\NAK',
+                   '\SYN','\ETB','\CAN','\SUB','\ESC','\DEL']
 
 quotedQuote = do
     string "\\'"
     return '\''
 
 rule name action = (<?> name) $ lexeme $ action
+
+verbatimRule name action = (<?> name) $ action
 
 literalRule name action = (<?> name) $ postSpace $ action
 
@@ -223,8 +338,8 @@ tryChoice = choice . map try
 data Assoc                = AssocNone 
                           | AssocLeft
                           | AssocRight
-			  | AssocList
-			  | AssocChain
+                          | AssocList
+                          | AssocChain
                         
 data Operator t st a      = Infix (GenParser t st (a -> a -> a)) Assoc
                           | Prefix (GenParser t st (a -> a))
@@ -261,12 +376,12 @@ buildExpressionParser operators simpleExpr
               ambigiousLeft     = ambigious "left" lassocOp
               ambigiousNon      = ambigious "non" nassocOp 
 
-	      foldOp = foldr (.) id
+              foldOp = foldr (.) id
               
               termP = do
-		pres	<- many prefixOp
-                x	<- term
-                posts	<- many postfixOp
+                pres    <- many prefixOp
+                x       <- term
+                posts   <- many postfixOp
                 return $ foldOp posts $ foldOp pres x
               
               rassocP x  = do{ f <- rassocOp

@@ -14,6 +14,7 @@
 module AST where
 import Internals
 import Context
+import Rule
 
 type Ident = String
 
@@ -67,6 +68,7 @@ instance Value [VPair] where
 instance Value VSub where
     castV = VSub
     doCast (VSub b) = b
+    doCast (VList [VSub b]) = b -- XXX Wrong
     doCast v = error ("Cannot cast into VSub: " ++ (show v))
 
 instance Value VBool where
@@ -108,7 +110,10 @@ instance Value VRat where
     doCast (VInt i)     = i % 1
     doCast (VRat r)     = r
     doCast (VBool b)    = if b then 1 % 1 else 0 % 1
-    doCast x            = approxRational (vCast x :: VNum) 1
+    doCast (VList l)    = genericLength l
+    doCast (VArray (MkArray a))    = genericLength a
+    doCast (VHash (MkHash h))    = fromIntegral $ sizeFM h
+    doCast x            = toRational (vCast x :: VNum)
 
 instance Value VNum where
     castV = VNum
@@ -123,7 +128,7 @@ instance Value VNum where
     doCast (VList l)    = genericLength l
     doCast (VArray (MkArray a))    = genericLength a
     doCast (VHash (MkHash h))    = fromIntegral $ sizeFM h
-    doCast x            = error $ "cannot cast as Num: " ++ (show x)
+    doCast x            = 0/0 -- error $ "cannot cast as Num: " ++ (show x)
 
 instance Value VComplex where
     castV = VComplex
@@ -142,6 +147,7 @@ instance Value VStr where
     -- vCast (MVal v)      = vCast $ castV v
     vCast (VPair (k, v))= vCast k ++ "\t" ++ vCast v ++ "\n"
     vCast (VArray (MkArray l))     = unwords $ map vCast l
+    vCast (VSub s)      = "<" ++ show (subType s) ++ "(" ++ subName s ++ ")>"
     vCast x             = error $ "cannot cast as Str: " ++ (show x)
 
 showNum x
@@ -176,7 +182,7 @@ instance Value VList where
     vCast (VPair (k, v))   = [k, v]
     vCast (VRef v)      = vCast v
     -- vCast (MVal v)      = vCast $ castV v
-    vCast (VUndef)      = []
+    vCast (VUndef)      = [VUndef]
     vCast v             = [v]
 
 instance Value VHandle where
@@ -188,7 +194,9 @@ instance Value (Maybe a) where
     vCast VUndef        = Nothing
     vCast _             = Just undefined
 
-instance Value Int   where doCast = intCast
+instance Value Int   where
+    doCast = intCast
+    castV = VInt . fromIntegral
 instance Value Word  where doCast = intCast
 instance Value Word8 where doCast = intCast
 instance Value [Word8] where doCast = map (toEnum . ord) . vCast
@@ -259,9 +267,29 @@ data Val
     | VJunc     VJunc
     | VError    VStr Exp
     | VHandle   VHandle
-    | MVal    MVal
+    | MVal      MVal
     | VControl  VControl
     deriving (Show, Eq, Ord)
+
+valType VUndef          = "Any"
+valType (VRef v)        = valType v
+valType (VBool    _)    = "Bool"
+valType (VInt     _)    = "Int"
+valType (VRat     _)    = "Rat"
+valType (VNum     _)    = "Num"
+valType (VComplex _)    = "Complex"
+valType (VStr     _)    = "Str"
+valType (VList    _)    = "List"
+valType (VArray   _)    = "Array"
+valType (VHash    _)    = "Hash"
+valType (VPair    _)    = "Pair"
+valType (VSub     _)    = "Sub"
+valType (VBlock   _)    = "Block"
+valType (VJunc    _)    = "Junc"
+valType (VError _ _)    = "Error"
+valType (VHandle  _)    = "Handle"
+valType (MVal     _)    = "Var"
+valType (VControl _)    = "Control"
 
 type VBlock = Exp
 data VControl
@@ -329,12 +357,11 @@ data Exp
     | Syn String [Exp]
     | Sym Symbol
     | Prim ([Val] -> Eval Val)
---  | MVal MVal
     | Val Val
     | Var Var
     | Parens Exp
     | NonTerm SourcePos
-    | Parser (CharParser Env Exp)
+    | Statements [(Exp, SourcePos)]
     deriving (Show, Eq, Ord)
 
 instance Show (CharParser Env Exp) where
@@ -353,6 +380,12 @@ extract ((App n invs args), vs) = (App n invs' args', vs'')
     where
     (invs', vs')  = foldr extractExp ([], vs) invs
     (args', vs'') = foldr extractExp ([], vs') args
+extract ((Statements stmts), vs) = (Statements stmts', vs')
+    where
+    exps = map fst stmts
+    poss = map snd stmts
+    (exps', vs') = foldr extractExp ([], vs) exps
+    stmts' = exps' `zip` poss
 extract ((Syn n exps), vs) = (Syn n exps', vs')
     where
     (exps', vs') = foldr extractExp ([], vs) exps
@@ -397,12 +430,11 @@ defaultHashParam    = buildParam "" "*" "%_" (Val VUndef)
 defaultScalarParam  = buildParam "" "*" "$_" (Val VUndef)
 
 data Env = Env { envContext :: Cxt
-	       , envLValue  :: Bool
+	           , envLValue  :: Bool
                , envLexical :: Pad
                , envGlobal  :: IORef Pad
                , envClasses :: ClassTree
                , envEval    :: Exp -> Eval Val
-               , envCC      :: Val -> Eval Val
                , envCaller  :: Maybe Env
                , envBody    :: Exp
                , envDepth   :: Int

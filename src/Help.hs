@@ -1,7 +1,4 @@
-{-# OPTIONS -cpp #-}
-#define VERSION "6"
-#define DATE ""
-#include "config.h"
+{-# OPTIONS -fglasgow-exts -cpp #-}
 
 {-
     Online help and banner text.
@@ -12,7 +9,14 @@
     across so wide a Sea?
 -}
 
-module Help (printHelp, banner, versnum, version, copyright, disclaimer) where
+#define PUGS_VERSION "6"
+#define PUGS_DATE ""
+#define PUGS_SVN_REVISION "0"
+#include "config.h"
+#include "version.h"
+
+module Help (printHelp, banner, versnum, version, 
+             copyright, disclaimer, intro) where
 
 printHelp :: IO ()
 printHelp
@@ -28,10 +32,16 @@ printHelp
 -}
 
 name       = "Perl6 User's Golfing System"
-versnum    = VERSION
-date	   = DATE
-version    = name ++ ", version " ++ versnum ++ ", " ++ date
+versnum    = PUGS_VERSION
+date	   = PUGS_DATE
+version    = name ++ ", version " ++ versnum ++ ", " ++ date ++ revision
 copyright  = "Copyright 2005 by Autrijus Tang"
+revision
+    | rev <- show(PUGS_SVN_REVISION)
+    , rev /= "0"
+    = " (r" ++ rev ++ ")"
+    | otherwise
+    = ""
 disclaimer =
     "This software is distributed under the terms of the " ++
     "GNU Public Licence.\n" ++
@@ -42,17 +52,20 @@ versionFill n = fill ++ vstr
     where
     fill = replicate (n - vlen) ' '
     vlen = length vstr
-    vstr = "Version: " ++ versnum
+    vstr = "Version: " ++ versnum ++ revision
 
+banner :: IO ()
 banner = putStrLn $ unlines
     [ ".=====. __  __  ____   ___    _________________________________________"
     , "||   || ||  || ||  || ||__'   Pugs 6: Based on the Perl 6 Synopses     "
     , "||====' ||__|| ||__||  __||   " ++ copyright
     , "||      `===='  ___|| `==='   World Wide Web: http://autrijus.org/pugs "
     , "||             `===='         Report bugs to: autrijus@autrijus.org    "
-    , "==" ++ versionFill 27    ++ " ========================================="
-    , ""
-    , "Welcome to Pugs -- " ++ name
-    , "Type :h for help"
+    , "==" ++ versionFill 27 ++        " ====================================="
     ]
 
+intro :: IO ()
+intro = putStrLn $ unlines
+    [ "Welcome to Pugs -- " ++ name
+    , "Type :h for help"
+    ]

@@ -1,31 +1,100 @@
+#!/usr/bin/pugs
+
 use v6;
+require Test;
 
-say "1..10";
+=pod
 
-my %hash1 = ('key' => 'value');
-if (%hash1{'key'} eq 'value') { say "ok 1" } else { say "not ok 1" }
+Hash tests
 
-my %hash2;
-eval '%hash2 = (:one, :key<value>, :three(3))';
-if (%hash2{'one'} == 1) { say "ok 2" } else { say "not ok 2 # TODO colonpair" }
-if (%hash2{'key'} eq 'value') { say "ok 3" } else {
-    say "not ok 3 # TODO colonpair" 
-}
-if (%hash2{'three'} == 3) { say "ok 4" } else {
-    say "not ok 4 # TODO colonpair" 
-}
+=cut
 
-my $value;
-eval '$value = %hash1<key>';
-if ($value eq 'value') { say "ok 5" } else { say "not ok 5 # TODO %hash<>" }
+plan 34;
 
-my @slice1 = %hash2{"one", "three"};
-if (@slice1[0] == 1) { say "ok 6" } else { say "not ok 6 # TODO hash slice" }
-if (@slice1[1] == 3) { say "ok 7" } else { say "not ok 7 # TODO hash slice" }
+# basic lvalue assignment
+
+my %hash1; 
+%hash1{"one"} = 5; 
+is(%hash1{"one"}, 5, 'lvalue hash assignment works (w/ double quoted keys)');
+
+%hash1{'one'} = 4; 
+is(%hash1{'one'}, 4, 'lvalue hash re-assignment works (w/ single quoted keys)');
+
+eval '%hash1{two} = 2'; 
+todo_is(%hash1{"two"}, 2, 'lvalue hash assignment works (w/ un-quoted keys)');
+
+my %hash1; 
+%hash1<three> = 3; 
+todo_is(%hash1<tree>, 3, 'lvalue hash assignment works (w/ unquoted style <key>)');
+
+# basic hash creation w/ comma seperated key/values
+
+my %hash2 = ("one", 1);
+is(%hash2{"one"}, 1, 'comma seperated key/value hash creation works');
+is(%hash2<one>, 1, 'unquoted <key> fetching works');
+
+my %hash3 = ("one", 1, "two", 2);
+is(%hash3{"one"}, 1, 'comma seperated key/value hash creation works with more than one pair');
+is(%hash3{"two"}, 2, 'comma seperated key/value hash creation works with more than one pair');
+
+# basic hash creation w/ => seperated key/values (pairs?)
+
+my %hash4;
+# eval '%hash4 = ("key" => "value")';
+todo_is(%hash4{"key"}, 'value', '(key => value) seperated key/value has creation works');
+
+# hash slicing
+
+my %hash5 = ("one", 1, "two", 2, "three", 3);
+
+my @slice1 = %hash5{"one", "three"};
+is(+@slice1, 2, 'got the right amount of values from the %hash{} slice');
+is(@slice1[0], 1, '%hash{} slice successfull');
+is(@slice1[1], 3, '%hash{} slice successfull');
 
 my @slice2;
-@slice2 = eval '%hash2<three one>';
-if (@slice2[0] == 5123123) { say "not ok 8 # TODO (wtf?)" } else { say "ok 8" }
-if (@slice2[0] == 3) { say "ok 9" } else { say "not ok 9 # TODO %hash<>" }
-if (@slice2[1] == 1) { say "ok 10" } else { say "not ok 10 # TODO %hash<>" }
+eval '@slice2 = %hash5<three one>';
+is(+@slice2, 2, 'got the right amount of values from the %hash<> slice');
+is(@slice2[0], 3, '%hash<> slice was successful');
+is(@slice2[1], 1, '%hash<> slice was successful');
+
+# keys 
+
+my %hash6 = ("one", 1, "two", 2, "three", 3);
+
+my @keys1 = keys %hash6;
+is(+@keys1, 3, 'got the right number of keys');
+is(@keys1[0], 'one', 'got the right key');
+is(@keys1[1], 'three', 'got the right key');
+is(@keys1[2], 'two', 'got the right key');
+
+my @keys2 = %hash6.keys;
+is(+@keys2, 3, 'got the right number of keys');
+is(@keys2[0], 'one', 'got the right key');
+is(@keys2[1], 'three', 'got the right key');
+is(@keys2[2], 'two', 'got the right key');
+
+# values
+
+my %hash7 = ("one", 1, "two", 2, "three", 3);
+
+my @values1 = values %hash6;
+is(+@values1, 3, 'got the right number of values');
+is(@values1[0], 1, 'got the right values');
+is(@values1[1], 3, 'got the right values');
+is(@values1[2], 2, 'got the right values');
+
+my @values1 = %hash6.values;
+is(+@values1, 3, 'got the right number of values');
+is(@values1[0], 1, 'got the right values');
+is(@values1[1], 3, 'got the right values');
+is(@values1[2], 2, 'got the right values');
+
+# misc stuff ...
+
+my %hash8;
+eval '%hash8 = (:one, :key<value>, :three(3))';
+todo_is %hash8{'one'}, 1, 'colonpair :one';
+todo_is %hash8{'key'}, 'value', 'colonpair :key<value>';
+todo_is %hash8{'three'}, 3, 'colonpair :three(3)';
 

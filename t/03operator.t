@@ -1,13 +1,40 @@
 #!/usr/bin/pugs
 
 use v6;
-use PugsTest;
+require Test;
 
-say "1..1";
+plan 15;
+
 my $str1 = "foo";
 my $str2 = "bar";
 my $str3 = "foobar";
 my $str4 = $str1~$str2;
 
-#PugsTest.ok("$str3 eq $str4", "operator ~");
-if ($str3 eq $str4) {say "ok 1"} else {say "not ok 1"}
+is($str3, $str4, "~");
+
+my $bar = "";
+($str3 eq $str4) ?? $bar = 1 :: $bar = 0;
+
+ok($bar, "?? ::");
+
+my $five = 5;
+my $four = 4;
+my $wibble = 4;
+
+ok(!($five == $four), "== (false)");
+ok($wibble == $four, "== (true)");
+ok(!($wibble != $four), "== (false)");
+ok($five != $four, "!= (true)");
+
+ok($five == 5, "== (const on rhs)");
+ok(!($five != 5), "!= (const on rhs)");
+
+ok(5 == $five, "== (const on lhs)");
+ok(!(5 != $five), "!= (const on lhs)");
+
+ok($five == (2 + 3), "== (sum on rhs)");
+ok(!($five != (2 + 3)), "== (sum on rhs)");
+
+is(2 + 3, $five, "== (sum on lhs)");
+ok((2 + 3) == 5, "== (sum on lhs)");
+ok(!((2 + 3) != $five), "== (sum on lhs)");

@@ -1,14 +1,20 @@
+#!/usr/bin/pugs
+
 use v6;
+require Test;
 
-say "1..6";
+plan(7);
 
-my @push;
+my @foo;
 eval 'push @foo, 42';
-if (@push[0] == 42) { say "ok 1" } else { say "not ok 1 # TODO push" }
+todo_is(@foo[0], 42, "push @foo, 42 causes the empty list @foo to have a single element at index 0.");
+
 eval '@foo.push(24)';
-if (@push[0] == 42) { say "ok 2" } else { say "not ok 2 # TODO push" }
-if (@push[1] == 24) { say "ok 3" } else { say "not ok 3 # TODO push" }
+todo_is(@foo[0], 42, "@foo.push doesn't overwrite first element");
+todo_is(@foo[1], 24, "@foo.push appends an item");
+
 eval 'push @foo, 1, 2, 3';
-if (@push[2] == 1) { say "ok 4" } else { say "not ok 4 # TODO push" }
-if (@push[3] == 2) { say "ok 5" } else { say "not ok 5 # TODO push" }
-if (@push[4] == 3) { say "ok 6" } else { say "not ok 6 # TODO push" }
+is(@foo[2], 1, "@foo[2] == 1 after push");
+is(@foo[3], 2, "@foo[3] == 2 after push");
+is(@foo[4], 3, "@foo[4] == 3 after push");
+is(+@foo, 5, "after all the pushes, @foo is 5 elements long.");
