@@ -1,12 +1,10 @@
+#!/usr/bin/pugs
+
 use v6;
 
 require Test;
 
-
-
-
-plan 19;
-
+plan 20;
 
 =kwid
 
@@ -35,7 +33,7 @@ These tests test named parmaeters. L<S06/"Named parameters">
 # L<S06/"Named parameters" /marked by a \+/>
 sub simple_pos_params (+$x) { $x }
 
-todo_is(simple_pos_params( 'x' => 4 ), 4, "simple named param");
+is(simple_pos_params( 'x' => 4 ), 4, "simple named param");
 
 
 sub foo (+$x = 3) { $x }
@@ -43,7 +41,7 @@ sub foo (+$x = 3) { $x }
 is(foo(), 3, "not specifying named params that aren't mandatory works");
 is(foo(4), 4, "using a named as a positional works");
 
-todo_is(foo( 'x' => 5),4, "naming named param also works");
+is(foo( 'x' => 5), 5, "naming named param also works");
 
 
 
@@ -53,6 +51,7 @@ sub assign_based_on_positional ($x, +$y = $x) { $y }
 todo_is(eval 'assign_based_on_named_positional(5)', 5, "When we don't explicitly specify, we get the original value");
 todo_is(eval 'assign_based_on_named_positional(5,  "y"=> 2)', 2, "When we explicitly specify, we get our value");
 todo_is(eval 'assign_based_on_named_positional(5,  y => 2)', 2, "When we explicitly specify, we get our value");
+todo_is(eval 'my $var = "y"; assign_based_on_named_positional(5, $var => 2)', 2, "When we explicitly specify, we get our value");
 
 # L<S06/"Named parameters" /a \+\+ prefix.*?required/>
 sub mandatory (++$param) {
@@ -73,8 +72,8 @@ sub formalize($text, +$case, +$justify)  returns List {
 {
 my ($text,$case,$justify)  = formalize('title', case=>'upper');
 is($text,'title', "text param was positional");
-todo_is($justify, undef, "justification param was not given");
-todo_is($case, 'upper', "case param was named, and in justification param's position");
+is($justify, undef, "justification param was not given");
+is($case, 'upper', "case param was named, and in justification param's position");
 }
 
 
@@ -82,7 +81,7 @@ todo_is($case, 'upper', "case param was named, and in justification param's posi
 my ($text,$case,$justify)   = formalize('title', justify=>'left');
 is($text,'title', "text param was positional");
 is($justify, 'left', "justify param was named");
-todo_is($case, undef, "case was not given at all");
+is($case, undef, "case was not given at all");
 }
 
 {

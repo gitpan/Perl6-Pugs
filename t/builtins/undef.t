@@ -5,20 +5,14 @@ require Test;
 
 =kwid
 
-Basic "undef" tests
-
-=cut
-
-plan 61;
-
-=kwid
+"undef" tests
 
 This test file contains two sections: a port of the perl5 undef.t tests,
 and perl6-specific tests.
 
-First the perl5 parts.
-
 =cut
+
+plan 62;
 
 our $GLOBAL;
 
@@ -98,10 +92,12 @@ ok(!defined(undef), "undef is not defined");
 	sub a_sub { "møøse" }
 
 	ok(defined(&a_sub), "defined sub");
-	todo_ok(eval 'defined(%«$?PACKAGE\::»<&a_sub>)', "defined sub (symbol table)");
+	todo_ok(eval 'defined(%«$?PACKAGE\::»<&a_sub>)',
+			"defined sub (symbol table)");
 
-	is(eval 'defined(&a_subwoofer); 1', undef, "undefined sub");
-	todo_ok(eval '!defined(%«$?PACKAGE\::»<&a_subwoofer>)', "undefined sub (symbol table)");
+	todo_ok(eval '!defined(&a_subwoofer)', "undefined sub"); # unTODOme
+	todo_ok(eval '!defined(%«$?PACKAGE\::»<&a_subwoofer>)',
+			"undefined sub (symbol table)");
 }
 
 # TODO: find a read-only value to try and assign to, since we don't
@@ -129,20 +125,19 @@ Perl6-specific tests
 
 	my @ary = (<a b c d e>);
 	my $ary_r = @ary; # ref
-	is(ref($ary_r), "Array", "taking a ref");
+	isa_ok($ary_r, "Array");
 	ok(defined($ary_r), "array reference");
 	undef @ary;
 	ok(defined($ary_r), "undef array referent");
-	todo_is(eval '$ary_r.elems', 0, "dangling array reference") or diag $ary_r;
+	todo_is(+$ary_r, 0, "dangling array reference"); # unTODOme
 
 	my %hash = (1, 2, 3, 4);
 	my $hash_r = %hash;
-	is(ref($hash_r), "Hash", "taking a ref");
+	isa_ok($hash_r, "Hash");
 	ok(defined($hash_r), "hash reference");
 	undef %hash;
 	ok(defined($hash_r), "undef hash referent");
-	todo_is(eval '$hash_r.keys.elems', 0, "dangling hash reference") or
-		diag $hash_r;
+	todo_is(+$hash_r.keys, 0, "dangling hash reference"); # unTODOme
 }
 
 {
@@ -176,6 +171,7 @@ Perl6-specific tests
 
 # rules
 # TODO. refer to S05
+# L<<S05/"Hypothetical variables" /backtracks past the closure/>>
 
 {
 	# - unmatched alternative should bind to undef
@@ -230,19 +226,53 @@ Perl6-specific tests
 
 # subroutines
 {
-	# TODO: call me. refer to S06
-	# - a sub with optional args and named parameters which don't have
-	#   defaults specified, when called without values will yield undef
 	sub bar ($bar, ?$baz, +$quux) {
 		is($bar, "BAR", "defined param"); # sanity
+
+		# L<<S06/"Optional parameters" /Missing optional arguments/>>
 		ok(!defined($baz), "unspecified optional param");
+
+		# L<<S06/"Named parameters" /Named parameters are optional/>>
 		ok(!defined($quux), "unspecified optional param");
 	}
 
-	bar("BAR"); # not yet
+	bar("BAR");
 
 }
 
 # autoloading
-# TODO: write me, refer to S09
-# - autoloading
+# L<S10/Autoloading>
+
+todo_fail("FIXME parsefail (autoload tests)"); # unTODOme
+# Currently waiting on
+# - packages
+# - symtable hash
+# - autoloading itself
+
+#{
+#	package AutoMechanic {
+#		AUTOSCALAR    { \my $_scalar }
+#		AUTOARRAY     { \my @_array }
+#		AUTOHASH      { \my %_hash }
+#		AUTOSUB       { { "code" } }
+#		AUTOMETH      { { "code" } }
+#
+#		AUTOSCALARDEF { %::«'$' ~ $_» = "autoscalardef" }
+#		AUTOARRAYDEF  { %::«'@' ~ $_» = "autoarraydef".split(//) }
+#		AUTOHASHDEF   { %::«'%' ~ $_» = <autohashdef yes> }
+#		AUTOSUBDEF    { %::«'&' ~ $_» = { "autosubdef" } }
+#		AUTOMETHDEF   { %::«'&' ~ $_» = { "automethdef" } }
+#	}
+#
+#	is(ref $AutoMechanic::scalar0,    "Scalar", "autload - scalar");
+#	is(ref @AutoMechanic::array0,     "Array",  "autload - array");
+#	is(ref %AutoMechanic::hash,       "Hash",   "autload - hash");
+#	is(ref &AutoMechanic::sub0,       "Code",   "autload - sub");
+#	is(ref AutoMechanic.can("meth0"), "Code",   "autload - meth");
+#	
+#	is($AutoMechanic::scalar, "autoscalardef",            "autoloaddef - scalar");
+#	is(~@AutoMechanic::ary,   ~("autoarraydef".split(//), "autoloaddef - array");
+#	is(~%AutoMechanic::hash,  ~<autohashdef yes>,         "autoloaddef - hash");
+#	is(&AutoMechanic::sub.(), "autosubdef",               "autoloaddef - sub");
+#	is(AutoMechanic.meth(),   "automethdef",              "autoloaddef - method");
+#}

@@ -1,15 +1,47 @@
 #!/usr/bin/perl
 
+use strict;
 use Cwd;
 use Config;
 use FindBin;
 use File::Copy;
 use File::Basename;
 
-if (!@ARGV) {
-    die "Usage: $0 [ source[.p6] | -e oneliner ]\n";
+if (!@ARGV || grep {$_ eq '--help'} @ARGV) {
+    die "Usage: $0 [--run] [--pugs|--haskell|--parrot] [ source[.p6] | -e oneliner ]\n";
 }
 
+my $run;
+
+if ($ARGV[0] =~ /^(?:(-)r|(--)run)(.*)$/) {
+    $run = 1;
+    if ($3) {
+        no warnings;
+        $ARGV[0] = "$1$2$3";
+    }
+    else {
+        shift @ARGV;
+    }
+}
+
+
+my $backend = 'Pugs';
+if ($ARGV[0] =~ /^(?:-H|--haskell)$/) {
+    $backend = 'Haskell';
+    shift @ARGV;
+}
+elsif ($ARGV[0] =~ /^(?:-P|--parrot)$/) {
+    $backend = 'Parrot';
+    shift @ARGV;
+}
+elsif ($ARGV[0] =~ /^--pugs$/) {
+    $backend = 'Pugs';
+    shift @ARGV;
+}
+
+print "*** Using the '$backend' backend.\n" if !$run;
+
+my $ghc_exe = $ENV{GHC} || 'ghc';
 my $ghc_version = ghc_version();
 my $base = cwd();
 if (!-e "src/Main.hs") {
@@ -19,55 +51,158 @@ if (!-e "src/Main.hs") {
     }
 }
 
-$ENV{PATH} .= $Config{path_sep} . $base;
+$ENV{PATH} = $base . $Config{path_sep} . $ENV{PATH};
 
 my $out = 'a';
 if (@ARGV and -e $ARGV[0]) {
     $out = basename($ARGV[0]);
     $out =~ s{\..*}{};
 }
-$out .= ($^O eq 'MSWin32') ? ".exe" : ".out";
+
+if ($backend eq 'Parrot') {
+    $out .= ".imc";
+}
+else {
+    $out .= ($^O eq 'MSWin32') ? ".exe" : ".out";
+}
 
 unlink "dump.ast";
-
-system("pugs", -C => @ARGV);
+system("pugs", "-C$backend" => @ARGV);
 exit 1 unless -e "dump.ast";
 
-copy ("$base/src/Main.hs" => "$base/src/MainCC.hs");
+if ($backend eq 'Parrot') {
+    rename "dump.ast" => $out;
+    chmod 0755, $out;
+}
+else {
+    rename "dump.ast" => "$base/src/MainCC.hs";
 
-open FH, '>>', "$base/src/MainCC.hs";
-open AST, "dump.ast" or die $!;
-print FH "\nmainCC = runAST \$ ";
-print FH <AST>;
-close AST;
-close FH;
+    my @ghc_flags = (
+        "-L$base", "-L$base/src", "-L$base/src/pcre",
+        "-I$base", "-I$base/src", "-I$base/src/pcre",
+        "-i$base", "-i$base/src", "-i$base/src/pcre",
+        qw(-static -Wall -fno-warn-unused-imports -fno-warn-unused-binds -fno-warn-missing-signatures -fno-warn-name-shadowing),
+    );
 
-unlink "dump.ast";
+    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /perl5/i) {
+        push @ghc_flags, ("-I$Config{archlib}/CORE", "-L$Config{archlib}/CORE", "-i$Config{archlib}/CORE", "-lperl");
+    }
 
-my @ghc_flags = (
-    "-L$base", "-L$base/src", "-L$base/src/pcre",
-    "-I$base", "-I$base/src", "-I$base/src/pcre",
-    "-i$base", "-i$base/src", "-i$base/src/pcre",
-    qw(-static -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing),
-);
+    if ($ghc_version ge '6.4') {
+        push @ghc_flags, qw(-fno-warn-deprecations -fno-warn-orphans);
+    }
 
-if ($ghc_version ge '6.4') {
-    push @ghc_flags, qw(-fno-warn-deprecations -fno-warn-orphans);
+    push @ghc_flags, "$base/src/pcre/pcre.o";
+    push @ghc_flags, "$base/src/UnicodeC.o";
+
+    (system($ghc_exe, "-v0", "-o", $out, "--make", "-main-is", "MainCC.mainCC", @ghc_flags, "$base/src/MainCC.hs") == 0) or die $!;
+    unlink "$base/src/MainCC.hs";
 }
 
-if ($Config{_exe} ne '.exe') {
-    push @ghc_flags, "$base/src/pcre/pcre$Config{_o}";
-}
+die unless -e $out;
 
-system("ghc", "-v0", "-o", $out, "--make", "-main-is", "mainCC", @ghc_flags, "$base/src/MainCC.hs");
-unlink "$base/src/MainCC.hs";
-print "Generated output: $out\n";
+if ($run) {
+    if ($backend eq 'Parrot' and !-x '/usr/bin/env') {
+        system("parrot" => $out) == 0 or die $!;
+    }
+    else {
+        system($out) == 0 or die $!;
+    }
+}
+else {
+    print "*** Generated output: $out\n";
+}
 
 sub ghc_version {
-    my $ghcver = `ghc --version`;
+    my $ghcver = `$ghc_exe --version`;
     ($ghcver =~ /Glasgow.*\bversion\s*(\S+)/s) or die << '.';
 *** Cannot find a runnable 'ghc' from path.
 *** Please install GHC from http://haskell.org/ghc/.
 .
     return $1;
 }
+
+1;
+
+=pod
+
+=head1 NAME
+
+pugscc - Pugs Compiler Compiler
+
+=head1 SYNOPSIS
+
+    % pugscc --runpugs -e "'Hello, Parrot'.say"
+    % pugscc --runparrot -e "'Hello, Parrot'.say"
+    % pugscc --runhaskell -e "'Hello, Haskell'.say"
+
+=head1 DESCRIPTION
+               
+The 'pugscc' script allows you to create an exectuable image from a
+Perl6 script, much like 'perlcc' does for Perl5. 'pugscc' is 
+currently in the very early stages (proof-of-concept), and all 
+interested hackers are welcome to come join in the fun.
+
+=head1 BACKENDS
+
+'pugscc' is currently in a very early stage, but will eventually 
+support a number of different backends. Currently the default (and
+only fully working) backend is the 'Pugs' backend which will create
+an executable with an embedded pugs interpreter. Experimental 
+support also currently exists for a 'Haskell' and 'Parrot' backend, 
+with plans for a 'Ponie' and 'Perl5' backend as well (yes, this 
+means you can run perl5 code with Pugs too).
+
+=head1 HOW CAN YOU HELP
+
+The main engine for 'pugscc' is found in the src/Compile.hs file, and 
+the backends are located within src/Compile/. 
+
+** Autrijus can you write something here? **
+
+=head1 DEPENDENCIES
+
+Here is a list of the various dependencies for each backend, and 
+links to where they can be downloaded. 
+
+=over 4
+
+=item Pugs - requires Pugs ;-)
+
+=item Parrot - requires Parrot
+
+L<http://search.cpan.org/~ltoetsch/parrot/>
+L<http://www.parrotcode.org/>
+
+=item Haskell - GHC (which is needed for Pugs)
+
+=item Perl5 - requires perl5
+
+L<http://www.perl.org>
+
+=item Ponie - requires Ponie 
+
+L<http://opensource.fotango.com/software/ponie/downloads>
+L<http://search.cpan.org/~abergman/ponie/>
+L<http://www.poniecode.org/>
+
+=back
+
+=head1 AUTHORS
+
+Stevan Little E<lt>stevan@iinteractive.comE<gt>.
+
+=head1 COPYRIGHT
+
+Copyright 2005 by Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>.
+
+This code is free software; you can redistribute it and/or modify it under
+the terms of either:
+
+    a) the GNU General Public License, version 2, or
+    b) the Artistic License, version 2.0beta5.
+
+For the full license text, please see the F<GPL-2> and F<Artistic-2> files
+under the F<LICENSE> directory in the Pugs distribution.
+
+=cut

@@ -9,7 +9,7 @@ Hash tests
 
 =cut
 
-plan 40;
+plan 49;
 
 # basic lvalue assignment
 
@@ -29,7 +29,7 @@ is($hash1{'1st'}, 4, 'lvalue hash re-assignment works (w/ single quoted keys)');
 # todo_is($hash1{"2nd"}, 2, 'lvalue hash assignment works (w/ un-quoted keys)');
 
 $hash1<3rd> = 3; 
-todo_is($hash1<3rd>, 3, 'lvalue hash assignment works (w/ unquoted style <key>)');
+is($hash1<3rd>, 3, 'lvalue hash assignment works (w/ unquoted style <key>)');
 
 # basic hash creation w/ comma seperated key/values
 
@@ -62,12 +62,12 @@ is(@slice2[1], 1, '%hash<> slice was successful');
 # slice assignment
 
 eval '$hash5{"1st", "3rd"} = (5, 10)';
-todo_is($hash5<1st>, 5, 'value was changed successfully with slice assignment');
-todo_is($hash5<3rd>, 10, 'value was changed successfully with slice assignment');
+todo_is($hash5<1st>, 5, 'value was changed successfully with slice assignment'); # unTODOme
+todo_is($hash5<3rd>, 10, 'value was changed successfully with slice assignment'); # unTODOme
 
 eval '$hash5<1st 3rd> = [3, 1]';
-todo_is($hash5<1st>, 3, 'value was changed successfully with slice assignment');
-todo_is($hash5<3rd>, 1, 'value was changed successfully with slice assignment');
+todo_is($hash5<1st>, 3, 'value was changed successfully with slice assignment'); # unTODOme
+todo_is($hash5<3rd>, 1, 'value was changed successfully with slice assignment'); # unTODOme
 
 # keys 
 
@@ -103,3 +103,20 @@ is(@values1[0], 1, 'got the right values');
 is(@values1[1], 2, 'got the right values');
 is(@values1[2], 3, 'got the right values');
 
+# hashref assignment using {}
+# L<S06/"Anonymous hashes vs blocks" /"So you may use sub or hash or pair to disambiguate:">
+my $hash8_a = { a => 1, b => 2 };             todo_isa_ok $hash8_a, "Hash";
+my $hash8_b = { a => 1, "b", 2 };             todo_isa_ok $hash8_b, "Hash";
+my $hash8_c = eval 'hash(a => 1, "b", 2)';    todo_isa_ok $hash8_c, "Hash";
+my $hash8_d = eval 'hash a => 1, "b", 2';     todo_isa_ok $hash8_d, "Hash";
+my $hash8_e = eval '{ pair "a", 1, "b", 2 }'; todo_isa_ok $hash8_e, "Hash";
+
+# recursive hash
+my %hash9 = (val => 42);
+%hash9{"ref"} = \%hash9;
+isa_ok %hash9,        "Hash";
+isa_ok %hash9{"ref"}, "Hash";
+todo_fail("FIXME parsefail");
+#todo_is %hash9{"ref"}{"val"},          42, "access to recursive hash (1)";
+todo_fail("FIXME parsefail");
+#todo_is %hash9{"ref"}.{"ref"}.{"val"}, 42, "access to recursive hash (2)";

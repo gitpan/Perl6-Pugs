@@ -1,4 +1,3 @@
-#line 1 "inc/Module/Install.pm - /Users/ingy/local/lib/perl5/site_perl/5.8.6/Module/Install.pm"
 package Module::Install;
 $VERSION = '0.36';
 use FindBin;
@@ -22,13 +21,12 @@ use File::Path ();
 @inc::Module::Install::ISA = 'Module::Install';
 *inc::Module::Install::VERSION = *VERSION;
 
-#line 129
-
 sub import {
     my $class = shift;
     my $self = $class->new(@_);
 
     if (not -f $self->{file}) {
+        die "Pugs build should not get here";
         require "$self->{path}/$self->{dispatch}.pm";
         File::Path::mkpath("$self->{prefix}/$self->{author}");
         $self->{admin} = 
@@ -44,8 +42,6 @@ sub import {
     delete $INC{"$self->{file}"};
     delete $INC{"$self->{path}.pm"};
 }
-
-#line 156
 
 sub autoload {
     my $self = shift;
@@ -65,10 +61,13 @@ sub autoload {
     };
 }
 
-#line 181
-
+use Cwd qw(cwd abs_path);
 sub new {
     my ($class, %args) = @_;
+
+    # ignore the prefix on extension modules built from top level.
+    delete $args{prefix}
+      unless Cwd::cwd() eq $FindBin::Bin;
 
     return $args{_self} if $args{_self};
 
@@ -78,7 +77,7 @@ sub new {
     $args{bundle}   ||= 'inc/BUNDLES';
     $args{base}     ||= $FindBin::Bin;
 
-    $class =~ s/^\Q$args{prefix}\E:://;
+    $class =~ s/^inc:://;
     $args{name}     ||= $class;
     $args{version}  ||= $class->VERSION;
 
@@ -91,8 +90,6 @@ sub new {
     bless(\%args, $class);
 }
 
-#line 210
-
 sub call {
     my $self   = shift;
     my $method = shift;
@@ -101,8 +98,6 @@ sub call {
     unshift @_, $obj;
     goto &{$obj->can($method)};
 }
-
-#line 225
 
 sub load {
     my ($self, $method) = @_;
@@ -127,8 +122,6 @@ END
     $obj;
 }
 
-#line 255
-
 sub load_extensions {
     my ($self, $path, $top_obj) = @_;
     $path = "$self->{base}/$path";
@@ -146,8 +139,6 @@ sub load_extensions {
         push @{$self->{extensions}}, $pkg->new( _top => $top_obj );
     }
 }
-
-#line 279
 
 sub find_extensions {
     my ($self, $path) = @_;
@@ -169,5 +160,3 @@ sub find_extensions {
 1;
 
 __END__
-
-#line 617

@@ -17,6 +17,7 @@ module Internals (
     module UTF8,
     module Unicode,
     module Cont,
+    module Embed,
     module Posix,
     module RRegex,
     module RRegex.Syntax,
@@ -46,7 +47,7 @@ module Internals (
     module Data.Tree,
     module Data.Maybe,
     module Data.Complex,
-    module Data.FiniteMap,
+    module Internals.Map,
     module Data.IORef,
     module Debug.Trace,
     internalError,
@@ -56,9 +57,11 @@ module Internals (
     encodeUTF8,
 ) where
 
+import Internals.Map
 import UTF8
 import Unicode
 import Cont
+import Embed
 import Posix
 import RRegex
 import RRegex.Syntax
@@ -98,7 +101,6 @@ import Data.Set (
     )
 import Data.Ratio
 import Data.Complex
-import Data.FiniteMap
 import Data.Tree
 import Data.IORef
 import Debug.Trace
@@ -118,7 +120,7 @@ instance Show (IORef (FiniteMap String String)) where
 
 internalError :: String -> a
 internalError s = error $ 
-    "Internal error: " ++ s ++ " please file a bug report."
+    "Internal error:\n    " ++ s ++ "\nPlease file a bug report."
 
 split :: (Eq a) => [a] -> [a] -> [[a]]
 split []  _   = internalError "splitting by an empty list"

@@ -67,16 +67,16 @@ instance Value VHash where
     -- vCast VUndef = MkHash emptyFM
     vCast v = MkHash $ vCast v
 
-instance Value (FiniteMap Val Val) where
+instance Value (FiniteMap VStr Val) where
     vCast (VHash (MkHash h)) = h
     -- vCast VUndef = emptyFM
-    vCast (VPair p) = listToFM [p]
-    vCast x = listToFM $ vCast x
+    vCast (VPair (k, v)) = listToFM [(vCast k, v)]
+    vCast x = listToFM [ (vCast k, v) | (k, v) <- vCast x ]
 
 instance Value [VPair] where
     -- vCast VUndef = []
     vCast (VRef v)      = vCast v
-    vCast (VHash (MkHash h)) = fmToList h
+    vCast (VHash (MkHash h)) = [ (VStr k, v) | (k, v) <- fmToList h ]
     vCast (VPair p) = [p]
     vCast (VList vs) =
         let fromList [] = []
@@ -175,9 +175,9 @@ instance Value VStr where
         return $ unlines ls
         where
         strPair (k, v) = do
-            k' <- fromMVal k
+            -- k' <- fromMVal k
             v' <- fromMVal v
-            return $ k' ++ "\t" ++ v'
+            return $ k ++ "\t" ++ v'
     fromVal v = fromVal' v
     vCast VUndef        = ""
     vCast (VStr s)      = s
@@ -190,7 +190,8 @@ instance Value VStr where
     -- vCast (MVal v)      = vCast $ castV v
     vCast (VPair (k, v))= vCast k ++ "\t" ++ vCast v ++ "\n"
     vCast (VArray (MkArray l))   = unwords $ map vCast l
-    vCast (VHash (MkHash h))     = unlines $ map (\(k, v) -> (vCast k ++ "\t" ++ vCast v)) $ fmToList h
+    vCast (VHash (MkHash h))     = unlines $
+        map (\(k, v) -> (k ++ "\t" ++ vCast v)) $ fmToList h
     vCast (VSub s)      = "<" ++ show (subType s) ++ "(" ++ subName s ++ ")>"
     vCast (VJunc j)     = show j
     vCast x             = error $ "cannot cast as Str: " ++ (show x)
@@ -228,7 +229,7 @@ instance Value VList where
     castV = VList
     vCast (VList l)     = l
     vCast (VArray (MkArray l)) = l
-    vCast (VHash (MkHash h)) = map VPair $ fmToList h
+    vCast (VHash (MkHash h)) = [ VPair (VStr k, v) | (k, v) <- fmToList h ]
     vCast (VPair (k, v))   = [k, v]
     vCast (VRef v)      = vCast v
     -- vCast (MVal v)      = vCast $ castV v
@@ -294,12 +295,17 @@ type VNum  = Double
 type VComplex = Complex VNum
 type VStr  = String
 type VList = [Val]
-type VRule = Regex
+type VSubst = (VRule, Exp)
 type VHandle = Handle
 type MVal = IORef Val
 newtype VArray = MkArray [Val] deriving (Show, Eq, Ord)
-newtype VHash  = MkHash (FiniteMap Val Val) deriving (Show, Eq, Ord)
+newtype VHash  = MkHash (FiniteMap VStr Val) deriving (Show, Eq, Ord)
 newtype VThunk = MkThunk (Eval Val)
+data VRule     = MkRule
+    { rxRegex     :: Regex
+    , rxGlobal    :: Bool
+    }
+    deriving (Show, Eq, Ord)
 
 type VPair = (Val, Val)
 
@@ -322,6 +328,7 @@ data Val
     | VError    VStr Exp
     | VHandle   VHandle
     | VRule     VRule
+    | VSubst    VSubst
     | MVal      MVal
     | VControl  VControl
     | VThunk    VThunk
@@ -349,6 +356,7 @@ valType (MVal     _)    = "Var"
 valType (VControl _)    = "Control"
 valType (VThunk   _)    = "Thunk"
 valType (VRule    _)    = "Rule"
+valType (VSubst   _)    = "Subst"
 
 type VBlock = Exp
 data VControl
@@ -395,6 +403,7 @@ data Param = Param
     deriving (Show, Eq, Ord)
 
 type Params = [Param]
+type Bindings = [(Param, Exp)]
 
 data VSub = Sub
     { isMulti       :: Bool
@@ -403,13 +412,13 @@ data VSub = Sub
     , subPad        :: Pad
     , subAssoc      :: String
     , subParams     :: Params
+    , subBindings   :: Bindings
     , subReturns    :: Cxt
     , subFun        :: Exp
     }
     deriving (Show, Eq, Ord)
 
 instance Ord VComplex where {- ... -}
-instance (Ord a, Ord b) => Ord (FiniteMap a b)
 instance Ord MVal where
     compare _ _ = EQ -- compare (castV x) (castV y)
 instance Show MVal where
@@ -575,6 +584,7 @@ retError str exp = do
 
 #if __GLASGOW_HASKELL__ <= 602
 
+instance (Ord a, Ord b) => Ord (FiniteMap a b)
 instance (Show a, Show b) => Show (FiniteMap a b) where
     show fm = show (fmToList fm)
 instance (Ord a) => Ord (Set a) where
@@ -667,3 +677,9 @@ naturalOrRat  = (<?> "number") $ do
             ; let n = foldl (\x d -> base*x + toInteger (digitToInt d)) 0 digits
             ; seq n (return n)
             }          
+
+evalExp :: Exp -> Eval Val
+evalExp exp = do
+    evl <- asks envEval
+    evl exp
+

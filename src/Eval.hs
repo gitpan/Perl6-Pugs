@@ -59,11 +59,13 @@ debug key fun str a = do
 
 evaluateMain :: Exp -> Eval Val
 evaluateMain exp = do
-    val     <- evaluate exp
+    val     <- resetT $ evaluate exp
     endAV   <- evalVar "@*END"
     subs    <- readMVal endAV
     enterContext "Void" $ do
-        mapM_ evalExp [ Syn "()" [Val sub, Syn "invs" [], Syn "args" []] | sub <- vCast subs ]
+        mapM_ evalExp [ Syn "()" [Val sub, Syn "invs" [], Syn "args" []]
+                      | sub <- vCast subs
+                      ]
     return val
 
 evaluate :: Exp -> Eval Val
@@ -99,11 +101,6 @@ evaluate exp = do
     case val of
         VError s e  -> retError s e
         _           -> return val
-
-evalExp :: Exp -> Eval Val
-evalExp exp = do
-    evl <- asks envEval
-    evl exp
 
 evalSym :: Symbol -> Eval (String, Val)
 evalSym (SymVal _ name val) =
@@ -206,6 +203,7 @@ posSyms pos = [ SymVal SMy n v | (n, v) <- syms ]
         , ("$?POSITION", castV $ pretty pos)
         ]
 
+evalVar :: Ident -> ContT Val (ReaderT Env IO) Val
 evalVar name = do
     env <- ask
     v <- findVar env name
@@ -381,7 +379,7 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
                 indexVal  <- readMVal indexMVal
                 val'      <- enterEvalContext "Scalar" exp
                 valScalar <- newMVal val'
-                let hash = addToFM fm indexVal valScalar
+                let hash = addToFM fm (vCast indexVal) valScalar
                     fm = case hashVal of
                             VUndef  -> emptyFM -- autovivification
                             _       -> vCast hashVal
@@ -441,7 +439,7 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
         hashVal  <- enterEvalContext "Hash" listExp
         hash    <- readMVal hashVal
         cls     <- asks envClasses
-        let slice = map (lookupWithDefaultFM (vCast hash) VUndef) ((map vCast $ vCast range) :: [Val])
+        let slice = map (lookupWithDefaultFM (vCast hash) VUndef) ((map vCast $ vCast range) :: [VStr])
         if isaType cls "Scalar" cxt
             then retVal $ last (VUndef:slice)
             else retVal $ VList slice
@@ -458,10 +456,23 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
         -- ignore val
         retVal val
     "rx" -> do
-        let [exp] = exps
+        let [exp, Val (VBool g)] = exps
         val     <- enterEvalContext "Str" exp
         str     <- fromVal val
-        retVal $ VRule $ mkRegex $ encodeUTF8 str
+        retVal $ VRule $ MkRule
+            { rxRegex  = mkRegex $ encodeUTF8 str
+            , rxGlobal = g
+            }
+    "subst" -> do
+        let [exp, g, subst] = exps
+        (VRule rx)  <- reduce env (Syn "rx" [exp, g])
+        retVal $ VSubst (rx, subst)
+    "inline" -> do
+        retVal VUndef
+    "module" -> do
+        retVal VUndef
+    "noop" ->
+        retVal VUndef
     syn | last syn == '=' -> do
         let [lhs, exp] = exps
             op = "&infix:" ++ init syn
@@ -520,6 +531,14 @@ reduce _ (App "&goto" (subExp:invs) args) = do
            , envLValue = envLValue caller
            }
 
+-- XXX absolutely evil bloody hack for "assuming"
+reduce _ (App "&assuming" (subExp:invs) args) = do
+    vsub <- enterEvalContext "Code" subExp
+    sub <- fromVal vsub
+    case bindSomeParams sub invs args of
+        Left errMsg      -> retError errMsg (Val VUndef)
+        Right curriedSub -> retVal $ castV $ curriedSub
+        
 
 reduce Env{ envClasses = cls, envContext = cxt, envLexical = lex, envGlobal = glob } exp@(App name invs args) = do
     syms    <- liftIO $ readIORef glob
@@ -602,7 +621,7 @@ reduce Env{ envClasses = cls, envContext = cxt, envLexical = lex, envGlobal = gl
         let invocants = filter isInvocant prms
         let prms' = if null invocants then prms else invocants
         let distance = (deltaFromCxt ret : map (deltaFromScalar . paramContext) prms')
-        let bound = either (const False) (const True) $ bindParams prms invs args
+        let bound = either (const False) (const True) $ bindParams sub invs args
         return $ Just
             ( (isGlobal, subT, isMulti sub, bound, distance)
             , fromJust fun
@@ -647,12 +666,12 @@ apply sub invs args = do
 -- XXX - faking application of lexical contexts
 -- XXX - what about defaulting that depends on a junction?
 doApply :: Env -> VSub -> [Exp] -> [Exp] -> Eval Val
-doApply Env{ envClasses = cls } sub@Sub{ subParams = prms, subFun = fun, subType = typ } invs args =
-    case bindParams prms invs args of
+doApply Env{ envClasses = cls } sub@Sub{ subFun = fun, subType = typ } invs args =
+    case bindParams sub invs args of
         Left errMsg     -> retError errMsg (Val VUndef)
-        Right bindings  -> do
+        Right sub  -> do
             enterScope $ do
-                (pad, bound) <- doBind [] bindings
+                (pad, bound) <- doBind [] (subBindings sub)
                 -- trace (show bound) $ return ()
                 val <- local fixEnv $ enterLex pad $ do
                     (`juncApply` bound) $ \realBound -> do

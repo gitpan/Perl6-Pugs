@@ -8,14 +8,9 @@ use inc::Module::Install;
 my $pugs = "pugs$Config{_exe}";
 my $version_h = "src/pugs_version.h";
 my $config_h = "src/pugs_config.h";
-my @srcdirs = ("src", grep(-d, glob "src/*"));
+my @srcdirs = ("src", grep(-d, glob "src/*"), grep(-d, glob "src/*/*"));
 
 deny_cygwin     ();
-my ($ghc, $ghc_version) = assert_ghc();
-if ($Config{_exe} eq '.exe' and $ghc_version lt "6.4") {
-    die "*** Sorry, we require GHC 6.4 on Win32 now.\n" .
-	"*** Please download it from http://haskell.org/ghc/download.html\n";
-}
 
 name            ('Perl6-Pugs');
 version_from    ('lib/Perl6/Pugs.pm');
@@ -24,12 +19,15 @@ author          ('Autrijus Tang <autrijus@autrijus.org>');
 license         ('perl');
 install_script  ($pugs);
 install_script  (glob('script/*'));
-build_requires  ('ExtUtils::MakeMaker' => 6.17);
+build_requires  ('ExtUtils::MakeMaker' => 6.15);
 include         ('Module::Install::Makefile::Name');
 include         ('Module::Install::Makefile::Version');
-build_subdirs   (map fixpaths($_), grep -e "$_/Makefile.PL", glob("ext/*"));
+build_subdirs   (map fixpaths($_), grep {
+                   -f "$_/Makefile.PL" && not -l "$_/Makefile.PL"
+                 } glob("ext/*")
+                );
 makemaker_args  (
-    test => { TESTS => join ' ', (glob("t/*.t"), glob("t/*/*.t")) },
+    test => { TESTS => join ' ', "t/*.t", "t/*/*.t", "t/*/*/*.t" },
     MAN1PODS => {},
 );
 clean_files     (map fixpaths($_),
@@ -39,30 +37,26 @@ clean_files     (map fixpaths($_),
     map {("$_/*.hi", "$_/*.o*")} @srcdirs
 );
 
-setup_perl6_install();
 set_postamble   ();
 no_index        (directory => 'inc', 'examples');
-WritePugs       (sign => 1);
+sign            (1);
+WritePugs       (6);
 
 ################################################################################
 sub set_postamble {
-    my @srcfiles = map glob("$_/*.*hs"), @srcdirs;
+    my @srcfiles = grep !/MainCC/, map glob("$_/*.*hs"), @srcdirs;
 
     # turning off unused imports and deprecations for GHC6.4.
-    my $ghc_flags = "-L. -Lsrc -Lsrc/pcre -I. -Isrc -Isrc/pcre -i. -isrc -isrc/pcre -static -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing";
-    if ($ghc_version ge '6.4') {
-        $ghc_flags .= " -fno-warn-deprecations -fno-warn-orphans";
-    }
+    my ($ghc, $ghc_version, $ghc_flags) = assert_ghc();
     my $ghc_output = "-o pugs$Config{_exe} src/Main.hs";
-    my @prereqs = ($config_h, qw( src/UnicodeC.c src/UnicodeC.h ));
 
-    if ($Config{_exe} ne '.exe') {
-        my $pcre = "src/pcre/pcre$Config{_o}";
-        unlink "pcre$Config{_o}";
-        symlink $pcre => "pcre$Config{_o}";
-        $ghc_output .= " $pcre";
-        push @prereqs, $pcre;
-    }
+    my $pcre = "src/pcre/pcre.o";
+    my $pcre_c = "src/pcre/pcre.c";
+    my $unicode = "src/UnicodeC.o";
+    my $unicode_c = "src/UnicodeC.c";
+
+    my @prereqs = ($config_h, $pcre, $unicode);
+    $ghc_output .= " $pcre $unicode";
 
     postamble(fixpaths(<< "."));
 $config_h : lib/Perl6/Pugs.pm util/config_h.pl
@@ -73,6 +67,12 @@ $version_h : .svn/entries util/version_h.pl
 
 .svn/entries :
 	\$(NOOP)
+
+$pcre : $pcre_c
+	$ghc -no-link -no-hs-main -O -o $pcre $pcre_c
+
+$unicode : $unicode_c
+	$ghc -no-link -no-hs-main -O -o $unicode $unicode_c
 
 src/Config.hs : util/PugsConfig.pm
 	\$(PERL) -Iutil -MPugsConfig -e "PugsConfig->write_config_module" > src/Config.hs
@@ -86,8 +86,13 @@ optimized :: src/Config.hs @srcfiles $version_h @prereqs
 $pugs : src/Config.hs @srcfiles $version_h @prereqs
 	$ghc --make $ghc_flags $ghc_output
 
-tags :
-	hasktags -c src
+ghci ::
+	$ghc --interactive $ghc_flags $ghc_output
+
+tags : @srcfiles
+	hasktags -c @srcfiles
+	sort tags > tags.tmp
+	mv tags.tmp tags
 
 INST6_ARCHLIB = 'blib6/arch'
 INST6_SCRIPT = 'blib6/script'

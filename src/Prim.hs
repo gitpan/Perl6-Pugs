@@ -3,12 +3,10 @@
 {-
     Primitive operators.
 
-    Learn now the lore of Living Creatures!
-    First name the four, the free peoples:
-    Eldest of all, the elf-children;
-    Dwarf the delver, dark are his houses;
-    Ent the earthborn, old as mountains;
-    Man the mortal, master of horses...
+    There hammer on the anvil smote,
+    There chisel clove, and graver wrote;
+    There forged was blade, and bound was hilt;
+    The delver mined, the mason built...
 -}
 
 module Prim where
@@ -17,6 +15,7 @@ import Junc
 import AST
 import Pretty
 import Parser
+import External
 
 op0 :: Ident -> [Val] -> Eval Val
 -- op0 ","  = return . VList . concatMap vCast
@@ -37,6 +36,7 @@ op0 "¥" = (>>= return . VList . concat . transpose) . mapM fromVal
 op0 "Y" = op0 "¥"
 op0 other = \x -> return $ VError ("unimplemented listOp: " ++ other) (App other (map Val x) [])
 
+retEmpty :: ContT Val (ReaderT Env IO) Val
 retEmpty = do
     cxt <- asks envContext
     return $ case cxt of
@@ -72,6 +72,10 @@ op1 "undef" = \mv -> do
     return VUndef
 op1 "+"    = return . op1Numeric id
 op1 "abs"  = return . op1Numeric abs
+op1 "atan2"= op1Floating atan
+op1 "cos"  = op1Floating cos
+op1 "sin"  = op1Floating sin
+op1 "sqrt" = op1Floating sqrt
 op1 "post:++" = \mv -> do
     val <- readMVal mv
     ref <- fromVal mv
@@ -117,6 +121,10 @@ op1 "all"  = return . opJuncAll . vCast
 op1 "one"  = return . opJuncOne . vCast
 op1 "none" = return . VJunc . Junc JNone emptySet . mkSet . vCast
 op1 "perl" = return . VStr . (pretty :: Val -> VStr)
+op1 "require_haskell" = \v -> do
+    name    <- fromVal v
+    externRequire "Haskell" name
+    return $ VBool True
 op1 "require" = \v -> do
     fileVal <- readMVal v
     -- XXX - assuming a flat array
@@ -137,6 +145,7 @@ op1 "require" = \v -> do
                 str <- liftIO $ readFile pathName
                 opEval True pathName str
 op1 "eval" = opEval False "<eval>" . vCast
+op1 "eval_perl5" = boolIO evalPerl5
 op1 "defined" = \v -> do
     v <- readMVal v
     return . VBool $ case v of
@@ -173,6 +182,8 @@ op1 "sleep" = boolIO sleep
 op1 "mkdir" = boolIO createDirectory
 op1 "rmdir" = boolIO removeDirectory
 op1 "chdir" = boolIO setCurrentDirectory
+op1 "-d"    = boolIO3 doesDirectoryExist
+op1 "-f"    = boolIO3 doesFileExist
 op1 "chmod" = \v -> do
     v <- readMVal v
     vals <- mapM readMVal (vCast v)
@@ -296,6 +307,11 @@ boolIO2 f u v = do
         f (vCast u) (vCast v)
         return True
     return $ VBool ok
+    
+boolIO3 f v = do 
+    ok <- tryIO False $ do
+        f (vCast v)
+    return $ VBool ok    
 
 opEval :: Bool -> String -> String -> Eval Val
 opEval fatal name str = do
@@ -310,6 +326,9 @@ retEvalResult fatal val = do
     glob <- askGlobal
     let Just errSV = findSym "$!" glob
     case val of
+        VError _ (Val errval) | not fatal  -> do
+            writeMVal errSV errval
+            retEmpty
         VError _ _ | not fatal  -> do
             writeMVal errSV (VStr $ show val)
             retEmpty
@@ -356,6 +375,7 @@ op2 "~"  = op2Str (++)
 op2 "+|" = op2Int (.|.)
 op2 "+^" = op2Int xor
 op2 "~|" = op2Str $ mapStr2Fill (.|.)
+op2 "?|" = op2Bool (||)
 op2 "~^" = op2Str $ mapStr2Fill xor
 op2 "=>" = \x y -> return $ VPair (x, y)
 op2 "cmp"= op2Ord vCastStr
@@ -402,10 +422,46 @@ op2 "split"= \x y -> return $ split' (vCast x) (vCast y)
     split' glue xs = VList $ map VStr $ split glue xs
 op2 other = \x y -> return $ VError ("unimplemented binaryOp: " ++ other) (App other [Val x, Val y] [])
 
+op2Match x (VSubst (rx@MkRule{ rxGlobal = True }, subst)) = do
+    str     <- fromVal x
+    rv      <- doReplace (encodeUTF8 str) Nothing
+    case rv of
+        (str', Just _) -> do
+            writeMVal (vCast x) (VStr $ decodeUTF8 $ str')
+            return $ VBool True
+        _ -> return $ VBool False
+    where
+    doReplace :: String -> Maybe [String] -> Eval (String, Maybe [String])
+    doReplace str subs = do
+        case str =~~ rxRegex rx of
+            Nothing -> return (str, subs)
+            Just mr -> do
+                glob    <- askGlobal
+                let Just matchAV = findSym "$/" glob
+                    subs = elems $ mrSubs mr
+                writeMVal matchAV $ VList $ map VStr subs
+                str'    <- fromVal =<< evalExp subst
+                (after', rv) <- doReplace (mrAfter mr) (Just subs)
+                let subs' = fromMaybe subs rv
+                return (concat [mrBefore mr, str', after'], Just subs')
+
+op2Match x (VSubst (rx@MkRule{ rxGlobal = False }, subst)) = do
+    str     <- fromVal x
+    case encodeUTF8 str =~~ rxRegex rx of
+        Nothing -> return $ VBool False
+        Just mr -> do
+            glob <- askGlobal
+            let Just matchAV = findSym "$/" glob
+                subs = elems $ mrSubs mr
+            writeMVal matchAV $ VList $ map VStr subs
+            str' <- fromVal =<< evalExp subst
+            writeMVal (vCast x) $
+                (VStr $ decodeUTF8 $ concat [mrBefore mr, str', mrAfter mr])
+            return $ VBool True
 
 op2Match x (VRule rx) = do
     str     <- fromVal x
-    case encodeUTF8 str =~~ rx of
+    case encodeUTF8 str =~~ rxRegex rx of
         Nothing -> return $ VBool False
         Just mr -> do
             --- XXX: Fix $/ and make it lexical.
@@ -504,16 +560,19 @@ op2Map list sub = do
         return $ vCast rv
     return $ VList $ concat vals
 
-vCastStr :: Val -> VStr
-vCastStr = vCast
-vCastRat :: Val -> VRat
-vCastRat = vCast
+vCastStr :: Val -> Eval VStr
+vCastStr = fromVal
+vCastRat :: Val -> Eval VRat
+vCastRat = fromVal
 
 op2Str  f x y = return $ VStr  $ f (vCast x) (vCast y)
 op2Num  f x y = return $ VNum  $ f (vCast x) (vCast y)
 op2Rat  f x y = return $ VRat  $ f (vCast x) (vCast y)
 op2Bool f x y = return $ VBool $ f (vCast x) (vCast y)
-op2Int  f x y = return $ VInt  $ f (vCast x) (vCast y)
+op2Int  f x y = do
+    x' <- fromVal x
+    y' <- fromVal y
+    return $ VInt $ f x' y'
 
 op1Range (VStr s)    = VList $ map VStr $ strRangeInf s
 op1Range (VRat n)    = VList $ map VRat [n ..]
@@ -555,12 +614,23 @@ op2Logical f x y = do
 
 op2DefinedOr = undefined
 
-op2Cmp f cmp x y = return $ VBool $ f x `cmp` f y
+op2Cmp f cmp x y = do
+    x' <- f x
+    y' <- f y
+    return $ VBool $ x' `cmp` y'
 
-op2Ord f x y = return $ VInt $ case f x `compare` f y of
-    LT -> -1
-    EQ -> 0
-    GT -> 1
+op2Ord f x y = do
+    x' <- f x
+    y' <- f y
+    return $ VInt $ case x' `compare` y' of
+        LT -> -1
+        EQ -> 0
+        GT -> 1
+
+op1Floating :: (Double -> Double) -> Val -> Eval Val
+op1Floating f v = do
+    foo <- fromVal v
+    return $ VNum $ f foo
 
 op1Numeric :: (forall a. (Num a) => a -> a) -> Val -> Val
 op1Numeric f VUndef     = VInt $ f 0
@@ -597,6 +667,7 @@ primOp sym assoc prms ret = SymVal SOur name sub
                       , subType     = SubPrim
                       , subAssoc    = assoc
                       , subParams   = prms
+                      , subBindings = []
                       , subReturns  = ret
                       , subFun      = (Prim f)
                       }
@@ -665,6 +736,13 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      spre    !       (Bool)\
 \\n   Num       spre    +       (Num)\
 \\n   Num       pre     abs     (Num)\
+\\n   Num       pre     atan2    (Num)\
+\\n   Num       pre     cos     (Num)\
+\\n   Num       pre     sin     (Num)\
+\\n   Num       pre     exp     (Num)\
+\\n   Num       pre     sqrt    (Num)\
+\\n   Bool      pre     -d      (Str)\
+\\n   Bool      pre     -f      (Str)\
 \\n   Num       spre    -       (Num)\
 \\n   Str       spre    ~       (Str)\
 \\n   Bool      spre    ?       (Bool)\
@@ -717,7 +795,9 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     kv      (Hash)\
 \\n   Str       pre     perl    (List)\
 \\n   Any       pre     eval    (Str)\
+\\n   Any       pre     eval_perl5 (Str)\
 \\n   Any       pre     require (Str)\
+\\n   Any       pre     require_haskell (Str)\
 \\n   Any       pre     last    (?Int=1)\
 \\n   Any       pre     exit    (?Int=0)\
 \\n   Num       pre     rand    (?Num=1)\
@@ -766,6 +846,7 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Num       left    /       (Num, Num)\
 \\n   Num       left    %       (Num, Num)\
 \\n   Str       left    x       (Str, Int)\
+\\n   Any       left    is      (Any, Any)\
 \\n   List      left    xx      (Any, Int)\
 \\n   Int       left    +&      (Int, Int)\
 \\n   Int       left    +<      (Int, Int)\
@@ -781,13 +862,14 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Int       left    +^      (Int, Int)\
 \\n   Str       left    ~|      (Str, Str)\
 \\n   Str       left    ~^      (Str, Str)\
+\\n   Str       left    ?|      (Str, Str)\
 \\n   Pair      non     =>      (Any, Any)\
 \\n   Int       non     cmp     (Str, Str)\
 \\n   Int       non     <=>     (Num, Num)\
 \\n   List      non     ..      (Any, Any)\
 \\n   Bool      chain   !=      (Num, Num)\
 \\n   Bool      chain   ==      (Num, Num)\
-\\n   Bool      chain   ~~      (Any, Any)\
+\\n   Bool      chain   ~~      (rw!Any, Any)\
 \\n   Bool      chain   !~      (Any, Any)\
 \\n   Bool      chain   <       (Num, Num)\
 \\n   Bool      chain   <=      (Num, Num)\

@@ -15,35 +15,33 @@
 
 module Main where
 import Internals
-import Config 
+import Config
+import Run
 import AST
 import Eval
+import External
 import Shell
 import Parser
 import Help
 import Pretty
-import Posix
-import Prim
+import Compile
 
 main :: IO ()
 main = do
-    hSetBuffering stdout NoBuffering 
+    hSetBuffering stdout NoBuffering
     args <- getArgs
     run $ concatMap procArg args
     where
-    procArg ('-':'e':prog@(_:_)) = ["-e", prog]
-    procArg ('-':'d':rest@(_:_)) = ["-d", ('-':rest)]
+    -- procArg ('-':'e':prog@(_:_)) = ["-e", prog]
+    -- procArg ('-':'d':rest@(_:_)) = ["-d", ('-':rest)]
     procArg x = [x]
 
 run :: [String] -> IO ()
-run ("-l":rest)                 = run rest
-run ("-d":rest)                 = run rest
-run ("-w":rest)                 = run rest
-run (('-':'l':xs):rest)         = run (('-':xs):rest)
-run (('-':'w':xs):rest)         = run (('-':xs):rest)
-run (('-':'d':xs):rest)         = run (('-':xs):rest)
-run (('-':'e':prog@(_:_)):args) = doRun "-e" args prog
-run ("-e":prog:args)            = doRun "-e" args prog
+run (("-l"):rest)                 = run rest
+run (("-d"):rest)                 = run rest
+run (("-w"):rest)                 = run rest
+run (("-e"):prog:args)            = doRun "-e" args prog
+
 run ("-h":_)                    = printCommandLineHelp
 run ("--help":_)                = printCommandLineHelp
 run ("-V":_)                    = printConfigInfo
@@ -52,9 +50,21 @@ run ("--version":_)             = banner
 run ("-c":"-e":prog:_)          = doCheck "-e" prog
 run ("-ce":prog:_)              = doCheck "-e" prog
 run ("-c":file:_)               = readFile file >>= doCheck file
-run ("-C":"-e":prog:_)          = doDump "-e" prog
-run ("-Ce":prog:_)              = doDump "-e" prog
-run ("-C":file:_)               = readFile file >>= doDump file
+
+run (('-':'I':_):rest)          = run rest
+-- run (('-':'l':xs):rest)         = run (('-':xs):rest)
+-- run (('-':'w':xs):rest)         = run (('-':xs):rest)
+-- run (('-':'d':xs):rest)         = run (('-':xs):rest)
+run (('-':'c':rest@(_:_)):args) = run (("-c"):('-':rest):args)
+run (('-':'d':rest@(_:_)):args) = run (("-d"):('-':rest):args)
+run (('-':'e':prog@(_:_)):args) = run (("-e"):prog:args)
+run (('-':'l':xs):args)         = run (("-l"):('-':xs):args)
+run (('-':'w':xs):args)         = run (("-w"):('-':xs):args)
+
+run (('-':'C':backend):"-e":prog:_) = doCompile backend "-e" prog
+run (('-':'C':backend):file:_)      = readFile file >>= doCompile backend file
+run ("--external":mod:"-e":prog:_)    = doExternal mod "-e" prog
+run ("--external":mod:file:_)         = readFile file >>= doExternal mod file
 run ("-":_)                     = do
     prog <- getContents
     doRun "-" [] prog
@@ -66,9 +76,17 @@ run []                          = do
         else run ["-"]
 
 -- convenience functions for GHCi
+eval :: String -> IO ()
 eval = runProgramWith id (putStrLn . pretty) "<interactive>" []
+
+parse :: String -> IO ()
 parse = doParse "-"
+
+dump :: String -> IO ()
 dump = (doParseWith $ \exp _ -> print exp) "-"
+
+comp :: String -> IO ()
+comp = (doParseWith $ \exp _ -> putStrLn =<< compile "Haskell" exp) "-"
 
 repLoop :: IO ()
 repLoop = do
@@ -84,16 +102,24 @@ repLoop = do
             CmdHelp           -> printInteractiveHelp >> loop
             CmdReset          -> tabulaRasa >>= writeIORef env >> loop
 
+tabulaRasa :: IO AST.Env
 tabulaRasa = prepareEnv "<interactive>" []
 
+doCheck :: FilePath -> String -> IO ()
 doCheck = doParseWith $ \_ name -> do
     putStrLn $ name ++ " syntax OK"
 
-doDump = doParseWith $ \exp _ -> do
-    fh <- openFile "dump.ast" WriteMode
-    hPutStrLn fh $ show exp
-    hClose fh
+doExternal :: String -> FilePath -> String -> IO ()
+doExternal mod = doParseWith $ \exp _ -> do
+    str <- externalize mod exp
+    putStrLn str
 
+doCompile :: [Char] -> FilePath -> String -> IO ()
+doCompile backend = doParseWith $ \exp _ -> do
+    str <- compile backend exp
+    writeFile "dump.ast" str
+
+doParseWith :: (AST.Exp -> FilePath -> IO a) -> FilePath -> String -> IO a
 doParseWith f name prog = do
     env <- emptyEnv []
     runRule env (f' . envBody) ruleProgram name $ decodeUTF8 prog
@@ -104,6 +130,7 @@ doParseWith f name prog = do
     f' exp = f exp name
 
 
+doParse :: FilePath -> String -> IO ()
 doParse name prog = do
     env <- emptyEnv []
     case runRule env envBody ruleProgram name (decodeUTF8 prog) of
@@ -175,97 +202,22 @@ runFile :: String -> IO ()
 runFile file = do
     withArgs [file] main
 
-runProgramWith :: 
+runProgramWith ::
     (Env -> Env) -> (Val -> IO ()) -> VStr -> [VStr] -> String -> IO ()
 runProgramWith fenv f name args prog = do
     env <- prepareEnv name args
     val <- runEnv $ runRule (fenv env) id ruleProgram name $ decodeUTF8 prog
     f val
 
-runEval :: Env -> Eval Val -> IO Val
-runEval env eval = do
-    (`runReaderT` env) $ do
-        (`runContT` return) $
-            resetT eval
-
-runEnv env = runEval env $ evaluateMain (envBody env)
-
-runAST ast = do
-    hSetBuffering stdout NoBuffering 
-    name <- getProgName
-    args <- getArgs
-    env  <- prepareEnv name args
-    runEnv env{ envBody = ast, envDebug = Nothing }
-
-prepareEnv name args = do
-    environ <- getEnvironment
-    let envFM = listToFM $ [ (VStr k, VStr v) | (k, v) <- environ ]
-    libs    <- getLibs environ
-    progSV  <- newMVal $ VStr name
-    endAV   <- newMVal $ VList []
-    matchAV <- newMVal $ VList []
-    incAV   <- newMVal $ VList (map VStr libs)
-    argsAV  <- newMVal $ VList (map VStr args)
-    inGV    <- newMVal $ VHandle stdin
-    outGV   <- newMVal $ VHandle stdout
-    errGV   <- newMVal $ VHandle stderr
-    errSV   <- newMVal $ VStr ""
-    let subExit = \x -> case x of
-            [x] -> op1 "exit" x
-            _   -> op1 "exit" VUndef
-    emptyEnv
-        [ SymVal SGlobal "@*ARGS"       argsAV
-        , SymVal SGlobal "@*INC"        incAV
-        , SymVal SGlobal "$*PROGNAME"   progSV
-        , SymVal SGlobal "@*END"        endAV
-        , SymVal SGlobal "$*IN"         inGV
-        , SymVal SGlobal "$*OUT"        outGV
-        , SymVal SGlobal "$*ERR"        errGV
-        , SymVal SGlobal "$!"           errSV
-        , SymVal SGlobal "$/"           matchAV
-        , SymVal SGlobal "%*ENV" (VHash . MkHash $ envFM)
-        -- XXX What would this even do?
-        -- , SymVal SGlobal "%=POD"        (Val . VHash . MkHash $ emptyFM) 
-        , SymVal SGlobal "@=POD"        (VArray . MkArray $ [])
-        , SymVal SGlobal "$=POD"        (VStr "")
-        , SymVal SGlobal "$?OS"         (VStr config_osname)
-        , SymVal SGlobal "$?_BLOCK_EXIT" $ VSub $ Sub
-            { isMulti = False
-            , subName = "$?_BLOCK_EXIT"
-            , subType = SubPrim
-            , subPad = []
-            , subAssoc = "pre"
-            , subParams = []
-            , subReturns = "Void"
-            , subFun = Prim subExit
-            }
-        ]
-       
-
-
-getLibs :: [(String, String)] -> IO [String]
-getLibs environ = return $ filter (not . null) libs
-    where
-    envlibs nm = maybe [] (split config_path_sep) $ nm `lookup` environ
-    libs =  envlibs "PERL6LIB"
-         ++ [ config_archlib
-            , config_privlib
-            , config_sitearch
-            , config_sitelib
-            ]
-         ++ [ "." ]
-
 printConfigInfo :: IO ()
 printConfigInfo = do
     environ <- getEnvironment
     libs <- getLibs environ
     putStrLn $ unlines $
-        ["Summary of pugs configuration:"
+        ["This is " ++ version ++ " built for " ++ getConfig "archname"
         ,""
-        ,"archlib: " ++ config_archlib
-        ,"privlib: " ++ config_privlib
-        ,"sitearch: " ++ config_sitearch
-        ,"sitelib: " ++ config_sitelib
-        ,""
-        ] ++
-        [ "@*INC:" ] ++ libs
+        ,"Summary of pugs configuration:"
+        ,"" ]
+        ++ map (\x -> "\t" ++ fst x ++ ": " ++ snd x) (fmToList config)
+        ++ [ "" ]
+        ++ [ "@*INC:" ] ++ libs
