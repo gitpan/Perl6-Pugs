@@ -9,7 +9,7 @@ Tests for Synopsis 6
 
 =cut
 
-plan 13;
+plan 18;
 
 sub foobar ($var) {
     return $var;
@@ -78,3 +78,39 @@ sub perl5sub {
 }
 perl5sub(<foo bar>);
 todo_is(@result, <foo bar>, 'use @_ in sub');
+
+=pod
+
+L<S06/"Unpacking array parameters">
+
+=cut
+
+sub argShifter (@a) {
+	my $first := shift @a;
+	return $first;
+}
+
+todo_fail("FIXME parsefail"); # actually exe fail... # unTODOme
+#is eval 'argShifter(3..5)', 3, "use shift on an array argument";
+
+todo_eval_ok    # unTODOme
+'sub unpack_array ([$first, @rest]) {
+	return $first;
+}', 'splitting array arguments';
+
+my @array = 3..7;
+todo_is eval 'unpack_array(@array)', 3, 'unpacking an array parameter'; # unTODOme
+
+=pod
+
+L<S06/"Unpacking hash parameters">
+
+=cut
+
+todo_eval_ok    # unTODOme
+'sub unpack_hash({+$yo, *%other}){
+	return $yo;
+}', 'splitting hash arguments';
+
+my %params = yo => 3, nope => 4;
+todo_is eval 'unpack_hash(%params)', 3, 'unpacking a hash parameter'; # unTODOme

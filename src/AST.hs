@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
 
 {-
     Abstract syntax tree.
@@ -16,6 +16,8 @@ import Internals
 import Context
 import Rule
 import List
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 type Ident = String
 
@@ -67,16 +69,16 @@ instance Value VHash where
     -- vCast VUndef = MkHash emptyFM
     vCast v = MkHash $ vCast v
 
-instance Value (FiniteMap VStr Val) where
+instance Value (Map VStr Val) where
     vCast (VHash (MkHash h)) = h
     -- vCast VUndef = emptyFM
-    vCast (VPair (k, v)) = listToFM [(vCast k, v)]
-    vCast x = listToFM [ (vCast k, v) | (k, v) <- vCast x ]
+    vCast (VPair (k, v)) = Map.fromList [(vCast k, v)]
+    vCast x = Map.fromList [ (vCast k, v) | (k, v) <- vCast x ]
 
 instance Value [VPair] where
     -- vCast VUndef = []
     vCast (VRef v)      = vCast v
-    vCast (VHash (MkHash h)) = [ (VStr k, v) | (k, v) <- fmToList h ]
+    vCast (VHash (MkHash h)) = [ (VStr k, v) | (k, v) <- Map.assocs h ]
     vCast (VPair p) = [p]
     vCast (VList vs) =
         let fromList [] = []
@@ -106,14 +108,14 @@ instance Value VBool where
     doCast _           = True
 
 juncToBool :: VJunc -> Bool
-juncToBool (Junc JAny  _  vs) = (True `elementOf`) $ mapSet vCast vs
-juncToBool (Junc JAll  _  vs) = not . (False `elementOf`) $ mapSet vCast vs
-juncToBool (Junc JNone _  vs) = not . (True `elementOf`) $ mapSet vCast vs
+juncToBool (Junc JAny  _  vs) = (True `Set.member`) $ Set.map vCast vs
+juncToBool (Junc JAll  _  vs) = not . (False `Set.member`) $ Set.map vCast vs
+juncToBool (Junc JNone _  vs) = not . (True `Set.member`) $ Set.map vCast vs
 juncToBool (Junc JOne  ds vs)
-    | (True `elementOf`) $ mapSet vCast ds
+    | (True `Set.member`) $ Set.map vCast ds
     = False
     | otherwise
-    = (1 ==) . length . filter vCast $ setToList vs
+    = (1 ==) . length . filter vCast $ Set.elems vs
 
 readMVal :: MonadIO m => Val -> m Val
 readMVal (MVal mv) = readMVal =<< liftIO (readIORef mv)
@@ -131,7 +133,7 @@ instance Value VRat where
     doCast (VBool b)    = if b then 1 % 1 else 0 % 1
     doCast (VList l)    = genericLength l
     doCast (VArray (MkArray a))    = genericLength a
-    doCast (VHash (MkHash h))    = fromIntegral $ sizeFM h
+    doCast (VHash (MkHash h))    = fromIntegral $ Map.size h
     doCast (VStr s) | not (null s) , isSpace $ last s = doCast (VStr $ init s)
     doCast (VStr s) | not (null s) , isSpace $ head s = doCast (VStr $ tail s)
     doCast (VStr s)     =
@@ -161,7 +163,8 @@ instance Value VNum where
                 Right d -> realToFrac d
     doCast (VList l)    = genericLength l
     doCast (VArray (MkArray a))    = genericLength a
-    doCast (VHash (MkHash h))    = fromIntegral $ sizeFM h
+    doCast (VHash (MkHash h))    = fromIntegral $ Map.size h
+    doCast t@(VThread _)  = read $ vCast t
     doCast _            = 0/0 -- error $ "cannot cast as Num: " ++ (show x)
 
 instance Value VComplex where
@@ -171,7 +174,7 @@ instance Value VComplex where
 instance Value VStr where
     castV = VStr
     fromVal (VHash (MkHash h)) = do
-        ls <- mapM strPair $ fmToList h
+        ls <- mapM strPair $ Map.assocs h
         return $ unlines ls
         where
         strPair (k, v) = do
@@ -191,9 +194,10 @@ instance Value VStr where
     vCast (VPair (k, v))= vCast k ++ "\t" ++ vCast v ++ "\n"
     vCast (VArray (MkArray l))   = unwords $ map vCast l
     vCast (VHash (MkHash h))     = unlines $
-        map (\(k, v) -> (k ++ "\t" ++ vCast v)) $ fmToList h
+        map (\(k, v) -> (k ++ "\t" ++ vCast v)) $ Map.assocs h
     vCast (VSub s)      = "<" ++ show (subType s) ++ "(" ++ subName s ++ ")>"
     vCast (VJunc j)     = show j
+    vCast (VThread t)   = dropWhile (not . isDigit) $ show t
     vCast x             = error $ "cannot cast as Str: " ++ (show x)
 
 showNum :: Show a => a -> String
@@ -229,7 +233,7 @@ instance Value VList where
     castV = VList
     vCast (VList l)     = l
     vCast (VArray (MkArray l)) = l
-    vCast (VHash (MkHash h)) = [ VPair (VStr k, v) | (k, v) <- fmToList h ]
+    vCast (VHash (MkHash h)) = [ VPair (VStr k, v) | (k, v) <- Map.assocs h ]
     vCast (VPair (k, v))   = [k, v]
     vCast (VRef v)      = vCast v
     -- vCast (MVal v)      = vCast $ castV v
@@ -240,6 +244,16 @@ instance Value VHandle where
     castV = VHandle
     doCast (VHandle x) = x
     doCast x            = error $ "cannot cast into a handle: " ++ show x
+
+instance Value VSocket where
+    castV = VSocket
+    doCast (VSocket x) = x
+    doCast x            = error $ "cannot cast into a socket: " ++ show x
+
+instance Value VThread where
+    castV = VThread
+    doCast (VThread x) = x
+    doCast x            = error $ "cannot cast into a thread: " ++ show x
 
 instance Value (Maybe a) where
     vCast VUndef        = Nothing
@@ -297,9 +311,11 @@ type VStr  = String
 type VList = [Val]
 type VSubst = (VRule, Exp)
 type VHandle = Handle
+type VSocket = Socket
+type VThread = ThreadId
 type MVal = IORef Val
 newtype VArray = MkArray [Val] deriving (Show, Eq, Ord)
-newtype VHash  = MkHash (FiniteMap VStr Val) deriving (Show, Eq, Ord)
+newtype VHash  = MkHash (Map VStr Val) deriving (Show, Eq, Ord)
 newtype VThunk = MkThunk (Eval Val)
 data VRule     = MkRule
     { rxRegex     :: Regex
@@ -327,6 +343,8 @@ data Val
     | VJunc     VJunc
     | VError    VStr Exp
     | VHandle   VHandle
+    | VSocket   VSocket
+    | VThread   VThread
     | VRule     VRule
     | VSubst    VSubst
     | MVal      MVal
@@ -352,6 +370,8 @@ valType (VBlock   _)    = "Block"
 valType (VJunc    _)    = "Junc"
 valType (VError _ _)    = "Error"
 valType (VHandle  _)    = "Handle"
+valType (VSocket  _)    = "Socket"
+valType (VThread  _)    = "Thread"
 valType (MVal     _)    = "Var"
 valType (VControl _)    = "Control"
 valType (VThunk   _)    = "Thunk"
@@ -384,7 +404,7 @@ instance Show VJunc where
 	    (foldl (\x y ->
 		if x == "" then (vCast :: Val -> VStr) y
 		else x ++ "," ++ (vCast :: Val -> VStr) y)
-	    "" $ setToList set) ++ ")"
+	    "" $ Set.elems set) ++ ")"
 
 data SubType = SubMethod | SubRoutine | SubBlock | SubPrim
     deriving (Show, Eq, Ord)
@@ -427,6 +447,8 @@ instance Show (IORef Pad) where
     show _ = "<pad>"
 instance Ord VHandle where
     compare x y = compare (show x) (show y)
+instance Ord VSocket where
+    compare x y = compare (show x) (show y)
 
 type Var = String
 -- type MVal = IORef Val
@@ -434,7 +456,7 @@ type Var = String
 data Exp
     = App String [Exp] [Exp]
     | Syn String [Exp]
-    | Sym [Symbol]
+    | Sym [Symbol Exp]
     | Prim ([Val] -> Eval Val)
     | Val Val
     | Var Var
@@ -531,20 +553,35 @@ data Env = Env { envContext :: Cxt
                , envBody    :: Exp
                , envDepth   :: Int
                , envID      :: Unique
-               , envDebug   :: Maybe (IORef (FiniteMap String String))
+               , envDebug   :: Maybe (IORef (Map String String))
                } deriving (Show, Eq)
 
-type Pad = [Symbol]
-data Symbol
-    = SymVal { symScope :: Scope
-             , symName  :: String
-             , symVal   :: Val
-             }
-    | SymExp { symScope :: Scope
-             , symName  :: String
-             , symExp   :: Exp
-             }
-    deriving (Show, Eq, Ord)
+type Pad = [Symbol Val]
+data Symbol a where
+    SymVal :: Scope -> String -> Val -> Symbol Val
+    SymExp :: Scope -> String -> Exp -> Symbol Exp
+
+show' :: (Show a) => a -> String
+show' x = "( " ++ show x ++ " )"
+
+instance Show (Symbol a) where
+    show (SymVal s n v) = unwords [ "SymVal", show' s, show' n, show' v ]
+    show (SymExp s n e) = unwords [ "SymExp", show' s, show' n, show' e ]
+
+instance Eq (Symbol a) where
+    x == y = (show x) == (show y)
+
+instance Ord (Symbol a) where
+    compare x y = compare (show x) (show y)
+
+symScope (SymVal s _ _) = s
+symScope (SymExp s _ _) = s
+symName (SymVal _ n _) = n
+symName (SymExp _ n _) = n
+symVal (SymVal _ _ v) = v
+symVal _ = error "Cannot cast SymVal to SymExp"
+symExp (SymExp _ _ e) = e
+symExp _ = error "Cannot cast SymExp to SymVal"
 
 data Scope = SGlobal | SMy | SOur | SLet | STemp | SState
     deriving (Show, Eq, Ord, Read, Enum)
@@ -573,7 +610,7 @@ askGlobal = do
 readVar name = do
     glob <- askGlobal
     case find ((== name) . symName) glob of
-        Just SymVal{ symVal = ref } -> readMVal ref
+        Just ref -> readMVal $ symVal ref
         _ -> return VUndef
 
 emptyExp = App "&not" [] []
@@ -581,18 +618,6 @@ emptyExp = App "&not" [] []
 retError :: VStr -> Exp -> Eval a
 retError str exp = do
     shiftT $ \_ -> return $ VError str exp
-
-#if __GLASGOW_HASKELL__ <= 602
-
-instance (Ord a, Ord b) => Ord (FiniteMap a b)
-instance (Show a, Show b) => Show (FiniteMap a b) where
-    show fm = show (fmToList fm)
-instance (Ord a) => Ord (Set a) where
-    compare x y = compare (setToList x) (setToList y)
-instance (Show a) => Show (Set a) where
-    show x = show $ setToList x
-
-#endif
 
 naturalOrRat  = (<?> "number") $ do
     sig <- sign

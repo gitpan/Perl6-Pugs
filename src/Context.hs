@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Context propagators and equalizers.
@@ -85,11 +85,14 @@ initTree = Node "Any"
             , Node "Ref" []
             , Node "Pair" []
             , Node "IO" []
+            , Node "Socket" []
+            , Node "Thread" []
             , Node "Code"
                 [ Node "Routine"
                     [ Node "Sub"
                         [ Node "Method" []
-                        , Node "Submethod" [] ]
+                        , Node "Submethod" []  -- why isn't this a node off Method? - mugwump
+                        ]
                     , Node "Macro" [] ]
                 , Node "Block"
                     [ Node "Bare"
@@ -105,4 +108,6 @@ initTree = Node "Any"
             [ Node "Class" [] ] ]
     , Node "Action" []
     , Node "Void" []
-    ]
+    , Node "Trait"
+        [ Node "PkgTrait" [] ] ]
+

@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 
 {-
     Embedded interpreters.
@@ -16,3 +16,4 @@ import Embed.Perl5
 -- import Embed.Haskell
 -- import Embed.Parrot
 -- import Embed.Ponie
+

@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
 
 {-
     Internal utilities and library imports.
@@ -36,6 +36,7 @@ module Internals (
     module System.Cmd,
     module Control.Monad.RWS,
     module Control.Monad.Error,
+    module Control.Concurrent,
     module Data.Array,
     module Data.Bits,
     module Data.List,
@@ -43,21 +44,22 @@ module Internals (
     module Data.Word,
     module Data.Ratio,
     module Data.Char,
-    module Data.Set,
     module Data.Tree,
     module Data.Maybe,
     module Data.Complex,
-    module Internals.Map,
+    module Data.Set,
+    module Data.Map,
     module Data.IORef,
     module Debug.Trace,
+    module Network,
     internalError,
     split,
     breakOnGlue,
+    afterPrefix,
     decodeUTF8,
     encodeUTF8,
 ) where
 
-import Internals.Map
 import UTF8
 import Unicode
 import Cont
@@ -67,6 +69,7 @@ import RRegex
 import RRegex.Syntax
 import Data.Dynamic
 import Data.Array (elems)
+import Network
 import System.Environment (getArgs, withArgs, getProgName)
 import System.Random hiding (split)
 import System.Exit
@@ -75,7 +78,7 @@ import System.Cmd
 import System.IO (
     Handle, stdin, stdout, hClose, hGetLine, hGetContents,
     openFile, hPutStr, hPutStrLn, IOMode(..), stderr,
-    hSetBuffering, BufferMode(..), hIsTerminalDevice
+    hSetBuffering, BufferMode(..), hIsTerminalDevice, hFlush
     )
 import System.IO.Unsafe
 import System.IO.Error (ioeGetErrorString, isUserError)
@@ -83,6 +86,7 @@ import System.Directory
 import Control.Exception (catchJust, errorCalls)
 import Control.Monad.RWS
 import Control.Monad.Error (MonadError(..))
+import Control.Concurrent
 import Data.Bits hiding (shift)
 import Data.Maybe
 import Data.Either
@@ -95,14 +99,12 @@ import Data.Unique
 import Data.Ratio
 import Data.Word
 import Data.Char (chr, ord, digitToInt)
-import Data.Set (
-    Set, elementOf, setToList, mapSet, mkSet,
-    emptySet, unionManySets, union, cardinality
-    )
 import Data.Ratio
 import Data.Complex
 import Data.Tree
 import Data.IORef
+import Data.Set (Set)
+import Data.Map (Map)
 import Debug.Trace
 import Rule.Pos
 
@@ -115,7 +117,7 @@ instance Eq (a -> b) where
     _ == _ = False
 instance Ord (a -> b) where
     compare _ _ = LT
-instance Show (IORef (FiniteMap String String)) where
+instance Show (IORef (Map String String)) where
     show _ = "{ n/a }"
 
 internalError :: String -> a
@@ -153,3 +155,4 @@ decodeUTF8 :: String -> String
 decodeUTF8 str = fst $ decode bytes
     where
     bytes = map (toEnum . ord) str
+

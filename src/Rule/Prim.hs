@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts -O #-}
+{-# OPTIONS_GHC -fglasgow-exts -O #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -454,5 +454,4 @@ tokens shows nextposs s
                            | otherwise     = Empty (errExpect c)
 
        in walk1 s input)
-
 

@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Parameter binding.
@@ -157,3 +157,4 @@ bindSomeParams sub@Sub{ subBindings = bindings, subParams = params } invsExp arg
         { subBindings = newBindings
         , subParams   = newParams
         }
+

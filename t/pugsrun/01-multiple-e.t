@@ -13,16 +13,21 @@ like C<join "\n"> concatenation .
 =cut
 
 my @examples = (
-'-e print -e q. -e Hello -e " " -e Pugs -e .'
+   '-e print -e qq.Hello -e Pugs.'
+ , '-e print -we qq.Hello -e Pugs.'
+ , '-e print -wle qq.Hello -e Pugs.'
+ , '-e print -weqq.Hello -e Pugs.'
+ , '-e print -e qq.Hel. -e ";print" -e qq.lo. -e ";print" -e "qq.\nPugs."'
+ , '-e print -e qq.Hel. -w -e ";print" -e qq.lo. -w -e ";print" -e "qq.\nPugs."'
 );
 
-plan +@examples;
+plan +@examples +1;
 
 diag "Running under $?OS";
 
-my ($pugs,$redir) = ("./pugs", "&>");
+my ($pugs,$redir) = ("./pugs", ">");
 
-if ($?OS eq "MSWin32") {
+if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
   $pugs = 'pugs.exe';
   $redir = '>';
 };
@@ -32,9 +37,17 @@ for @examples -> $ex {
   diag $command;
   system $command;
 
-  my $expected = "\nHello\nPugs\n";
+  my $expected = "Hello\nPugs";
   my $got      = slurp "temp-ex-output";
-  unlink "temp-ex-output";
 
-  todo_is $got, $expected, "Multiple -e switches work and append the script";
+  is $got, $expected, "Multiple -e switches work and append the script";
 }
+
+my $command = qq($pugs -e @ARGS.perl.say -e "" Hello Pugs $redir temp-ex-output);
+diag $command;
+system $command;
+
+my @expected = <Hello Pugs>;
+my @got      = eval slurp "temp-ex-output";
+is @got, @expected, "-e '' does not eat a following argument";
+

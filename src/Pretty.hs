@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Pretty printing for various data structures.
@@ -15,6 +15,8 @@ module Pretty where
 import Internals
 import AST
 import Text.PrettyPrint
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 defaultIndent :: Int
 defaultIndent = 2
@@ -35,10 +37,10 @@ instance Pretty Exp where
     format (Sym syms) = text "Sym" <+> format syms
     format x = text $ show x
 
-instance Pretty [Symbol] where
+instance Pretty [Symbol a] where
     format syms = cat $ map format syms
 
-instance Pretty Symbol where
+instance Pretty (Symbol a) where
     format (SymVal scope name val) = text (show scope) <+> format name <+> text ":=" <+> (nest defaultIndent $ format val)
     format (SymExp scope name exp) = text (show scope) <+> format name <+> text ":=" <+> (nest defaultIndent $ format exp)
 
@@ -62,7 +64,7 @@ instance Pretty Val where
     format (VJunc (Junc j dups vals)) = parens $ joinList mark items 
         where
         items = map format $ values
-        values = setToList vals ++ (concatMap (replicate 2)) (setToList dups)
+        values = Set.elems vals ++ (concatMap (replicate 2)) (Set.elems dups)
         mark  = case j of
             JAny  -> text " | "
             JAll  -> text " & "
@@ -90,8 +92,10 @@ instance Pretty Val where
     format (VError x y) = hang (text "*** Error:" <+> text x) defaultIndent (text "at" <+> format y)
     format (VArray (MkArray x)) = format (VList x)
     format (VHash (MkHash x)) = braces $ (joinList $ text ", ") $
-        [ format (VStr k, v) | (k, v) <- fmToList x ]
+        [ format (VStr k, v) | (k, v) <- Map.toList x ]
     format (VHandle x) = text $ show x
+    format t@(VThread _) = text $ vCast t
+    format (VSocket x) = text $ show x
     format (MVal v) = text $ unsafePerformIO $ do
         val <- readIORef v
         return $ pretty val

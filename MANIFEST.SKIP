@@ -23,4 +23,5 @@ pugs_version\.h
 src/Config.hs$
 src/pugs_version\.h$
 svn-commit\.tmp$
-^t/.*[A-Z]
+^t/.*[A-Z]\w*/
+^debian/

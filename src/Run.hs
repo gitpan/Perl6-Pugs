@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Runtime engine.
@@ -10,14 +10,20 @@
 -}
 
 module Run where
+import Run.Args
 import Internals
-import Config 
+import Config
 import AST
 import Eval
 import Prim
+import qualified Data.Map as Map
+
+runWithArgs f = do
+    args <- getArgs
+    f $ canonicalArgs args
 
 runEval :: Env -> Eval Val -> IO Val
-runEval env eval = do
+runEval env eval = withSocketsDo $ do
     my_perl <- initPerl5 ""
     val <- (`runReaderT` env) $ do
         (`runContT` return) $
@@ -38,7 +44,7 @@ runAST ast = do
 
 runComp :: Eval Val -> IO Val
 runComp comp = do
-    hSetBuffering stdout NoBuffering 
+    hSetBuffering stdout NoBuffering
     name <- getProgName
     args <- getArgs
     env  <- prepareEnv name args
@@ -47,7 +53,8 @@ runComp comp = do
 prepareEnv :: VStr -> [VStr] -> IO Env
 prepareEnv name args = do
     environ <- getEnvironment
-    let envFM = listToFM $ [ (k, VStr v) | (k, v) <- environ ]
+    let envFM = Map.fromList $ [ (k, VStr v) | (k, v) <- environ ]
+    let confFM = Map.fromList $ [ (k, VStr v) | (k, v) <- Map.toList config ]
     exec    <- getArg0
     libs    <- getLibs environ
     execSV  <- newMVal $ VStr exec
@@ -76,7 +83,7 @@ prepareEnv name args = do
         , SymVal SGlobal "$/"           matchAV
         , SymVal SGlobal "%*ENV" (VHash . MkHash $ envFM)
         -- XXX What would this even do?
-        -- , SymVal SGlobal "%=POD"        (Val . VHash . MkHash $ emptyFM) 
+        -- , SymVal SGlobal "%=POD"        (Val . VHash . MkHash $ emptyFM)
         , SymVal SGlobal "@=POD"        (VArray . MkArray $ [])
         , SymVal SGlobal "$=POD"        (VStr "")
         , SymVal SGlobal "$?OS"         (VStr (getConfig "osname"))
@@ -91,19 +98,23 @@ prepareEnv name args = do
             , subReturns = "Void"
             , subFun = Prim subExit
             }
+         , SymVal SGlobal "%?CONFIG" (VHash . MkHash $ confFM)
         ]
 
 
-        
+
 getLibs :: [(String, String)] -> IO [String]
 getLibs environ = do
         args <- getArgs
-        return $ filter (not . null) (libs args)
+        return $ filter (not . null) (libs (canonicalArgs args))
     where
     envlibs nm = maybe [] (split (getConfig "path_sep")) $ nm `lookup` environ
-    inclibs args = map (drop 2) (filter isLibArg args)
-    isLibArg ('-':'I':_) = True
-    isLibArg _ = False
+
+    -- broken, need real parser
+    inclibs ("-I":dir:rest) = [dir] ++ inclibs(rest)
+    inclibs (_:rest)        = inclibs(rest)
+    inclibs ([])            = []
+
     libs args =  (inclibs args)
               ++ envlibs "PERL6LIB"
               ++ [ getConfig "archlib"

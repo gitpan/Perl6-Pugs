@@ -1,5 +1,5 @@
-{-# OPTIONS -fglasgow-exts -O #-}
-{-# OPTIONS -#include "UnicodeC.h" #-}
+{-# OPTIONS_GHC -fglasgow-exts -O #-}
+{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 {-
     Higher-level parser for building ASTs.
@@ -31,8 +31,11 @@ ruleProgram = rule "program" $ do
     return $ env { envBody = Statements statements }
 
 ruleBlock :: RuleParser Exp
-ruleBlock = rule "block" $ do
-    body <- braces ruleBlockBody
+ruleBlock = lexeme ruleVerbatimBlock
+
+ruleVerbatimBlock :: RuleParser Exp
+ruleVerbatimBlock = verbatimRule "block" $ do
+    body <- between (symbol "{") (char '}') ruleBlockBody
     retSyn "block" [body]
 
 ruleBlockBody = do
@@ -62,7 +65,7 @@ ruleStatement = do
 
 ruleStatementList :: RuleParser [(Exp, SourcePos)]
 ruleStatementList = rule "statements" $ choice
-    [ rulePodBlock
+    [ ruleDocBlock
     , nonSep  ruleBlockDeclaration
     , semiSep ruleDeclaration
     , nonSep  ruleConstruct
@@ -83,20 +86,23 @@ ruleBeginOfLine = do
     unless (sourceColumn pos == 1) $ fail ""
     return ()
 
-rulePodIntroducer = (<?> "intro") $ do
+ruleDocIntroducer = (<?> "intro") $ do
     ruleBeginOfLine
     char '='
 
-rulePodCut = (<?> "cut") $ do
-    rulePodIntroducer
+ruleDocCut = (<?> "cut") $ do
+    ruleDocIntroducer
     string "cut"
     ruleWhiteSpaceLine
     return ()
 
-rulePodBlock = verbatimRule "POD block" $ do
+ruleDocBlock = verbatimRule "Doc block" $ do
     isEnd <- try $ do
-        rulePodIntroducer
-        section <- literalIdentifier
+        ruleDocIntroducer
+        section <- do
+            c <- wordAlpha
+            cs <- many $ satisfy (not . isSpace)
+            return (c:cs)
         param <- option "" $ do
             satisfy isSpace
             -- XXX: drop trailing spaces?
@@ -108,14 +114,14 @@ rulePodBlock = verbatimRule "POD block" $ do
             many anyChar
             return []
         else do
-            rulePodBody
+            ruleDocBody
             whiteSpace
             option [] ruleStatementList
 
-rulePodBody = (try rulePodCut) <|> eof <|> do
+ruleDocBody = (try ruleDocCut) <|> eof <|> do
     many $ satisfy  (/= '\n')
     many1 newline -- XXX - paragraph mode
-    rulePodBody
+    ruleDocBody
     return ()
    
 -- Declarations ------------------------------------------------
@@ -188,12 +194,17 @@ ruleSubDeclaration = rule "subroutine declaration" $ do
     -- XXX: user-defined infix operator
     return $ Sym [SymExp scope name $ Syn "sub" [subExp]]
 
+subNameWithPrefix prefix = (<?> "subroutine name") $ lexeme $ try $ do
+    star    <- option "" $ string "*"
+    c       <- wordAlpha
+    cs      <- many wordAny
+    return $ "&" ++ star ++ prefix ++ (c:cs)
+
 ruleSubName = rule "subroutine name" $ do
     star    <- option "" $ string "*"
     fixity  <- option "" $ choice (map (try . string) $ words fixities)
-    c       <- wordAlpha
-    cs      <- many wordAny
-    return $ "&" ++ star ++ fixity ++ (c:cs)
+    names   <- identifier `sepBy1` (try $ string "::")
+    return $ "&" ++ star ++ fixity ++ concat (intersperse "::" names)
     where
     fixities = " prefix: postfix: infix: circumfix: "
 
@@ -576,7 +587,7 @@ currentFunctions = do
 currentUnaryFunctions = do
     funs <- currentFunctions
     return $ unwords [
-        encodeUTF8 name | f@SymVal{ symVal = VSub sub } <- funs
+        encodeUTF8 name | f@(SymVal _ _ (VSub sub)) <- funs
         , subAssoc sub == "pre"
         , length (subParams sub) == 1
         , isNothing $ find isSlurpy $ subParams sub
@@ -668,7 +679,7 @@ rulePostTerm = tryRule "term postfix" $ do
 
 ruleInvocation = tryVerbatimRule "invocation" $ do
     hasEqual <- option False $ do char '='; whiteSpace; return True
-    name            <- subNameWithPrefix ""
+    name            <- ruleSubName
     (invs,args)     <- option ([],[]) $ parseParenParamList ruleExpression
     return $ \x -> if hasEqual
         then Syn "=" [x, App name (x:invs) args]
@@ -676,7 +687,7 @@ ruleInvocation = tryVerbatimRule "invocation" $ do
 
 ruleInvocationParens = do
     hasEqual <- option False $ do char '='; whiteSpace; return True
-    name            <- subNameWithPrefix ""
+    name            <- ruleSubName
     (invs,args)     <- parens $ parseNoParenParamList ruleExpression
     -- XXX we just append the adverbial block onto the end of the arg list
     -- it really goes into the *& slot if there is one. -lp
@@ -705,14 +716,8 @@ ruleCodeSubscript = tryRule "code subscript" $ do
     (invs,args) <- parens $ parseParamList ruleExpression
     return $ \x -> Syn "()" [x, Syn "invs" invs, Syn "args" args]
 
-subNameWithPrefix prefix = (<?> "subroutine name") $ lexeme $ try $ do
-    star    <- option "" $ string "*"
-    c       <- wordAlpha
-    cs      <- many wordAny
-    return $ "&" ++ star ++ prefix ++ (c:cs)
-
 parseApply = lexeme $ do
-    name            <- subNameWithPrefix ""
+    name            <- ruleSubName
     option ' ' $ char '.'
     (invs,args)   <- parseParamList ruleExpression
     return $ App name invs args
@@ -807,7 +812,6 @@ nonTerm = do
 ruleLit = choice
     [ ruleBlockLiteral
     , numLiteral
-    , strLiteral
     , listLiteral
     , arrayLiteral
     , pairLiteral
@@ -816,6 +820,7 @@ ruleLit = choice
     , namedLiteral "NaN"    (VNum $ 0/0)
     , namedLiteral "Inf"    (VNum $ 1/0)
     , dotdotdotLiteral
+    , qLiteral
     , qqLiteral
     , qwLiteral
     , rxLiteral
@@ -835,8 +840,6 @@ numLiteral = do
         Left  i -> return . Val $ VInt i
         Right d -> return . Val $ VRat d
 
-strLiteral = return . Val . VStr =<< stringLiteral
-
 listLiteral = tryRule "list literal" $ do -- XXX Wrong
     parens whiteSpace
     -- items <- parens $ parseOp `sepEndBy` symbol ","
@@ -846,17 +849,34 @@ arrayLiteral = do
     items   <- brackets $ ruleExpression `sepEndBy` symbol ","
     return $ App "&prefix:\\" [] [Syn "cxt" [Val (VStr "List"), Syn "," items]]
 
-pairLiteral = try $ do
-    key <- identifier
-    symbol "=>"
-    val <- parseTerm
-    return $ App "&infix:=>" [Val (VStr key), val] []
+pairLiteral = try $
+    do
+	key <- identifier
+	symbol "=>"
+	val <- parseTerm
+	return $ App "&infix:=>" [Val (VStr key), val] []
+    <|>
+    do
+	string ":"
+	key <- many1 wordAny
+	val <- option (Val $ VInt 1) valuePart
+	return $ App "&infix:=>" [Val (VStr key), val] []
+	where
+	valuePart =
+	    do{ skipMany1 (satisfy isSpace); option (Val $ VInt 1) $ do{ symbol "."; valueExp } }
+	    <|>
+	    valueExp
+	valueExp =
+	    parens ruleExpression
+	    <|> arrayLiteral
+	    <|> qwLiteral
+	    -- <|> ruleStandaloneBlock -- :key{ k1 => val }
 
 rxInterpolator end = choice
-    [ qqInterpolatorVar end, rxInterpolatorChar, ruleBlock ]
+    [ qqInterpolatorVar end, rxInterpolatorChar, ruleVerbatimBlock ]
 
 qqInterpolator end = choice
-    [ qqInterpolatorVar end, qqInterpolatorChar, ruleBlock ]
+    [ qqInterpolatorVar end, qqInterpolatorChar, ruleVerbatimBlock ]
 
 qqInterpolatorVar end = try $ do
     var <- ruleVarNameString
@@ -886,15 +906,29 @@ qqInterpolatorChar = do
     return (Val $ VStr [nextchar])
 
 qqLiteral = do
-    ch   <- getDelim
+    ch   <- (getDelim "qq" '"')
     expr <- interpolatingStringLiteral (balancedDelim ch) qqInterpolator
     char (balancedDelim ch)
     return expr
-        where getDelim = try $ do string "qq"
-                                  notFollowedBy alphaNum
-                                  delim <- anyChar
-                                  return delim
-                               <|> char '"'
+
+qLiteral = do
+    ch   <- (getDelim "q" '\'')
+    str  <- (many (try $ quotedDelim (balancedDelim ch) <|> noneOf [ balancedDelim ch ]))
+    char (balancedDelim ch)
+    return . Val . VStr $ str
+
+getDelim qstr sch = try $
+    do
+        string qstr
+        notFollowedBy alphaNum
+        delim <- anyChar
+        return delim
+    <|> char sch
+
+quotedDelim ch = choice
+    [ try $ do { string [ '\\', ch ]; return ch }
+    , try $ do { string "\\\\"; return '\\' }
+    ]
 
 substLiteral = try $ do
     symbol "s"
@@ -957,3 +991,4 @@ showErr err =
 retSyn :: String -> [Exp] -> RuleParser Exp
 retSyn sym args = do
     return $ Syn sym args
+

@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -122,3 +122,4 @@ mapPerms f (Perm x xs)
   where
     mapBranch f (Branch perm p)
       = Branch (mapPerms (f.) perm) p
+

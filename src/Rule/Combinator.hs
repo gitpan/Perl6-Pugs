@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts -O #-}
+{-# OPTIONS_GHC -fglasgow-exts -O #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -152,3 +152,4 @@ lookAhead p         = do{ state <- getParserState
                         ; setParserState state
                         ; return x
                         }
+

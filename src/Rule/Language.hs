@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -123,4 +123,3 @@ mondrianDef = javaStyle
                 , caseSensitive  = True				  
 		}
 
-				

@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Evaluation and reduction engine.
@@ -14,6 +14,7 @@
 module Eval where
 import Internals
 import Prelude hiding ( exp )
+import qualified Data.Map as Map
 
 import AST
 import Junc
@@ -25,7 +26,7 @@ import Pretty
 
 emptyEnv :: (MonadIO m) => Pad -> m Env
 emptyEnv pad = do
-    ref  <- liftIO $ newIORef emptyFM
+    ref  <- liftIO $ newIORef Map.empty
     uniq <- liftIO $ newUnique
     glob <- liftIO $ newIORef (pad ++ initSyms)
     return $ Env
@@ -51,10 +52,10 @@ debug key fun str a = do
         Nothing -> return ()
         Just ref -> liftIO $ do
             fm <- readIORef ref
-            let val = fun $ lookupWithDefaultFM fm "" key
+            let val = fun $ Map.findWithDefault "" key fm
             when (length val > 100) $ do
                 hPutStrLn stderr "*** Warning: deep recursion"
-            writeIORef ref (addToFM fm key val)
+            writeIORef ref (Map.insert key val fm)
             putStrLn ("***" ++ val ++ str ++ ": " ++ pretty a)
 
 evaluateMain :: Exp -> Eval Val
@@ -102,7 +103,7 @@ evaluate exp = do
         VError s e  -> retError s e
         _           -> return val
 
-evalSym :: Symbol -> Eval (String, Val)
+evalSym :: Symbol a -> Eval (String, Val)
 evalSym (SymVal _ name val) =
     return (name, val)
 evalSym (SymExp _ name vexp) = do
@@ -145,14 +146,13 @@ reduceStatements ((exp, pos):rest)
         reduceStatements rest v
     | Sym ((SymExp scope name vexp):other) <- exp = \v -> do
         val <- enterLValue $ enterEvalContext (cxtOfSigil $ head name) vexp
-        reduceStatements ((Sym (SymVal scope name val:other), pos):rest) v
-    | Sym (sym@(SymVal scope _ val):other) <- exp
-    , scope == SOur || scope == SGlobal = \_ -> do
-        addGlobalSym sym
-        reduceStatements ((Sym other, pos):rest) (Val val)
-    | Sym (sym@(SymVal SMy _ val):other) <- exp = \_ -> do
-        enterLex [ sym ] $ do
-            reduceStatements ((Sym other, pos):rest) (Val val)
+        let doRest = reduceStatements ((Sym other, pos):rest) v
+            sym = SymVal scope name val
+        case scope of
+            SMy -> enterLex [ sym ] doRest
+            _   -> do
+                addGlobalSym sym
+                doRest
     | Syn syn [Var name, vexp] <- exp
     , (syn == ":=" || syn == "::=") = \_ -> do
         env <- ask
@@ -379,9 +379,9 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
                 indexVal  <- readMVal indexMVal
                 val'      <- enterEvalContext "Scalar" exp
                 valScalar <- newMVal val'
-                let hash = addToFM fm (vCast indexVal) valScalar
+                let hash = Map.insert (vCast indexVal) valScalar fm
                     fm = case hashVal of
-                            VUndef  -> emptyFM -- autovivification
+                            VUndef  -> Map.empty -- autovivification
                             _       -> vCast hashVal
                 writeMVal hashMVal $ VHash $ MkHash hash
                 retVal val'
@@ -439,7 +439,7 @@ reduce env@Env{ envContext = cxt } exp@(Syn name exps) = case name of
         hashVal  <- enterEvalContext "Hash" listExp
         hash    <- readMVal hashVal
         cls     <- asks envClasses
-        let slice = map (lookupWithDefaultFM (vCast hash) VUndef) ((map vCast $ vCast range) :: [VStr])
+        let slice = map (\k -> Map.findWithDefault VUndef k (vCast hash)) ((map vCast $ vCast range) :: [VStr])
         if isaType cls "Scalar" cxt
             then retVal $ last (VUndef:slice)
             else retVal $ VList slice
@@ -733,3 +733,4 @@ arityMatch sub@Sub{ subAssoc = assoc, subParams = prms } argLen argSlurpLen
     = Just sub
     | otherwise
     = Nothing
+

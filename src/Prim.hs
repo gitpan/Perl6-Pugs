@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Primitive operators.
@@ -16,10 +16,12 @@ import AST
 import Pretty
 import Parser
 import External
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 op0 :: Ident -> [Val] -> Eval Val
 -- op0 ","  = return . VList . concatMap vCast
-op0 "!"  = return . VJunc . Junc JNone emptySet . mkSet
+op0 "!"  = return . VJunc . Junc JNone Set.empty . Set.fromList
 op0 "&"  = return . opJuncAll
 op0 "^"  = return . opJuncOne
 op0 "|"  = return . opJuncAny
@@ -34,6 +36,9 @@ op0 "not" = const retEmpty
 op0 "so" = const (return $ VBool True)
 op0 "¥" = (>>= return . VList . concat . transpose) . mapM fromVal
 op0 "Y" = op0 "¥"
+op0 "File::Spec::cwd" = \_ -> do
+                mycwd <- liftIO getCurrentDirectory
+                return $ VStr mycwd
 op0 other = \x -> return $ VError ("unimplemented listOp: " ++ other) (App other (map Val x) [])
 
 retEmpty :: ContT Val (ReaderT Env IO) Val
@@ -42,7 +47,7 @@ retEmpty = do
     return $ case cxt of
         "List"  -> VList []
         "Array" -> VArray (MkArray [])
-        "Hash"  -> VHash (MkHash emptyFM)
+        "Hash"  -> VHash (MkHash Map.empty)
         _       -> VUndef
 
 op1 :: Ident -> Val -> Eval Val
@@ -72,7 +77,6 @@ op1 "undef" = \mv -> do
     return VUndef
 op1 "+"    = return . op1Numeric id
 op1 "abs"  = return . op1Numeric abs
-op1 "atan2"= op1Floating atan
 op1 "cos"  = op1Floating cos
 op1 "sin"  = op1Floating sin
 op1 "sqrt" = op1Floating sqrt
@@ -119,7 +123,7 @@ op1 "true" = op1 "?"
 op1 "any"  = return . opJuncAny . vCast
 op1 "all"  = return . opJuncAll . vCast
 op1 "one"  = return . opJuncOne . vCast
-op1 "none" = return . VJunc . Junc JNone emptySet . mkSet . vCast
+op1 "none" = return . VJunc . Junc JNone Set.empty . Set.fromList . vCast
 op1 "perl" = return . VStr . (pretty :: Val -> VStr)
 op1 "require_haskell" = \v -> do
     name    <- fromVal v
@@ -150,7 +154,7 @@ op1 "defined" = \v -> do
     v <- readMVal v
     return . VBool $ case v of
         VUndef  -> False
-        _       -> True    
+        _       -> True
 op1 "last" = \v -> return (VError "cannot last() outside a loop" (Val v))
 op1 "return" = \v -> return (VError "cannot return() outside a subroutine" (Val v))
 
@@ -184,6 +188,9 @@ op1 "rmdir" = boolIO removeDirectory
 op1 "chdir" = boolIO setCurrentDirectory
 op1 "-d"    = boolIO3 doesDirectoryExist
 op1 "-f"    = boolIO3 doesFileExist
+op1 "elems" = return . VInt . (genericLength :: VList -> VInt) . vCast
+op1 "chars" = return . VInt . (genericLength :: String -> VInt) . vCast
+op1 "bytes" = return . VInt . (genericLength :: String -> VInt) . encodeUTF8 . vCast
 op1 "chmod" = \v -> do
     v <- readMVal v
     vals <- mapM readMVal (vCast v)
@@ -195,10 +202,17 @@ op1 "unlink" = \v -> do
     rets <- liftIO $ sequence $ map ( doBoolIO removeFile ) $ map vCast vals
     return $ VInt $ sum $ map bool2n rets
 op1 "slurp" = \v -> do
-    fileName <- fromVal v
-    ifContextIsa "List"
-        (slurpList fileName)
-        (slurpScalar fileName)
+    val         <- fromVal v
+    case val of
+        (VHandle h) -> do
+            ifContextIsa "List"
+                (op1 "=" val)
+                (return . VStr =<< (liftIO $ hGetContents h))
+        _ -> do
+            fileName    <- fromVal val
+            ifContextIsa "List"
+                (slurpList fileName)
+                (slurpScalar fileName)
     where
     slurpList file = op1 "=" (VList [VStr file])
     slurpScalar file = tryIO VUndef $ do
@@ -217,7 +231,33 @@ op1 "open" = \v -> do
     modeOf "+>" = ReadWriteMode
     modeOf m    = error $ "unknown mode: " ++ m
 op1 "system" = boolIO system
-op1 "close" = boolIO hClose
+op1 "accept" = \v -> do
+    socket      <- fromVal v
+    (h, _, _)   <- liftIO $ accept socket
+    return $ VHandle h
+op1 "yield" = \_ -> do
+    ok <- tryIO False $ do { yield ; return True }
+    return $ VBool ok
+op1 "async" = \v -> do
+    env     <- ask
+    code    <- fromVal v
+    tid     <- liftIO . (if rtsSupportsBoundThreads then forkOS else forkIO) $ do
+        (`runReaderT` env) $ (`runContT` return) $ resetT $ do
+            evl <- asks envEval
+            local (\e -> e{ envContext = "Void" }) $ do
+                evl (Syn "()" [Val code, Syn "invs" [], Syn "args" []])
+        return ()
+    return $ VThread tid
+op1 "listen" = \v -> do
+    port    <- fromVal v
+    socket  <- liftIO $ listenOn (PortNumber $ fromInteger port)
+    return $ VSocket socket
+op1 "flush" = boolIO hFlush
+op1 "close" = \v -> do
+    val <- fromVal v
+    case val of
+        (VSocket _) -> boolIO sClose val
+        _           -> boolIO hClose val
 op1 "key" = return . fst . (vCast :: Val -> VPair)
 op1 "value" = return . snd . (vCast :: Val -> VPair)
 op1 "kv" = return . VList . concatMap (\(k, v) -> [k, v]) . vCast
@@ -244,24 +284,41 @@ op1 "ref"  = return . VStr . valType
 op1 "pop"  = op1Pop (last, init)
 op1 "shift"= op1Pop (head, tail)
 op1 "pick" = op1Pick
+op1 "chr"  = return . op1Chr
+op1 "ord"  = return . op1Ord
+op1 "hex"  = return . op1Hex
 op1 other  = return . (\x -> VError ("unimplemented unaryOp: " ++ other) (App other [Val x] []))
 
 
 op1Values :: Val -> Val
-op1Values (VJunc j) = VList $ setToList $ juncSet j
+op1Values (VJunc j) = VList $ Set.elems $ juncSet j
 op1Values (VPair (_, v)) = VList $ [v] -- lwall: a pair is a really small hash.
 op1Values v@(VHash _) = VList $ map snd $ (vCast :: Val -> [VPair]) v
 op1Values v@(VList _) = VList $ map snd $ (vCast :: Val -> [VPair]) v -- hope it's a list of pairs
 op1Values (VRef v) = op1Values v
 op1Values v = VError "values not defined" (Val v)
 
+-- what's less cheesy than read?
+op1Hex          :: Val -> Val
+op1Hex (VStr s) = VInt (read ("0x" ++ s))
+op1Hex (VInt i) = VInt (read ("0x" ++ show i))  -- PerlJam asks "auto int to str coercion?"
+op1Hex v        = VError "hex not defined" (Val v)
+
+op1Ord              :: Val -> Val
+op1Ord (VStr (s:_)) = VInt (fromIntegral (ord s))
+op1Ord v            =  VError "ord not defined" (Val v)
+
+op1Chr          :: Val -> Val
+op1Chr (VInt i) = VStr [(chr . fromIntegral) i]
+op1Chr v        = VError "chr not defined" (Val v)
+
 op1Pick :: Val -> Eval Val
 op1Pick (VJunc (Junc JAny _ set)) = do -- pick mainly works on 'any'
-    rand <- liftIO $ randomRIO (0 :: Int, (cardinality set) - 1)
-    return $ (setToList set) !! rand
-op1Pick (VJunc (Junc _ _ set)) = 
-    if (cardinality $ set) > 1 then return VUndef
-    else return $ head $ setToList set
+    rand <- liftIO $ randomRIO (0 :: Int, (Set.cardinality set) - 1)
+    return $ (Set.elems set) !! rand
+op1Pick (VJunc (Junc _ _ set)) =
+    if (Set.cardinality $ set) > 1 then return VUndef
+    else return $ head $ Set.elems set
 op1Pick (VRef v) = op1Pick v
 op1Pick v = return $ VError "pick not defined" (Val v)
 
@@ -307,11 +364,11 @@ boolIO2 f u v = do
         f (vCast u) (vCast v)
         return True
     return $ VBool ok
-    
-boolIO3 f v = do 
+
+boolIO3 f v = do
     ok <- tryIO False $ do
         f (vCast v)
-    return $ VBool ok    
+    return $ VBool ok
 
 opEval :: Bool -> String -> String -> Eval Val
 opEval fatal name str = do
@@ -371,6 +428,10 @@ op2 "~>" = \x y -> return $ VStr $ mapStr (`shiftR` vCast y) (vCast x)
 op2 "**" = op2Rat ((^^) :: VRat -> VInt -> VRat)
 op2 "+"  = op2Numeric (+)
 op2 "-"  = op2Numeric (-)
+op2 "atan2" = \x y -> do
+    x' <- fromVal x
+    y' <- fromVal y
+    return . VNum $ atan2 x' y'
 op2 "~"  = op2Str (++)
 op2 "+|" = op2Int (.|.)
 op2 "+^" = op2Int xor
@@ -415,12 +476,31 @@ op2 "grep"= op2Grep
 op2 "map"= op2Map
 op2 "unshift" = op2Push (flip (++))
 op2 "push" = op2Push (++)
-op2 "split"= \x y -> return $ split' (vCast x) (vCast y)
+op2 "split"= \x y -> do
+    val <- fromVal x
+    str <- fromVal y
+    case val of
+        VRule rx -> do
+            chunks <- rxSplit rx (encodeUTF8 str)
+            return $ VList $ map (VStr . decodeUTF8) chunks
+        _ -> do
+            delim <- fromVal val
+            return $ split' delim str
     where
     split' :: VStr -> VStr -> Val
     split' [] xs = VList $ map (VStr . (:[])) xs
     split' glue xs = VList $ map VStr $ split glue xs
+op2 "connect" = \x y -> do
+    host <- fromVal x
+    port <- fromVal y
+    hdl  <- liftIO $ connectTo host (PortNumber $ fromInteger port)
+    return $ VHandle hdl
 op2 other = \x y -> return $ VError ("unimplemented binaryOp: " ++ other) (App other [Val x, Val y] [])
+
+-- XXX - need to generalise this
+op2Match x y@(MVal _) = do
+    y' <- fromVal y
+    op2Match x y'
 
 op2Match x (VSubst (rx@MkRule{ rxGlobal = True }, subst)) = do
     str     <- fromVal x
@@ -453,13 +533,27 @@ op2Match x (VSubst (rx@MkRule{ rxGlobal = False }, subst)) = do
             glob <- askGlobal
             let Just matchAV = findSym "$/" glob
                 subs = elems $ mrSubs mr
-            writeMVal matchAV $ VList $ map VStr subs
+            writeMVal matchAV $ VList $ map (VStr . decodeUTF8) subs
             str' <- fromVal =<< evalExp subst
             writeMVal (vCast x) $
                 (VStr $ decodeUTF8 $ concat [mrBefore mr, str', mrAfter mr])
             return $ VBool True
 
-op2Match x (VRule rx) = do
+op2Match x (VRule rx@MkRule{ rxGlobal = True }) = do
+    str     <- fromVal x
+    rv      <- doMatch (encodeUTF8 str)
+    ifContextIsa "List"
+        (return . VList $ map (VStr . decodeUTF8) rv)
+        (return . VInt $ genericLength rv)
+    where
+    doMatch str = do
+        case str =~~ rxRegex rx of
+            Nothing -> return []
+            Just mr -> do
+                rest <- doMatch $ mrAfter mr
+                return $ (tail $ elems (mrSubs mr)) ++ rest
+
+op2Match x (VRule rx@MkRule{ rxGlobal = False }) = do
     str     <- fromVal x
     case encodeUTF8 str =~~ rxRegex rx of
         Nothing -> return $ VBool False
@@ -468,10 +562,24 @@ op2Match x (VRule rx) = do
             glob <- askGlobal
             let Just matchAV = findSym "$/" glob
                 subs = elems $ mrSubs mr
-            writeMVal matchAV $ VList $ map VStr subs
+            writeMVal matchAV $ VList $ map (VStr . decodeUTF8) subs
             return $ VBool True
 
 op2Match x y = op2Cmp vCastStr (==) x y
+
+rxSplit :: VRule -> String -> Eval [String]
+rxSplit _  [] = return []
+rxSplit rx str = do
+    case str =~~ rxRegex rx of
+        Nothing -> return [str]
+        Just mr | null $ mrMatch mr -> do
+            let (c:cs) = str
+            rest <- rxSplit rx (cs)
+            return ([c]:rest)
+        Just mr -> do
+            rest <- rxSplit rx (mrAfter mr)
+            let f = if null (mrBefore mr) then id else (mrBefore mr:)
+            return $ (f $ mrSubList mr) ++ rest
 
 op3 :: Ident -> Val -> Val -> Val -> Eval Val
 op3 "index" = \x y z -> do
@@ -483,7 +591,7 @@ op3 "index" = \x y z -> do
     doIndex :: VInt -> VStr -> VStr -> VInt -> VInt
     doIndex n a b p
         | p > 0, null a     = doIndex n a b 0
-        | p > 0             = doIndex (n+1) (tail a) b (p-1) 
+        | p > 0             = doIndex (n+1) (tail a) b (p-1)
         | b `isPrefixOf` a  = n
         | null a            = -1
         | otherwise         = doIndex (n+1) (tail a) b 0
@@ -653,7 +761,7 @@ op2Numeric f x y
         y' <- fromVal y
         return . VNum $ f x' y'
 
-primOp :: String -> String -> Params -> String -> Symbol
+primOp :: String -> String -> Params -> String -> Symbol Val
 primOp sym assoc prms ret = SymVal SOur name sub
     where
     name | isAlpha (head sym)
@@ -697,7 +805,7 @@ primOp sym assoc prms ret = SymVal SOur name sub
         "chain"     -> (2, "infix", False)
         "list"      -> (0, "infix", False)
         other       -> (0, other, True)
-        
+
 primDecl str = primOp sym assoc (foldr foldParam [] prms) ret
     where
     (ret:assoc:sym:prms') = words str
@@ -715,6 +823,10 @@ foldParam ('r':'w':'!':"List") = \ps -> ((buildParam "List" "" "@?0" (Val VUndef
 foldParam ('r':'w':'!':str) = \ps -> ((buildParam str "" "$?1" (Val VUndef)) { isLValue = True }:ps)
 foldParam ""        = id
 foldParam ('?':str)
+    | (('r':'w':'!':typ), "=$_") <- break (== '=') str
+    = \ps -> ((buildParam typ "?" "$?1" (Var "$_")) { isLValue = True }:ps)
+    | (typ, "=$_") <- break (== '=') str
+    = \ps -> (buildParam typ "?" "$?1" (Var "$_"):ps)
     | (typ, ('=':def)) <- break (== '=') str
     = let readVal "Num" = Val . VNum . read
           readVal "Int" = Val . VInt . read
@@ -735,12 +847,12 @@ foldParam x         = doFoldParam x []
 initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      spre    !       (Bool)\
 \\n   Num       spre    +       (Num)\
-\\n   Num       pre     abs     (Num)\
-\\n   Num       pre     atan2    (Num)\
-\\n   Num       pre     cos     (Num)\
-\\n   Num       pre     sin     (Num)\
-\\n   Num       pre     exp     (Num)\
-\\n   Num       pre     sqrt    (Num)\
+\\n   Num       pre     abs     (?Num=$_)\
+\\n   Num       pre     atan2   (Num, Num)\
+\\n   Num       pre     cos     (?Num=$_)\
+\\n   Num       pre     sin     (?Num=$_)\
+\\n   Num       pre     exp     (?Num=$_)\
+\\n   Num       pre     sqrt    (?Num=$_)\
 \\n   Bool      pre     -d      (Str)\
 \\n   Bool      pre     -f      (Str)\
 \\n   Num       spre    -       (Num)\
@@ -750,7 +862,7 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      spre    =       (IO)\
 \\n   Str       pre     readline (IO)\
 \\n   List      pre     readline (IO)\
-\\n   Int       pre     int     (Int)\
+\\n   Int       pre     int     (?Int=$_)\
 \\n   List      pre     list    (List)\
 \\n   Scalar    pre     scalar  (Scalar)\
 \\n   List      pre     reverse (List)\
@@ -769,10 +881,10 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Int       pre     index   (Str, Str, ?Int=0)\
 \\n   Int       pre     rindex  (Str, Str, ?Int)\
 \\n   Int       pre     substr  (rw!Str, Int, ?Int, ?Str)\
-\\n   Str       pre     lc      (Str)\
-\\n   Str       pre     lcfirst (Str)\
-\\n   Str       pre     uc      (Str)\
-\\n   Str       pre     ucfirst (Str)\
+\\n   Str       pre     lc      (?Str=$_)\
+\\n   Str       pre     lcfirst (?Str=$_)\
+\\n   Str       pre     uc      (?Str=$_)\
+\\n   Str       pre     ucfirst (?Str=$_)\
 \\n   Any       post    ++      (rw!Num)\
 \\n   Num       post    --      (rw!Num)\
 \\n   Any       spre    ++      (rw!Num)\
@@ -794,9 +906,9 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     values  (Hash)\
 \\n   List      pre     kv      (Hash)\
 \\n   Str       pre     perl    (List)\
-\\n   Any       pre     eval    (Str)\
-\\n   Any       pre     eval_perl5 (Str)\
-\\n   Any       pre     require (Str)\
+\\n   Any       pre     eval    (?Str=$_)\
+\\n   Any       pre     eval_perl5 (?Str=$_)\
+\\n   Any       pre     require (?Str=$_)\
 \\n   Any       pre     require_haskell (Str)\
 \\n   Any       pre     last    (?Int=1)\
 \\n   Any       pre     exit    (?Int=0)\
@@ -804,14 +916,21 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     defined (Any)\
 \\n   Str       pre     ref     (Any)\
 \\n   Num       pre     time    ()\
+\\n   Str       pre     File::Spec::cwd  ()\
 \\n   Bool      pre     print   (List)\
 \\n   Bool      pre     say     (IO: List)\
 \\n   Bool      pre     say     (List)\
 \\n   Bool      pre     close   (IO)\
+\\n   Bool      pre     flush   (IO)\
+\\n   Bool      pre     close   (Socket)\
 \\n   Bool      pre     die     (List)\
 \\n   Any       pre     do      (Str)\
 \\n   IO        pre     open    (Str)\
-\\n   List      pre     slurp   (Str)\
+\\n   Socket    pre     listen  (Int)\
+\\n   Socket    pre     connect (Str, Int)\
+\\n   Any       pre     accept  (Any)\
+\\n   List      pre     slurp   (?Str=$_)\
+\\n   List      pre     slurp   (Handle)\
 \\n   Bool      pre     system  (Str)\
 \\n   Bool      pre     system  (Str: List)\
 \\n   Bool      pre     binmode (IO: ?Int=1)\
@@ -821,9 +940,12 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Junction  pre     one     (List)\
 \\n   Junction  pre     none    (List)\
 \\n   Bool      pre     sleep   (Int)\
-\\n   Bool      pre     rmdir   (Str)\
+\\n   Bool      pre     rmdir   (?Str=$_)\
 \\n   Bool      pre     mkdir   (Str)\
 \\n   Bool      pre     chdir   (Str)\
+\\n   Int       pre     elems   (Array)\
+\\n   Int       pre     chars   (?Str=$_)\
+\\n   Int       pre     bytes   (?Str=$_)\
 \\n   Int       pre     chmod   (List)\
 \\n   Scalar    pre     key     (Pair)\
 \\n   Scalar    pre     value   (Pair)\
@@ -906,5 +1028,12 @@ initSyms = map primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Scalar    left    nor     (Bool, ~Bool)\
 \\n   Scalar    left    xor     (Bool, Bool)\
 \\n   Scalar    left    err     (Bool, ~Bool)\
+\\n   Int       pre     chr     (?Str=$_)\
+\\n   Str       pre     ord     (?Int=$_)\
+\\n   Str       pre     hex     (?Str=$_)\
+\\n   Str       pre     hex     (Int)\
 \\n   Any       list    ;       (Any)\
+\\n   Thread    pre     async   (Code)\
+\\n   Bool      pre     yield   (?Thread)\
 \\n"
+

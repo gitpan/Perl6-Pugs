@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 
 {-
     Online help and banner text.
@@ -16,7 +16,7 @@
 #include "pugs_version.h"
 
 module Help (printInteractiveHelp, printCommandLineHelp,
-             banner, versnum, version, 
+             banner, versnum, version, revnum,
              copyright, disclaimer, intro) where
 
 printInteractiveHelp :: IO ()
@@ -30,17 +30,23 @@ printInteractiveHelp
         putStrLn "<exp>           = run a command"
         putStrLn ":i <exp>        = run a command, and ugly-print the result"
         putStrLn ":r              = reset the evaluation environment"
-        putStrLn ":l <filename>   = load a pugs file (need quotes around the name)" 
+        putStrLn ":l <filename>   = load a pugs file (need quotes around the name)"
 
 {- FIXME: Somebody with more UI skillz should make this nicer -}
 printCommandLineHelp :: IO ()
 printCommandLineHelp
-   = do putStrLn "Command-line flags:"
-        putStrLn "-e               executes its argument"
+   = do putStrLn "Usage: pugs [switches] [programfile] [arguments]"
+        putStrLn "Command-line flags:"
+        putStrLn "-e program       one line of program (several -e's allowed, omit programfile)"
+        putStrLn "-n               wrap the -e fragments in while(=<>){...} loop"
+        putStrLn "-p               wrap the -e fragments in while(=<>){...;print} loop"
+        putStrLn "-c               parses the file or -e, but does not run it"
+        putStrLn "-Cbackend        uses the compiler backend"
+        putStrLn "-M module        execute 'use module' before executing the program"
         putStrLn "-h or --help     gives this message"
         putStrLn "-V               long configuration information & version"
+        putStrLn "-V:item          short configuration information for item"
         putStrLn "-v or --version  version"
-        putStrLn "-c               parses the file or -e, but does not run it"
         putStrLn "-l -d and -w are ignored for compatability with perl 5"
 
 name       = "Perl6 User's Golfing System"
@@ -48,8 +54,9 @@ versnum    = PUGS_VERSION
 date	   = PUGS_DATE
 version    = name ++ ", version " ++ versnum ++ ", " ++ date ++ revision
 copyright  = "Copyright 2005 by Autrijus Tang"
+revnum     = show(PUGS_SVN_REVISION :: Integer)
 revision
-    | rev <- show(PUGS_SVN_REVISION :: Integer)
+    | rev <- revnum
     , rev /= "0"
     = " (r" ++ rev ++ ")"
     | otherwise
@@ -68,7 +75,7 @@ versionFill n = fill ++ vstr
 
 banner :: IO ()
 banner = putStrLn $ unlines
-    [ "   ______                                                            "                                                             
+    [ "   ______                                                            "
     , " /\\   __ \\                                                           "
     , " \\ \\  \\/\\ \\ __  __  ______  ______     (P)erl6                       "
     , "  \\ \\   __//\\ \\/\\ \\/\\  __ \\/\\  ___\\    (U)ser's                      "
@@ -76,7 +83,7 @@ banner = putStrLn $ unlines
     , "    \\ \\__\\  \\ \\____/\\ \\____ \\/\\_____\\  (S)ystem                      "
     , "     \\/__/   \\/___/  \\/___/\\ \\/____/                                 "
     , "                       /\\____/   " ++ versionFill 27
-    , "                       \\/___/    " ++ copyright       
+    , "                       \\/___/    " ++ copyright
     , "--------------------------------------------------------------------"
     , " Web: http://pugscode.org/           Email: perl6-compiler@perl.org "
     ]
@@ -86,3 +93,4 @@ intro = putStrLn $ unlines
     [ "Welcome to Pugs -- " ++ name
     , "Type :h for help"
     ]
+

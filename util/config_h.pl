@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Cwd;
+use File::Spec;
 
 my $base = shift || Cwd::cwd();
 
@@ -46,11 +47,10 @@ else {
     print OUT "#define PUGS_HAVE_POSIX 1\n";
 }
 
-my $has_readline = eval {
-    require Term::ReadLine;
-    require Term::ReadLine::Gnu;
-    1;
-};
+my $has_readline = try_compile(<< '.');
+import System.Console.Readline
+main = readline "" >> return ()
+.
 
 if ($has_readline) {
     print OUT "#define PUGS_HAVE_READLINE 1\n";
@@ -60,9 +60,54 @@ else {
     warn << '.';
 
 *** Readline support disabled.  If you want readline support,
-    please install Term::ReadLine::Gnu from CPAN, as well as
-    the GNU Readline headers and shared library.
+    please install the GNU readline library.
 
 .
 }
+
+my $has_th = try_compile(<< '.');
+{-# OPTIONS_GHC -fth #-}
+main = $([| return () |])
+.
+
+if ($has_th) {
+    print OUT "#define PUGS_HAVE_TH 1\n";
+}
+else {
+    print OUT "#undef PUGS_HAVE_TH\n";
+    warn << '.';
+
+*** Template Haskell compiler backends disabled.  If you want
+    Template Haskell support, please compile your GHC with the
+    GHCi option.
+
+.
+}
+
 close OUT;
+
+sub try_compile {
+    my $code = shift;
+    my $temp = File::Spec->catfile(File::Spec->tmpdir, "pugs-tmp-$$");
+
+    eval {
+        open TMP, "> $temp.hs";
+        print TMP $code;
+        close TMP;
+        system(
+            ($ENV{GHC} || 'ghc'), @_,
+            "--make", "-v0",
+            -o => "$temp.exe",
+            "$temp.hs"
+        );
+        
+    };
+
+    my $ok = -e "$temp.exe";
+    unlink("$temp.exe");
+    unlink("$temp.hs");
+    unlink("$temp.hi");
+    unlink("$temp.o");
+    return $ok;
+}
+

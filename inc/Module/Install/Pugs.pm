@@ -22,8 +22,7 @@ sub WritePugs {
 
     $self->WriteAll(@_);
 
-    $self->pugs_fix_makefile
-      if $install_version eq '6';
+    $self->pugs_fix_makefile;
 }
 
 sub set_makefile_macros {
@@ -40,7 +39,6 @@ sub set_makefile_macros {
         return 1;
     }
 }
-
 
 sub base_path {
     my $self = shift;
@@ -84,8 +82,14 @@ sub setup_perl6_install {
     my $self = shift;
     my $libs = $self->get_pugs_config;
     $self->makemaker_args(
-        INSTALLARCHLIB => $libs->{archlib},
-        INSTALLPRIVLIB => $libs->{privlib},
+        INSTALLARCHLIB  => $libs->{archlib},
+        INSTALLPRIVLIB  => $libs->{privlib},
+        INSTALLSITEARCH => $libs->{sitearch},
+        SITEARCHEXP 	=> $libs->{sitearch},
+        INSTALLSITELIB  => $libs->{sitelib},
+	SITELIBEXP	=> $libs->{sitelib},
+	PERLPREFIX	=> $libs->{prefix},
+	SITEPREFIX	=> $libs->{siteprefix},
     );
 }
 
@@ -123,7 +127,7 @@ sub pugs_binary {
     my $self = shift;
     my $pugs = "pugs$Config{_exe}";
     my $base = $self->{_top}{base};
-    "$base/blib6/script/$pugs";
+    "$base/blib/script/$pugs";
 }
 
 sub deny_cygwin {
@@ -145,6 +149,12 @@ sub assert_ghc {
 .
 
     my $ghc_version = $1;
+    unless ($ghc_version =~ /^(\d)\.(\d+)/ and $1 >= 6 and $2 >= 4) {
+        die << ".";
+*** Cannot find GHC 6.4 or above from path (we have $ghc_version).
+*** Please install a newer version from http://haskell.org/ghc/.
+.
+    }
     my $ghc_flags = "-H200m -L. -Lsrc -Lsrc/pcre -I. -Isrc -Isrc/pcre ";
     $ghc_flags .= " -i. -isrc -isrc/pcre -static "; 
     $ghc_flags .= " -Wall "
@@ -154,8 +164,7 @@ sub assert_ghc {
       if $self->is_extension_build;
     $ghc_flags .= " -I$Config{archlib}/CORE -L$Config{archlib}/CORE -i$Config{archlib}/CORE -lperl" 
       if $ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /perl5/i;
-    $ghc_flags .= " -fno-warn-deprecations -fno-warn-orphans"
-      if $ghc_version ge '6.4';
+    #$ghc_flags .= " -fno-warn-deprecations -fno-warn-orphans";
     return ($ghc, $ghc_version, $ghc_flags);
 }
 
@@ -165,33 +174,6 @@ sub fixpaths {
     my $sep = File::Spec->catdir('');
     $text =~ s{\b/}{$sep}g;
     return $text;
-}
-
-sub external {
-    my $self = shift;
-    my $module_path = shift;
-    open MODULE, $module_path
-      or die "Can't open '$module_path' for input\n";
-    my $source = do { local $/; <MODULE> };
-    return unless $source =~
-    /^\s*module\s+(.*?);.*\sinline\s/ms;
-    my $module_name = $1;
-    $module_name =~ s/-/__/;
-    $module_name =~ s/[\-\.]/_/g;
-    $self->{MM}{FULLEXT} = $module_name;
-
-    my ($ghc, $ghc_version, $ghc_flags) = $self->assert_ghc;
-
-    $self->postamble(<<_);
-pure_all :: $module_name.o
-	cp $module_name.o \$(INST_ARCHAUTODIR)
-
-$module_name.o :: $module_name.hs
-	$ghc --make -isrc -Isrc $ghc_flags \$(GHC_FLAGS) $module_name.hs
-
-$module_name.hs :: $module_path
-	pugs --external $module_name $module_path > $module_name.hs
-_
 }
 
 1;

@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     The Main REPL loop.
@@ -25,49 +25,60 @@ import Parser
 import Help
 import Pretty
 import Compile
+import IO
+import qualified Data.Map as Map
 
 main :: IO ()
 main = do
     hSetBuffering stdout NoBuffering
-    args <- getArgs
-    run $ concatMap procArg args
-    where
-    -- procArg ('-':'e':prog@(_:_)) = ["-e", prog]
-    -- procArg ('-':'d':rest@(_:_)) = ["-d", ('-':rest)]
-    procArg x = [x]
+    runWithArgs run
+{-    
+    __run args
 
+__run x = do
+            warn $ canonicalArgs x
+            warn $ gatherArgs . unpackOptions $ x
+            warn $ unpackOptions x
+            run $ canonicalArgs x
+-}
+warn x = do
+            hPrint stderr $ show x
+
+-- see also ArgParse.hs
 run :: [String] -> IO ()
-run (("-l"):rest)                 = run rest
 run (("-d"):rest)                 = run rest
+
+{- -l does not appear here anymore
+   as it will have been replaced by an -e snippet further
+   above .
+-- run (("-l"):rest)                 = run rest
+-}
+
 run (("-w"):rest)                 = run rest
-run (("-e"):prog:args)            = doRun "-e" args prog
+run (("-I"):_:rest)               = run rest
+
+-- XXX should raise an error here:
+-- run ("-I":[])                     = do
+--                                    print "Empty -I"
 
 run ("-h":_)                    = printCommandLineHelp
-run ("--help":_)                = printCommandLineHelp
-run ("-V":_)                    = printConfigInfo
+run (("-V"):_)                  = printConfigInfo []
+run (("-V:"):item:_)            = printConfigInfo [item]
 run ("-v":_)                    = banner
-run ("--version":_)             = banner
+
+-- turn :file: and "-e":frag into a common subroutine/token
 run ("-c":"-e":prog:_)          = doCheck "-e" prog
-run ("-ce":prog:_)              = doCheck "-e" prog
 run ("-c":file:_)               = readFile file >>= doCheck file
 
-run (('-':'I':_):rest)          = run rest
--- run (('-':'l':xs):rest)         = run (('-':xs):rest)
--- run (('-':'w':xs):rest)         = run (('-':xs):rest)
--- run (('-':'d':xs):rest)         = run (('-':xs):rest)
-run (('-':'c':rest@(_:_)):args) = run (("-c"):('-':rest):args)
-run (('-':'d':rest@(_:_)):args) = run (("-d"):('-':rest):args)
-run (('-':'e':prog@(_:_)):args) = run (("-e"):prog:args)
-run (('-':'l':xs):args)         = run (("-l"):('-':xs):args)
-run (('-':'w':xs):args)         = run (("-w"):('-':xs):args)
-
-run (('-':'C':backend):"-e":prog:_) = doCompile backend "-e" prog
-run (('-':'C':backend):file:_)      = readFile file >>= doCompile backend file
+run ("-C":backend:"-e":prog:_)           = doCompile backend "-e" prog
+run ("-C":backend:file:_)                = readFile file >>= doCompile backend file
 run ("--external":mod:"-e":prog:_)    = doExternal mod "-e" prog
 run ("--external":mod:file:_)         = readFile file >>= doExternal mod file
-run ("-":_)                     = do
-    prog <- getContents
-    doRun "-" [] prog
+
+run (("-e"):prog:args)          = do doRun "-e" args prog
+run ("-":args)                  = do
+                                    prog <- getContents
+                                    doRun "-" args prog
 run (file:args)                 = readFile file >>= doRun file args
 run []                          = do
     isTTY <- hIsTerminalDevice stdin
@@ -159,7 +170,7 @@ doRunSingle menv opts prog = (`catch` handler) $ do
                 then tabulaRasa >>= newIORef
                 else return menv
         debug <- if runOptDebug opts
-                then liftM Just (newIORef emptyFM)
+                then liftM Just (newIORef Map.empty)
                 else return Nothing
         modifyIORef ref $ \e -> e{ envDebug = debug }
         return ref
@@ -209,8 +220,11 @@ runProgramWith fenv f name args prog = do
     val <- runEnv $ runRule (fenv env) id ruleProgram name $ decodeUTF8 prog
     f val
 
-printConfigInfo :: IO ()
-printConfigInfo = do
+-- createConfigLine :: String -> String -- why doesn't this work?
+createConfigLine item = "\t" ++ item ++ ": " ++ (Map.findWithDefault "UNKNOWN" item config)
+
+printConfigInfo :: [String] -> IO ()
+printConfigInfo [] = do
     environ <- getEnvironment
     libs <- getLibs environ
     putStrLn $ unlines $
@@ -218,6 +232,10 @@ printConfigInfo = do
         ,""
         ,"Summary of pugs configuration:"
         ,"" ]
-        ++ map (\x -> "\t" ++ fst x ++ ": " ++ snd x) (fmToList config)
+        ++ map (\x -> createConfigLine x) (map (fst) (Map.toList config))
         ++ [ "" ]
         ++ [ "@*INC:" ] ++ libs
+
+printConfigInfo (item:_) = do
+	putStrLn $ createConfigLine item
+

@@ -1,331 +1,312 @@
-#!/usr/bin/perl -w
-
-=kwid
-
-To generate a test catalog HTML dir, run
-
-    $ rm -rf test_catalog
-    $ perl util/catalog_tests.pl t/ test_catalog    # regenerates the pods
-    $ rm -rf test_catalog_html
-    $ mkdir test_catalog_html
-    $ perl -MPod::Simple::HTMLBatch -e 'Pod::Simple::HTMLBatch::go' test_catalog/ test_catalog_html/
-
-and now you have test_catalog_html/
-
-Note that only backlinked synopses are generated.
-
-= TODO
-
-== important
-
-* rewrite to emit HTML
-	- by converting pods with Pod::Simple::HTMLBatch, or otherwise
-	- and by emiting HTML directly for tests
-		- perhaps with an output more similar to Devel::Cover
-* put backlinks:
-	- for links with no regex right after the heading, in a comma
-	  separated list so they don't take too much space
-	- for links with a regex, as a superscripted number with a
-	  <a name="file">, at the *end* of the regex match
-* 
-
-== unimportant
-
-* cause L<news:msg@id.com> to link to google groups or wherever
-* correlate test results to their files
-
-== long term
-
-* determine if the regexes could be coerced into a more concrete link (low priority)
-
-= BUGS
-
-* cannot link to something like C<=item "Pointy subs">
-* synopsis pod is not parsed, but regexed
-* stuff is planted in a naughty way (substr)
-* too slurpy
-* there is no well defined object for test meta data. It should look like:
-	- Pugs::TestFile
-		- lines
-		- test cases
-			- type
-			- todo
-			- description
-		- plan
-		- links
-
-=cut
-
+#!/usr/bin/perl
+use warnings;
 use strict;
-use Fatal qw/open close opendir closedir/;
-use File::Spec::Functions qw/catfile curdir updir splitdir/;
-use Regexp::Common qw/balanced delimited/;
-use Pod::ParseUtils;
-use File::Path qw/mkpath/;
+use File::Find;
+use File::Spec::Functions ':ALL';
+use File::Path;
 use File::Basename;
-use File::Slurp;
+use IO::File;
+use HTML::TreeBuilder;
+use Regexp::Common qw/balanced delimited/;
+use Pod::Simple::HTML;
+use Pod::PlainText;
+use Tie::RefHash;
+use List::Util 'first';
+$|++;
 
-$\ = "\n\n";
+() = <<__NOTES__;
 
-my ($in, $out) = @ARGV;
-$in ||= "t";
-$out ||= "test_catalog";
+Strategy: iterate through all tests first.  Collect links and format as HTML
+as we go.  Then get the design docs, and format those as HTML, linking to 
+the links, and inserting a names where needed.
 
-catalog_tests($in, $out);
+__NOTES__
 
+my $t_dir;      # The root directory of the test tree.
+my $output_dir; # The root directory of the output tree.
+# ref to hash of information about links that we mean to insert.
+# Top level index is file, second level is an array ref of hash refs.
+# FIXME: Document next level.
+my $link_info;
 
-sub sort_files {
-    return ((-d $a && -f $b) ? 1 :       # file beats directory
-            (-d $a && -f $b) ? -1 :      # file beats directory
-                (lc($a) cmp lc($b)))     # otherwise just sort 'em
-}
+($t_dir, $output_dir)=@ARGV;
+$t_dir ||= 't';
+$output_dir ||= 't_index';
 
-sub list_dir {
-    my ($path) = @_;
-    opendir DIR, $path;
-    my @contents = map { catfile($path, $_) } grep {
-                    $_ ne curdir() && $_ ne updir()
-                    } readdir DIR;
-    closedir DIR;
-    return sort "sort_files", @contents;
-}
+$t_dir = rel2abs($t_dir);
+$output_dir = rel2abs($output_dir);
+print "From tree at $t_dir to tree at $output_dir\n";
 
-sub catalog_tests {
-    my ($dir, $output) = @_;
-    for (list_dir($dir)) {
-        if (-d $_ && !/Synopsis/ && !/Dialects/ && !/\.svn/) {
-            catalog_tests($_, $output);
-        }
-        elsif (-f $_ && /\.t$/) {
-            catalog_file($_, $output);
-        }
+find(\&handle_t_file, $t_dir);
+
+infest_syns($link_info);
+
+# Note: this is intended to be called from File::Find::find as a wanted
+# routine, so takes odd parameters.
+sub handle_t_file {
+  return unless /\.t$/;
+  my $input_path=rel2abs($_);
+  my $output_path=inpath_to_outpath($input_path);
+  
+  print "$input_path => $output_path\n";
+  
+  mkpath(dirname $output_path);
+
+  my $infile = IO::File->new($input_path, "<:utf8") or die "Can't open input test file $input_path: $!";
+  my $outfile = IO::File->new($output_path, ">:utf8") or die "Can't open output test file $output_path: $!";
+  
+  my $outtree = HTML::TreeBuilder->new_from_content("<html><head><title></title></head><body><tt><pre></pre></tt></body></html>");
+  
+  $outtree->look_down(_tag=>'title')->push_content($input_path);
+  my $body = $outtree->look_down(_tag=>'pre');
+  
+  my $quotable = qr/\w+|$RE{delimited}{-delim=>'"'}/;
+  
+  while (my $rest = <$infile>) {
+	chomp $rest;
+	$body->push_content(HTML::Element->new('a', name=>"line_$."));
+	
+	while ($rest =~ m{
+					  (.*?)                                     # Leading bit
+					  (L <+
+					    ($quotable)(?:/($quotable))             # Normal bit of link -- fixme, support URLs.
+					    (?:
+					      \s+                                   # Whitespace before re
+					      $RE{delimited}{-delim=>'/'}{-keep}    # Regex
+					      ([xim]*)                              # RE options
+					    )?                                      # End of regex block
+					  >+)                                       # End of link
+                      (.*)                                      # rest of thing
+					}sx) {
+	  my $text = $1;
+	  my $whole = $2;
+	  my $linkfile = $3;
+	  my $linkhead = $4;
+	  # $5  captures the entire match
+	  # $6  captures the opening delimiter (provided only one delimiter was specified)
+      my $regex=$7;  # captures delimited portion of the string (provided only one delimiter was specified)
+      # $8  captures the closing delimiter (provided only one delimiter was specified)
+	  my $reopts=$9;
+	  $rest=$10;
+	  
+	  $linkfile = $1 if ($linkfile =~ /^"(.*)"$/);
+	  $linkhead = $1 if ($linkhead =~ /^"(.*)"$/);
+	  
+#	  print STDERR "before link: $text\n";
+#	  print STDERR "$whole: linkfile: $linkfile linkhead: $linkhead regex: $regex reopts: $reopts\n";
+#	  print STDERR "after link: $rest\n";
+	  
+	  $body->push_content(HTML::Element->new('pre')->push_content($text));
+	  
+	  my $link = {};
+	  $link->{linkfile}=$linkfile;
+	  $link->{linkhead}=$linkhead;
+	  $link->{whole}=$whole;
+	  if ($regex) {
+		$reopts||='';
+		$link->{regex} = eval "qr/$regex/$reopts";
+	  }
+	  $link->{sourcepath}=$output_path;
+
+	  my $syn_path = catfile($output_dir, "Synopsis", "$linkfile.html");
+	  $body->push_content(HTML::Element->new(
+		'a',
+		href => abs2rel($syn_path, dirname($output_path)) . "#" .(0+$link),
+		id => 0+$link
+	  )->push_content($whole));
+
+	  push @{$link_info->{$linkfile}}, $link;
     }
+	
+	if ($rest) {
+	  $body->push_content($rest);
+	}
+	$body->push_content("\n");
+  }
+  
+  $outfile->print($outtree->as_HTML(undef, ' '));
+  $outtree->delete;
 }
 
-sub catalog_file {
-    my ($file, $output) = @_;
-    
-    my $dom = parse_file($file); # create a big hash of the info we care about, from each test
+sub infest_syns {
+	my $index = shift;
 
-    $file =~ s/\.t$//; # this is because stupid Pod::Simple::Search won't eat foo.t.pod
-    
-    prettify($file, $output, $dom); # write out a pod for the test, with all the data in it
-    cross_index($file, $output, $dom); # and also plant backlinks in the synopses it links to
+	my $p = Pod::PlainText->new(width => 1000);
+
+	mkpath(my $syndir = catdir($output_dir, "Synopsis"));
+	foreach my $syn (keys %$index){
+		# create HTML out of the pod
+		my $synhtml = catfile($syndir, "$syn.html");
+		my $synpod = catfile($t_dir, "Synopsis", "$syn.pod");
+		Pod::Simple::HTML->parse_from_file($synpod, $synhtml);
+
+		print STDERR "$synpod => $synhtml\n";
+
+		# and parse it into a tree
+		my $sobj = HTML::TreeBuilder->new_from_file($synhtml);
+
+		# this makes it prettier
+		$sobj->look_down(_tag=>"head")->push_content(HTML::Element->new("link", rel=>"stylesheet", type=>"text/css", href=>"http://dev.perl.org/css/perl.css"));
+
+		# This makes later processing easier
+		$sobj->objectify_text;
+
+		for my $headlevel (reverse 1..3) {
+		  my $tag = 'h'.$headlevel;
+		  
+		  while (my $beg = $sobj->look_down(_tag => $tag)) {
+			my $beg_n = $beg->pindex;
+			
+			my $end = $beg->right;
+			
+			if (!defined $end) {
+			  $beg->tag('div');
+			  $beg->attr('class', 'empty_head '.$tag);
+
+			  next;
+			}
+
+			$end=$end->right until (!$end->right or $end->right->tag eq $tag);
+			
+			my $end_n = $end->pindex;
+
+#			print STDERR "$tag from $beg_n to $end_n: ";
+#			print STDERR "\n";
+#			$beg->dump(\*STDERR);
+#			$end->dump(\*STDERR);
+
+			my $name = join '', 
+			  map {$_->attr('text')} 
+				$beg->look_down(_tag=>'~text');
+
+			$name = $1 if $name =~ m/^"(.*)"/;
+
+			my $div = HTML::Element->new('div', class=>$tag, name=>$name);
+			
+			my @kids = $beg->parent->splice_content($beg_n, $end_n-$beg_n+1, $div);
+			$div->push_content(@kids);
+			$kids[0]->tag('div');
+		  }
+		}
+		
+		$sobj->deobjectify_text;
+
+ 		tie my %sup_links, 'Tie::RefHash';
+ 		foreach my $link (reverse @{ $index->{$syn} }){ # reverse is since we're splicing right after the h1
+ 			my $target = $link->{linkfile};
+ 			my $heading = $link->{linkhead};
+ 			my $source = $link->{sourcepath};
+ 			my $regex = $link->{regex};
+
+ 			# create a representation that is like the $html->as_text
+ 			$heading = $p->interpolate($heading);
+ 	   		$heading =~ s/^\s+|\s+$//g;;
+ 			$heading =~ tr/`'//d;
+
+ 			if ($heading) {
+ 				my $heading_re = qr/^\Q$heading\E$/i;
+
+#				print STDERR "Trying to get heading >$heading<\n";
+
+ 				my $h = $sobj->look_down(_tag=>'div', class => qr/^h\d$/, name => $heading_re);
+				
+ 				unless ($h) {
+ 					warn qq{Couldn't resolve L<$target/"$heading">\n};
+ 					next;
+ 				};
+
+ 				# create the backlink <a href...>
+ 				my $backlink = HTML::Element->new('a', href=>(abs2rel($source, dirname($synhtml)) . "#" . (0+$link)), id=>0+$link, title=>$link->{whole}, class=>'testlink');
+				# $backlink->push_content(abs2rel($source, $output_dir));
+				$h->push_content($backlink);
+				my $t = HTML::Element->new('sup');
+				$t->push_content('t');
+				$backlink->push_content($t);
+
+				
+ 				my $found;
+ 				if ($regex) {
+ 					# we're skipping forward till we find a regex
+
+#					print STDERR "Looking for RE $regex\n";
+
+#				    $h->dump(\*STDERR);
+
+				    my @stuff = $h->look_down(sub {$_[0]->as_text =~ $regex});
+
+#					warn "Found ".(@stuff+0)." matches";
+
+					if (!@stuff) {
+					  goto notregex;
+					}
+					
+					# Prefer deeper or earlier matches.
+					@stuff = sort {  $b->depth <=> $a->depth   or
+								   $a->address cmp $b->address
+								  } @stuff;
+
+					$h = $stuff[0];
+					
+#					$h->dump(\*STDERR);
+
+					my $i=-1;
+					foreach ($h->content_list) {
+					  $i++;
+					  
+					  next if ref $_;
+					  
+					  next unless /(.*)($regex)(.*)/;
+					  
+					  $h->splice_content($i, 1, $1, $2, $backlink, $3);
+					  $found = 1;
+					  last;
+					}
+
+					if (!$found) {
+					  warn "Found $regex in $target / $heading, but couldn't localize (from $source)";
+
+					  # Part of the content is inside a pre.
+					  $h->push_content($backlink);
+					  $found = 1;
+					}
+				  }
+				
+			  notregex:
+ 				# insert just a normal link, after the header, when there is no regex
+ 				# or if the regex failed
+ 				unless ($found) {
+				  warn "falling back to normal backlinking, $regex didn't match under $target / $heading (from $source)" if $regex;
+				  ($h->content_list)[0]->push_content($backlink);
+ 				}
+
+			  } else {
+ 				# perhaps L<S02> etc should just link to the top?
+ 				# this is what you get at the moment
+ 				warn "link in $source to $target does not have a heading\n";
+			  }
+			
+# 			#warn "$target $heading ... $regex -> $source #" . (0+$link);
+		  }
+		
+		# finally, write out the synopsis
+		my $outfile = IO::File->new(">$synhtml") or die "Can't open output test file $synhtml: $!";
+		$outfile->print($sobj->as_HTML(undef, ' ', {}));
+	}
 }
 
-sub prettify {
-    my ($file, $output, $dom) = @_;
+sub inpath_to_outpath {
+    my $inpath=shift;
+    # print "$inpath => ";
 
-    my $target = catfile($output, "$file.pod");
-    mkpath dirname($target);
-    open FILE, ">", $target;
+    my $outpath = abs2rel($inpath, $t_dir);
+    # print "$outpath => ";
+
+    $outpath = rel2abs(catfile("t", $outpath), $output_dir);
+    # print "$outpath => ";
     
-    my $doc = join("\n", map { $_->{text} } grep { $_->{type} eq 'doc' } @{ $dom->{items} });
+    # print "\n";
     
-    print FILE $_ for("=pod", "=head1 NAME", $file, "=head1 DESCRIPTION");
-    print FILE <<DESC;
-This is an automatically generated file of describing the aforementioned test.
-It might contain useful info such as test cases, and some info about them, as
-well as links to the synopses.
-DESC
-    print FILE $_ for ("=head1 DOCUMENTATION", $doc, "=head1 CONTENTS", "=over 4");
-
-    foreach my $item (grep { $_->{type} eq 'test' or $_->{'type'} eq 'link' } @{ $dom->{items} }){
-        print FILE "=item line $item->{line} - $item->{type}";
-        if ($item->{type} eq "test"){
-            print FILE "=over 4";
-            
-            if ($item->{kind}){
-                print FILE "=item *";
-                print FILE "kind: $item->{kind}()" . ($item->{todo} ? " # TODO" : "");
-            }
-            
-            if ($item->{desc}){
-                print FILE "=item *";
-                print FILE "description: $item->{desc}";
-            }
-            
-            if ($item->{comment}){
-                print FILE "=item *";
-                print FILE "comment: $item->{comment}";
-            }
-            
-            print FILE "=back";
-        } elsif ($item->{type} eq 'link'){
-            if ($item->{obj}){
-                print FILE "L<" . $item->{obj}->link . ">";
-            } else {
-                print FILE "COULD NOT BE PARSED: $item->{orig}";
-            }
-        }
-    }
-
-    print FILE "=$_" for qw/back cut/;
-    close FILE;
+    $outpath =~ s/\.t$/\.html/;
+    
+    return $outpath;
 }
-
-my %synopses; # contains the full synopses pods
-sub cross_index {
-    my ($file, $output, $dom) = @_;
-    
-    foreach my $link (grep { defined $_->{obj} } grep { $_->{type} eq 'link' } @{ $dom->{items} }){
-        my $syn = $link->{obj}->page;
-        my $sfile = catfile(split("::", $syn)) . ".pod";
-        $synopses{my $key = catfile($output, $sfile)} ||= read_file(catfile($in, $sfile));
-        my $node = $link->{obj}->node;
-        my $regex = $link->{re};
-        my $test_name = join("::", splitdir($file));
-        
-        $regex ||= qr//;
-        # this is a replacement for a proper lookup of a page/node -> regex thing
-        # just constructs a big regex, and matches it against the entire pod
-        $regex = qr/=(head\d+|item)\s+(?:\Q$node\E).*?($regex)/s;
-        
-        # if we succeed
-        if ($synopses{$key} =~ /$regex/){
-            # find a paragraph end somewhere, and just
-            # stick the link inside it, with substr
-            my $before = $+[-1] + 2;
-            my $at = rindex($synopses{$key}, "\n\n", $before);
-            substr($synopses{$key}, $at, 0, qq(\n\nL<$file, around line $link->{line}|$test_name/"line $link->{line} - link">)); # i should be punished, but otherwise match\ing regexes is not that easy
-        } else {
-            warn qq{couldn't resolve link $link->{orig} in $file ($regex)\n};
-        }
-    }
-}
-END {
-    # when we're done, write out the new synopses
-    foreach my $file (keys %synopses){
-        mkpath(dirname($file));
-        write_file($file, $synopses{$file});
-    }
-}
-
-sub parse_file {
-    my ($file) = @_;
-    my $in_doc;
-    
-    my @items;
-    my $todo_tests = 0;
-    my $tests_planned = 0;
-    
-    open FH, "<", $file;
-    LINE: while (<FH>) {
-        chomp();
-        
-        next if /^$/;
-        
-        # this part collects documentation
-        if (/=pod/ || /=kwid/) {
-            $in_doc = 1;
-            next;
-        }
-        if (/=cut/) {
-            $in_doc = 0;
-            next;
-        }
-        if ($in_doc) {
-            push @items, { type => "doc",  text => $_ };
-            next;
-        }
-
-
-        # this part fishes out real data,       
-        if (/^\s*plan.*?(\d+)/) {
-            $tests_planned = $1;
-        }
-        
-        # find links
-        if (/(L$RE{balanced}{-begin => "<|<<|<<<"}{-end => ">|>>|>>>"})/){
-            my ($link, $re) = dissect_link(my $orig = $1);
-            push @items, {
-                type => "link",
-                obj => $link,
-                re => $re,
-                orig => $orig,
-                line => $.,
-            };
-        }
-        
-        # find test cases
-        if (/( # the whole subname
-            (todo_)?  # can be todo
-            (
-                (?:eval)? # or eval
-                (?:ok|is|fail|isa_ok) # must be one of these
-            )
-        )/x){
-            my ($test_sub, $todo, $test_type) = ($1, $2, $3);
-            my ($desc, $comment);
-
-            if (/
-                .* # lots of stuff
-                \,\s* # a comma, followed by
-                ['"](.*)['"] # some quoted text
-            /x){ $desc = $1 }
-            
-            if (/
-                ;\s* # ending the statement, and from there on whitespace
-                \#\s*(.*)$ # followed by a comment
-            /x){ $comment = $1 }
-        
-            $todo &&= 1==1; # booleanize
-            
-            $todo_tests++ if $todo;
-            
-            push @items, {
-                type => 'test',
-                line => $.,
-                kind => $test_type,
-                desc => $desc,
-                comment => $comment,
-                todo => $todo,
-            };
-        }
-    }
-    close FH;
-    
-    return {
-        file => $file,
-        items => \@items,
-        plan => $tests_planned,
-        todo => $todo_tests,
-    }
-}
-
-# this function will take our funny link format
-# and make into a valid Pod::Hyperlink object and a regex
-sub dissect_link {
-    my $funny = shift;
-
-    my $qword = qr/\w+|$RE{delimited}{-delim=>'"'}/;
-    my $funny_link_format = qr{
-        ^(L<+)
-        ($qword(?:/$qword)?)
-        (?:
-            \s+? # match some whitespace between the podlink and the regex
-            $RE{delimited}{-delim=>'/'}{-keep} # and then a delimited regex # find some more delims
-            ([xim]*) # with optional options ;-) # /s is always used
-        )?
-        (>+)$ # yuck yuck yuck yuck
-    }x;
-
-    $funny =~ $funny_link_format or return undef;
-
-    my $regex = $5;
-    my $ropt = $7;
-    my $proper = Pod::Hyperlink->new($2) || die "$@";
-    /^S\d{2}$/ and $proper->page("Synopsis::$_") for $proper->page;
-    my $qr;
-
-    return $proper if not wantarray;
-    
-    if (defined $regex){
-        $regex =~ s/ +/\\s+/g;
-        $qr = eval "qr\0$regex\0s$ropt";
-        warn "error compiling regex qr/$regex/: $@" if $@;
-    }
-
-    return ($proper, $qr);
-}
-

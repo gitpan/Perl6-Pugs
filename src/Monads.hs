@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Monad structures.
@@ -293,3 +293,4 @@ callerReturn n v
         shiftT $ \_ -> return $ VControl $ ControlLeave (return . (==) (envID env) . envID) v
 
 returnScope = callerReturn 0 . VStr
+

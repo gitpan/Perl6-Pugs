@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 {-
     Regular expressions, based on PCRE.
@@ -83,3 +83,4 @@ matchRegex p str = fmap f (str =~~ p) where
 
 matchRegexAll p str = fmap f (str =~~ p) where
     f MR { mrBefore = b, mrAfter = a, mrSubList = sl, mrMatch = m } = (b,m,a,sl)
+

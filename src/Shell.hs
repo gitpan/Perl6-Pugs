@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 
 {-
     Interactive shell.
@@ -87,3 +87,4 @@ addHistory str = Readline.addHistory str
 #else
 addHistory _ = return ()
 #endif 
+

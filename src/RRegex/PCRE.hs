@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts -fvia-C -O #-}
+{-# OPTIONS_GHC -fglasgow-exts -fvia-C -O #-}
 
 {-# INCLUDE <pcre.h> #-}
 -- #include <sys/types.h>
@@ -185,3 +185,4 @@ pcreInfoFirsttable =  5
 pcreInfoLastliteral :: Int
 pcreInfoLastliteral =  6
 -}
+
