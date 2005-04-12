@@ -9,7 +9,7 @@ Arrays
 
 =cut
 
-plan 53;
+plan 52;
 
 # array of strings
 
@@ -38,12 +38,12 @@ is(@array2[2], undef,  'got the right value at array2 index 2');
 my @array3 = (@array1, @array2);
 isa_ok(@array3, 'Array');
 
-todo_is(+@array3, 6, 'the array3 has 6 elements'); # unTODOme
-todo_is(@array3[0], 'foo', 'got the right value at array3 index 0'); # unTODOme
-todo_is(@array3[1], 'bar', 'got the right value at array3 index 1'); # unTODOme
-todo_is(@array3[2], 'baz', 'got the right value at array3 index 2'); # unTODOme
-todo_is(@array3[3], 'test', 'got the right value at array3 index 3'); # unTODOme
-todo_is(@array3[4], 1,      'got the right value at array3 index 4'); # unTODOme
+is(+@array3, 6, 'the array3 has 6 elements'); # unTODOme
+is(@array3[0], 'foo', 'got the right value at array3 index 0'); # unTODOme
+is(@array3[1], 'bar', 'got the right value at array3 index 1'); # unTODOme
+is(@array3[2], 'baz', 'got the right value at array3 index 2'); # unTODOme
+is(@array3[3], 'test', 'got the right value at array3 index 3'); # unTODOme
+is(@array3[4], 1,      'got the right value at array3 index 4'); # unTODOme
 is(@array3[5], undef,  'got the right value at array3 index 5');
 
 # array slice
@@ -58,7 +58,7 @@ is(@array4[2], 'test', 'got the right value at array4 index 2');
 
 # create new array with 2 array slices
 
-my @array5 = [ @array2[2, 1, 0], @array1[2, 1, 0] ];
+my @array5 = ( @array2[2, 1, 0], @array1[2, 1, 0] );
 isa_ok(@array5, 'Array');
 
 is(+@array5, 6, 'the array5 has 6 elements');
@@ -75,14 +75,14 @@ my @slice = (2, 0, 1);
 my @array6 = @array1[@slice];
 isa_ok(@array6, 'Array');
 
-todo_is(+@array6, 3, 'the array6 has 3 elements'); # unTODOme
-todo_is(@array6[0], 'baz', 'got the right value at array6 index 0'); # unTODOme
-todo_is(@array6[1], 'foo', 'got the right value at array6 index 1'); # unTODOme
-todo_is(@array6[2], 'bar', 'got the right value at array6 index 2'); # unTODOme
+is(+@array6, 3, 'the array6 has 3 elements'); # unTODOme
+is(@array6[0], 'baz', 'got the right value at array6 index 0'); # unTODOme
+is(@array6[1], 'foo', 'got the right value at array6 index 1'); # unTODOme
+is(@array6[2], 'bar', 'got the right value at array6 index 2'); # unTODOme
 
-# create an array slice with an array constructed with []
+# create an array slice with an array constructed with ()
 
-my @array7 = @array1[[2, 1, 0]];
+my @array7 = @array1[(2, 1, 0)];
 isa_ok(@array7, 'Array');
 
 is(+@array7, 3, 'the array7 has 3 elements');
@@ -106,15 +106,14 @@ my @array9;
 isa_ok(@array9, 'Array');
 is(+@array9, 0, "new arrays are empty");
 
-my @array10;
-todo_ok(eval '@array10 = (1, 2, 3,)', "trailing comma"); # unTODOme
-todo_is(+@array10, 3, "trailing commas make correct list"); # unTODOme
+my @array10 = (1, 2, 3,);
+is(+@array10, 3, "trailing commas make correct list"); # unTODOme
 
 # declear a multidimension array
-todo_ok(eval '@array11[0...3; 0...1]', "multidimension array");
-todo_ok(eval '@array11[2,0] = 12', "push the value to a multidimension array");
-todo_ok(eval '@array12 is shape(2,4)', "another way to declare a multidimension array");
+todo_eval_ok('@array11[0...3; 0...1]', "multidimension array");
+todo_eval_ok('@array11[2,0] = 12', "push the value to a multidimension array");
+todo_eval_ok('@array12 is shape(2,4)', "another way to declare a multidimension array");
 
 # declare the array with data type
-todo_ok(eval 'my Int @array', "declare a array for integer only");
-todo_ok(eval '@array[0] = 23', "declare the array value");
+todo_eval_ok('my Int @array', "declare a array for integer only");
+todo_eval_ok('@array[0] = 23', "declare the array value");

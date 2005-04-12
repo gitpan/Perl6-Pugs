@@ -40,7 +40,7 @@ instance Compile (Symbol a) where
         , mval exp
         ]
         where
-        mval (App "&not" [] []) = text ""
+        mval (Syn "noop" []) = empty
         mval _ | ('$':_) <- name  = case exp of
             (Syn "mval" [App "&not" [] []]) -> empty
             _ -> varText name <+> text "=" <+> compile exp
@@ -50,8 +50,7 @@ instance Compile (Symbol a) where
         mval (Syn "mval" [exp]) | ('@':_) <- name =
             text "push" <+> varText name <+> text "," <+> compile exp
         mval _ = error $ show (exp, name)
-    compile (SymVal scope name val) =
-        compile (SymExp scope name $ Val val)
+    compile (SymVar _ _ _) = empty
 
 instance Compile SourcePos where
     compile SourcePos{ sourceName = file, sourceLine = line } = hsep $

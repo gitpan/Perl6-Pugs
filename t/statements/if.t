@@ -36,7 +36,8 @@ is $foo, 1, "die should stop execution immediately.";
 {
 	my $foo = 1;
 	eval 'if { 1 > 0 } { $foo = 2 } else { $foo = 3 }';
-	todo_is $foo, 2, 'if with no parens, and closure as cond'; # unTODOme
+	is $foo, 2, 'if with no parens, and closure as cond';
+	### This is a parser problem.  This test has been copied to perlbugs.
 };
 
 # if...elsif

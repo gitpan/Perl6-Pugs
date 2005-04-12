@@ -15,8 +15,10 @@ require File::Spec;
 plan 3;
 
 my ($pugs) = "./pugs";
-if ($?OS eq "MSWin32") {
-  $pugs = 'pugs.exe';
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
+    $pugs = 'pugs.exe';
+    skip 3, "setEnv is not implemented for Win32"; # unTODOme
+    exit;
 };
 
 sub run_pugs (Str $c) {
@@ -36,13 +38,13 @@ my $key = "MODIFIEDENV";
 my $val = "Test";
 
 try {
-  %ENV{$key} = $val;
+  %*ENV{$key} = $val;
 };
 
-todo_is($!, "", "Modification of %ENV raises no error");
-todo_is(%ENV{$key}, $val, "Modification of %ENV works");
+is($!, "", 'Modification of %*ENV raises no error');
+is(%*ENV{$key}, $val, 'Modification of %*ENV works');
 
 # Now check for the child process:
 
-my $res = run_pugs( '-e "say %ENV{\'' ~$key ~ '\'} // \'undefined\'"');
-todo_is($res, $val, "Child processes see the new value");
+my $res = run_pugs( '-e "print %ENV{\'' ~$key ~ '\'} // \'undefined\'"');
+is($res, $val, "Child processes see the new value");

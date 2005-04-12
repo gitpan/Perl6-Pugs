@@ -12,7 +12,7 @@ and perl6-specific tests.
 
 =cut
 
-plan 62;
+plan 71;
 
 our $GLOBAL;
 
@@ -57,25 +57,24 @@ ok(!defined(undef), "undef is not defined");
 
 	my %hash = ( bar => 'baz', quux => 'quuz' );
 	ok(defined(%hash{"bar"}), "hash subscript");
-	todo_ok(eval'!defined(%hash{"bargho"})', "non-existent hash subscript") or
-		diag("expected undef; got { %hash{'bargho'} }");
+	ok(!defined(%hash{"bargho"}), "non-existent hash subscript");
 
-	todo_fail("FIXME parsefail"); # currently fails compilation even in eval
-	#eval 'undef %hash{"bar"}';
-	#todo_ok(!defined(%hash{"bar"}), "undef hash subscript");
+	undef %hash{"bar"};
+	ok(!defined(%hash{"bar"}), "undef hash subscript");
 
-	eval '
-		%hash{"bar"} = "baz";
-		delete %hash{"bar"};
-	';
-	todo_ok(!defined(%hash{"bar"}), "delete hash subscript");
+	%hash{"bar"} = "baz";
+	%hash.delete("bar");
+	ok(!defined(%hash{"bar"}), "delete hash subscript");
 
 	ok(defined(@ary), "aggregate array defined");
 	ok(defined(%hash), "aggregate hash defined");
-	undef @ary;
-        todo_ok(!defined(@ary), "undef array");
-	undef %hash;
-        ok(!defined(%hash), "undef hash");
+
+	undef(@ary);
+    ok(!defined(@ary), "undef array");
+
+	undef(%hash);
+    ok(!defined(%hash), "undef hash");
+
 	@ary = (1);
 	ok(defined(@ary), "define array again");
 	%hash = (1,1);
@@ -83,21 +82,13 @@ ok(!defined(undef), "undef is not defined");
 }
 
 {
-	# rjbs reported this bug:
-	todo_fail("FIXME parsefail"); # currently fails compilation even in eval
-	#ok(eval 'my %hash; %hash = {}; undef %hash; %hash');
-}
-
-{
 	sub a_sub { "møøse" }
 
 	ok(defined(&a_sub), "defined sub");
-	todo_ok(eval 'defined(%«$?PACKAGE\::»<&a_sub>)',
-			"defined sub (symbol table)");
+	todo_eval_ok('defined(%«$?PACKAGE\::»<&a_sub>)', "defined sub (symbol table)");
 
-	todo_ok(eval '!defined(&a_subwoofer)', "undefined sub"); # unTODOme
-	todo_ok(eval '!defined(%«$?PACKAGE\::»<&a_subwoofer>)',
-			"undefined sub (symbol table)");
+	eval_ok('!defined(&a_subwoofer)', "undefined sub"); # unTODOme
+	todo_eval_ok('!defined(%«$?PACKAGE\::»<&a_subwoofer>)', "undefined sub (symbol table)");
 }
 
 # TODO: find a read-only value to try and assign to, since we don't
@@ -114,6 +105,25 @@ ok(!defined(undef), "undef is not defined");
 # modify the hash. To them, the hash should appear empty."
 
 
+# Test LHS assignment to undef:
+
+my $interesting;
+eval_ok('(undef, undef, $interesting) = (1,2,3)',"Undef on LHS of list assignment");
+is($interesting, 3, "Undef on LHS of list assignment");
+
+eval_ok('(undef, $interesting, undef) = (1,2,3)', "Undef on LHS of list assignment");
+is($interesting, 2, "Undef on LHS of list assignment");
+
+eval_ok('($interesting, undef, undef) = (1,2,3)', "Undef on LHS of list assignment");
+is($interesting, 1, "Undef on LHS of list assignment");
+
+sub two_elements() { (1,2) };
+eval_ok( '(undef,$interesting) = two_elements();', "Undef on LHS of function assignment");
+is($interesting, 2, "Undef on LHS of function assignment"); 
+
+eval_ok( '($interesting, undef) = two_elements();', "Undef on LHS of function assignment");
+is($interesting, 1, "Undef on LHS of function assignment");
+
 =kwid
 
 Perl6-specific tests
@@ -127,17 +137,19 @@ Perl6-specific tests
 	my $ary_r = @ary; # ref
 	isa_ok($ary_r, "Array");
 	ok(defined($ary_r), "array reference");
+
 	undef @ary;
-	ok(defined($ary_r), "undef array referent");
-	todo_is(+$ary_r, 0, "dangling array reference"); # unTODOme
+	ok(!defined($ary_r), "undef array referent");
+
+	is(+$ary_r, 0, "dangling array reference"); # unTODOme
 
 	my %hash = (1, 2, 3, 4);
 	my $hash_r = %hash;
 	isa_ok($hash_r, "Hash");
 	ok(defined($hash_r), "hash reference");
 	undef %hash;
-	ok(defined($hash_r), "undef hash referent");
-	todo_is(+$hash_r.keys, 0, "dangling hash reference"); # unTODOme
+	ok(defined($hash_r), "undef hash referent:");
+	is(+$hash_r.keys, 0, "dangling hash reference"); # unTODOme
 }
 
 {
@@ -191,11 +203,11 @@ Perl6-specific tests
 	';
 	for (<rx1 rx2>) {
 		# I want symbolic lookups because I need the rx names for test results.
-		
+
 		eval '"1" ~~ %MY::{$_}';
 		todo_ok(defined($num), "{$_}: successful hypothetical");
 		ok(!defined($alpha), "{$_}: failed hypothetical");
-		
+
 		eval '"A" ~~ %MY::{$_}';
 		ok(!defined($num), "{$_}: failed hypothetical (2nd go)");
 		todo_ok(defined($alpha), "{$_}: successful hypothetical (2nd go)");
@@ -207,8 +219,7 @@ Perl6-specific tests
 	my %matches;
 	eval '"a=b\nc=d\n" ~~ / %<matches> := [ (\w) = \N+ ]* /';
 	todo_ok(eval '%matches ~~ all(<a b>)', "match keys exist");
-	todo_ok(!defined(%matches{"a"}) && !defined(%matches{"b"}),
-			"match values don't");
+	ok(!defined(%matches{"a"}) && !defined(%matches{"b"}), "match values don't");
 }
 
 {
@@ -269,7 +280,7 @@ todo_fail("FIXME parsefail (autoload tests)"); # unTODOme
 #	is(ref %AutoMechanic::hash,       "Hash",   "autload - hash");
 #	is(ref &AutoMechanic::sub0,       "Code",   "autload - sub");
 #	is(ref AutoMechanic.can("meth0"), "Code",   "autload - meth");
-#	
+#
 #	is($AutoMechanic::scalar, "autoscalardef",            "autoloaddef - scalar");
 #	is(~@AutoMechanic::ary,   ~("autoarraydef".split(//), "autoloaddef - array");
 #	is(~%AutoMechanic::hash,  ~<autohashdef yes>,         "autoloaddef - hash");

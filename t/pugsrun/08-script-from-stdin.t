@@ -10,9 +10,10 @@ indicated by the C<-> switch.
 
 =cut
 
-my @examples = (
-     'print qq.Hello Pugs.'
-   , 'print @ARGS'
+my @examples = map { $_.values() } (
+   any('print qq.Hello Pugs.',
+       'print @ARGS',
+   )
 );
 
 plan +@examples;
@@ -21,7 +22,7 @@ diag "Running under $?OS";
 
 my ($pugs,$redir,$echo) = ("./pugs", ">", "echo");
 
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 

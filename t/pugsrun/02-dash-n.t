@@ -16,11 +16,11 @@ switch, and wraps the whole script in
 
 =cut
 
-my @examples;
-push @examples, '-n -e print';
-push @examples, '-ne print';
-push @examples, '-e "" -ne print';
-
+my @examples = (
+  '-n -e say',
+  '-ne say',
+  '-e "" -ne say',
+);
 
 plan +@examples;
 
@@ -28,10 +28,8 @@ diag "Running under $?OS";
 
 my ($pugs,$redir_in,$redir_out) = ("./pugs", "<", ">");
 
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
-  $redir_out = '>';
-  # $redir_in = '<';
 };
 
 my $str = "
@@ -52,7 +50,7 @@ for @examples -> $ex {
   my $got      = slurp "temp-ex-output";
   unlink "temp-ex-output";
 
-  todo_is $got, $expected, "-n -e print works like cat";
+  is $got, $expected, "-n -e print works like cat";
 }
 
 unlink "temp-ex-input";

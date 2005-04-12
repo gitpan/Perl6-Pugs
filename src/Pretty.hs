@@ -13,9 +13,9 @@
 
 module Pretty where
 import Internals
+import Types
 import AST
 import Text.PrettyPrint
-import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 defaultIndent :: Int
@@ -41,7 +41,7 @@ instance Pretty [Symbol a] where
     format syms = cat $ map format syms
 
 instance Pretty (Symbol a) where
-    format (SymVal scope name val) = text (show scope) <+> format name <+> text ":=" <+> (nest defaultIndent $ format val)
+    format (SymVar scope name var) = text (show scope) <+> format name <+> text ":=" <+> (nest defaultIndent $ format var)
     format (SymExp scope name exp) = text (show scope) <+> format name <+> text ":=" <+> (nest defaultIndent $ format exp)
 
 instance Pretty SourcePos where
@@ -60,6 +60,9 @@ instance Pretty (Val, Val) where
 instance Pretty (Exp, SourcePos) where
     format (x, _) = format x 
 
+instance Pretty VRef where
+    format x = braces $ text $ "ref:" ++ show x
+
 instance Pretty Val where
     format (VJunc (Junc j dups vals)) = parens $ joinList mark items 
         where
@@ -75,30 +78,33 @@ instance Pretty Val where
     format (VNum x) = if x == 1/0 then text "Inf" else text $ show x
     format (VInt x) = integer x
     format (VStr x) = text $ "'" ++ encodeUTF8 (concatMap quoted x) ++ "'"
-    format (VRat x) = double $ ratToNum x
+    format v@(VRat _) = text $ vCast v
     format (VComplex x) = text $ show x
     format (VControl x) = text $ show x
+{-
     format (VRef (VList x))
         | not . null . (drop 100) $ x
         = brackets $ format (head x) <+> text ", ..."
         | otherwise = brackets $ cat $ (punctuate $ text ", ") (map format x)
-    format (VRef x) = text "\\" <> (parens $ format x)
+-}
+    format (VRef x) = format x
     format (VList x)
         | not . null . (drop 100) $ x
         = parens $ (format (head x) <+> text ", ...")
         | otherwise = parens $ (joinList $ text ", ") (map format x)
-    format (VSub _) = text "sub {...}"
+    format (VCode _) = text "sub {...}"
     format (VBlock _) = text "{...}"
-    format (VError x y) = hang (text "*** Error:" <+> text x) defaultIndent (text "at" <+> format y)
-    format (VArray (MkArray x)) = format (VList x)
-    format (VHash (MkHash x)) = braces $ (joinList $ text ", ") $
-        [ format (VStr k, v) | (k, v) <- Map.toList x ]
+    format (VError x y@(NonTerm _)) = hang (text "*** Error:" <+> text x) defaultIndent (text "at" <+> format y)
+    format (VError x _) = text "*** Error:" <+> text x
+--  format (VArray x) = format (VList $ Array.elems x)
+--  format (VHash h) = braces $ (joinList $ text ", ") $
+--      [ format (VStr k, v) | (k, v) <- Map.toList h ]
     format (VHandle x) = text $ show x
     format t@(VThread _) = text $ vCast t
     format (VSocket x) = text $ show x
-    format (MVal v) = text $ unsafePerformIO $ do
-        val <- readIORef v
-        return $ pretty val
+    -- format (MVal v) = text $ unsafePerformIO $ do
+    --     val <- readIORef v
+    --     return $ pretty val
     format (VThunk _) = text $ "{thunk}"
     format (VRule _) = text $ "{rule}"
     format (VSubst _) = text $ "{subst}"

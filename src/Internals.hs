@@ -18,7 +18,7 @@ module Internals (
     module Unicode,
     module Cont,
     module Embed,
-    module Posix,
+    module Compat,
     module RRegex,
     module RRegex.Syntax,
     module Rule.Pos,
@@ -58,26 +58,29 @@ module Internals (
     afterPrefix,
     decodeUTF8,
     encodeUTF8,
+    forM,
+    forM_,
+    tryIO,
 ) where
 
 import UTF8
 import Unicode
 import Cont
 import Embed
-import Posix
+import Compat
 import RRegex
 import RRegex.Syntax
 import Data.Dynamic
 import Data.Array (elems)
 import Network
-import System.Environment (getArgs, withArgs, getProgName)
+import System.Environment (getArgs, withArgs, getProgName, getEnv)
 import System.Random hiding (split)
 import System.Exit
 import System.Time
 import System.Cmd
 import System.IO (
     Handle, stdin, stdout, hClose, hGetLine, hGetContents,
-    openFile, hPutStr, hPutStrLn, IOMode(..), stderr,
+    openFile, hPutStr, hPutStrLn, IOMode(..), stderr, SeekMode(..),
     hSetBuffering, BufferMode(..), hIsTerminalDevice, hFlush
     )
 import System.IO.Unsafe
@@ -155,4 +158,13 @@ decodeUTF8 :: String -> String
 decodeUTF8 str = fst $ decode bytes
     where
     bytes = map (toEnum . ord) str
+
+forM :: (Monad m) => [a] -> (a -> m b) -> m [b]
+forM = flip mapM
+
+forM_ :: (Monad m) => [a] -> (a -> m b) -> m ()
+forM_ = flip mapM_
+
+tryIO :: (MonadIO m) => a -> IO a -> m a
+tryIO err = liftIO . (`catch` (const $ return err))
 

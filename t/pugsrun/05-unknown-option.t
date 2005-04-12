@@ -15,22 +15,21 @@ if called with the (unknown) option C<-foo>
 
 =cut
 
-my @examples;
-push @examples, '-foo';
-push @examples, '-e "print" -foo';
-push @examples, '-foo -c';
-
-@examples = (); # unTODOme
+my @examples = map { $_.values }
+               map { $_.values } (
+    any('-foo ', '-e "print" -foo ', '-c -foo ', '-eprint -foo ')
+  ~ any("", '-e "print" ', '-c '),
+);
 
 plan +@examples;
 
 diag "Running under $?OS";
 
-my ($pugs,$redir) = ("./pugs", ">");
+# Win9x breakage:
+my ($pugs,$redir) = ("./pugs", "2>&1 >");
 
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
-  $redir = '>';
 };
 
 for @examples -> $ex {

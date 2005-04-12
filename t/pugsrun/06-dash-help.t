@@ -10,8 +10,10 @@ works.
 
 =cut
 
-my @examples = ("-h", "--help");
-@examples = @examples.map():{ $_, "-w $_", "$_ -w", "-w $_ -w" };
+my @examples = any<-h --help>;
+@examples = map { $_.values } 
+            map { $_, "-w $_", "$_ -w", "-w $_ -w" }
+            @examples;
 
 plan +@examples;
 
@@ -19,7 +21,7 @@ diag "Running under $?OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
   $redir = '>';
 };

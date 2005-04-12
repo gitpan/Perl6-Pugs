@@ -40,7 +40,7 @@ diag "Running under $?OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
   $redir = '>';
 };
@@ -60,18 +60,30 @@ for @tests -> $t {
   my $command;
   # This should be smarter about quoting
   # (currently, this should work for WinNT and Unix shells)
-  $command = join " ", map { qq("-I$_") }, @dirs;
+  $command = join " ", map { qq("-I$_") } @dirs;
   my $got = run_pugs( $command ~ " $fragment" );
 
+  if (substr($got,0,1) ~~ "\\") {
+    # Convert from arrayref to array
+    $got = substr($got, 1);
+  };
+
+  chomp $got;
   my @got = eval $got;
   @got = @got[ 0..@dirs-1 ];
   my @expected = @dirs;
 
   is @got, @expected, "'" ~ @dirs ~ "' works";
 
-  $command = join " ", map { qq(-I "$_") }, @dirs;
+  $command = join " ", map { qq(-I "$_") } @dirs;
   $got = run_pugs( $command ~ " $fragment" );
-
+  
+  if (substr($got,0,1) ~~ "\\") {
+    # Convert from arrayref to array
+    $got = substr($got, 1);
+  };
+  chomp $got;
+  
   my @got = eval $got;
   @got = @got[ 0..@dirs-1 ];
   my @expected = @dirs;

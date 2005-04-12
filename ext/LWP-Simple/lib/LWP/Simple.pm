@@ -15,20 +15,20 @@ use v6;
 # push(@EXPORT, @HTTP::Status::EXPORT);
 
 # $VERSION = sprintf("%d.%02d", q$Revision: 1.41 $ =~ /(\d+)\.(\d+)/);
-# $FULL_LWP++ if grep {lc($_) eq "http_proxy"} keys %ENV;
+# $FULL_LWP++ if grep {lc($_) eq "http_proxy"} keys %*ENV;
 
 # my $CRLF = rx:perl5/\015?\012/;
 my $CRLF = "\x0D\x0A\x0D\x0A";
 my $VERSION = "0.0.1";
 
 
-sub getprint ($url)
+sub getprint (Str $url)
 {
-  getstore $url, $*OUT;
+  getstore $url, '';
 };
 
 # FIXME to use a callback
-sub getstore ($url, $file)
+sub getstore (Str $url, Str $file)
 {
   my $fh = open ">$file";
   my $buffer = get $url;
@@ -40,13 +40,15 @@ sub getstore ($url, $file)
 };
 
 # TODO: Implement a non-faked version
+# TODO: Add If-Modified-Since: header
+# TODO: Handle 30x Not Modified response
 sub mirror ($url, $file)
 {
   getstore($url,$file)
 }
 
 sub get (Str $url) is export {
-  _get($url);
+  return _trivial_http_get($url);
 };
 
 # Refactor common code with _trivial_http_get
@@ -56,10 +58,8 @@ sub head (Str $url) is export {
 
   my ($host,$port,$path) = split_uri($url);
 
-  my $req = _make_request( "HEAD", $host, $path );
-  my $hdl = connect($host, $port);
-  $hdl.print($req);
-  $hdl.flush;
+  my $req = _make_request( "HEAD", $url );
+  my $hdl = _send_request( $host, $port, $req );
 
   my $head = slurp $hdl;
 
@@ -106,24 +106,13 @@ sub split_uri (Str $url) {
   return ($host,$port,$path);
 };
 
-sub _get (Str $url) {
-  my ($host,$port,$path) = split_uri($url);
-  return _trivial_http_get(($host,$port,$path));
-};
+sub _trivial_http_get (Str $url) returns Str {
+  # TODO: Set a timeout of 60 seconds (however)
+  # TODO: Send Connection: close, at least until we know better
+  my ($h,$p,$u) = split_uri($url);
 
-sub _trivial_http_get (Str $host, Str $port, Str $path) returns Str {
-  # * Don't use "say()", be specific and send "\r\n"
-  # * Set a timeout of 60 seconds (however)
-  # * Make sure the socket is autoflush, or better
-  #   is flushed after we've sent our lines.
-  # * Send Connection: close, at least until we know better
-  # say "$host:$port";
-
-  my $req = _make_request( "GET", $host, $path );
-
-  my $hdl = connect($host, $port);
-  $hdl.print($req);
-  $hdl.flush;
+  my $req = _make_request( "GET", $url );
+  my $hdl = _send_request( $h, $p, $req );
 
   # read response+headers:
   # $hdl.irs = /$CRLF$CRLF/; # <-- make this into a todo test
@@ -131,37 +120,59 @@ sub _trivial_http_get (Str $host, Str $port, Str $path) returns Str {
   my $buffer = slurp $hdl;
   # 1 while ( $buffer ~= $hdl.read() and $buffer !~ rx:perl5{$CRLF$CRLF} );
   # my ($status,@headers) = split /$CRLF/, $buffer;
-  # worry later about body
-  # say $buffer;
+  # worry later about large body
 
   # strip away status and headers
   # This should all be done better so the response doesn't live in
   # memory all at once
 
-  if ($buffer ~~ s:perl5{^HTTP\/\d+\.\d+\s+(\d+)(.*?\015?\012)+?\015?\012}{}) {
+  # if ($buffer ~~ s:perl5{^HTTP\/\d+\.\d+\s+(\d+)([^\012]*?\015?\012)+?\015?\012}{}) {
+  if ($buffer ~~ s:perl5{^HTTP\/\d+\.\d+\s+(\d+)([^\x0A]*?\x0D?\x0A)+?\x0D?\x0A}{}) {
     my $code = $1;
 
     # XXX: Add 30[1237] checking/recursion
 
     if ($code ~~ rx:perl5/^[^2]../) {
-       return undef;
+       return ();
     };
-
-    # strip status and headers
-    # $buffer ~~ s:perl5{^.*?$CRLF$CRLF}{};
 
     # Later add Content-Size: handling here
   };
   return $buffer
 }
 
-sub _make_request (Str $method, Str $host, Str $path) {
+sub _make_request (Str $method, Str $uri) {
+  my ($h,$p,$u) = split_uri($uri);
+  if (%*ENV<HTTP_PROXY>) {
+    $u = $uri;
+  };
+
   join "\n", # $CRLF,
-    "$method $path HTTP/1.1",
-    "Host: $host",
+    "$method $u HTTP/1.1",
+    "Host: $h",
     "User-Agent: lwp-trivial-pugs/$VERSION",
     "Connection: close",
     $CRLF;
+};
+
+sub _send_request (Str $host, Str $port, Str $request) {
+  # XXX clean up!
+
+  my ($h,$p) = ($host,$port);
+  # TODO: Replace with exists() once it is there
+  if (%*ENV<HTTP_PROXY> ~~ rx:perl5!.!) {
+    if (%*ENV<HTTP_PROXY> ~~ rx:perl5!http://()(:(\d+))?$!) {
+      $h = $1;
+      $p = $2 || 80;
+    } else {
+      die "Unhandled/unknown proxy settings: " ~ %*ENV<HTTP_PROXY>;
+    };
+  };
+
+  my $hdl = connect($h, $p);
+  $hdl.print($request);
+  $hdl.flush;
+  $hdl;
 };
 
 =pod
@@ -173,7 +184,7 @@ LWP::Simple - simple procedural interface to LWP
 =head1 SYNOPSIS
 
   pugs -MLWP::Simple -e 'getprint "http://www.sn.no"'
- 
+
   require LWP::Simple;
   $content = get("http://www.sn.no/");
   die "Couldn't get it!" unless defined $content;
@@ -226,7 +237,9 @@ The HTTP status code is returned
 
 =item Scalar Context
 
-All headers are returned as one long string
+All headers are returned as one long string, or maybe as a L<HTTP::Headers>
+object, depending on when C<want> gets implemented. Currently, the headers
+are returned as one long string.
 
 =item List Context
 

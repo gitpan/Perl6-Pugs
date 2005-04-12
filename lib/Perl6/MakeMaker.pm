@@ -83,12 +83,15 @@ sub external {
     $module_name =~ s/-/__/;
     $module_name =~ s/[\-\.]/_/g;
 
+    my @to_install = ("$module_name.o", "$module_name.hi", "$module_name.hs");
+    push @to_install, glob("src/*");
+
+    my $cp_to_install = join "\n", map "	\$(CP) $_ \$(INST_ARCHLIB)", @to_install;
     my ($ghc, $ghc_version, $ghc_flags) = assert_ghc();
 
     $postamble = <<_;
 pure_all :: $module_name.o $module_name.hi
-	\$(CP) $module_name.o \$(INST_ARCHLIB)
-	\$(CP) $module_name.hi \$(INST_ARCHLIB)
+$cp_to_install
 
 $module_name.o :: $module_name.hs
 	$ghc --make -isrc -Isrc $ghc_flags \$(GHC_FLAGS) $module_name.hs
@@ -109,7 +112,7 @@ sub assert_ghc {
 
     my $config = get_perl6_libs();
     my $pugs_core = File::Spec->catdir($config->{archlib}, 'CORE', 'pugs');
-    my $ghc_flags = "-H200m -L. -Lsrc -Lsrc/pcre -I. -Isrc -Isrc/pcre -i.  -isrc -isrc/pcre -static -fno-warn-missing-signatures -fno-warn-name-shadowing -I$pugs_core -L$pugs_core -i$pugs_core";
+    my $ghc_flags = "-H0 -L. -Lsrc -Lsrc/pcre -I. -Isrc -Isrc/pcre -i.  -isrc -isrc/pcre -static -fno-warn-missing-signatures -fno-warn-name-shadowing -I$pugs_core -L$pugs_core -i$pugs_core";
     return ($ghc, $ghc_version, $ghc_flags);
 }
 

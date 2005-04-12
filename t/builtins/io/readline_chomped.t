@@ -6,9 +6,9 @@ require Test;
 plan 3;
 
 
-my $fh = open "t/op/readline_chomped.t";;
-todo_ok($fh, "could open self"); # unTODOme
-todo_isa_ok($fh, 'Handle'); # unTODOme
+my $fh = open $*PROGRAM_NAME;
+ok($fh, "could open self");
+isa_ok($fh, 'IO');
 
 my $line;
 eval '

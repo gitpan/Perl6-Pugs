@@ -14,23 +14,17 @@ require File::Spec;
 
 my $dir = catdir( <t pugsrun> );
 
-my @t = (
+my @tests = (
   "-I$dir -MDummy -e load_test",
   "-e load_test -MDummy -I$dir"
 );
-
-# I don't know (yet) how to force a junction into expansion
-my @tests;
-for @t -> $test {
-  push @tests, $test;
-};
 
 plan 1+@tests;
 
 diag "Running under $?OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 

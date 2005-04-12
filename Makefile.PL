@@ -30,7 +30,7 @@ build_subdirs   (map fixpaths($_), grep {
                 );
 
 my $version = version();
-$version =~ s{6\.(\d{3})(\d{3})}{join '.', 6, int($1), int($2)}e;
+$version =~ s{6\.(\d{3})(\d{3})?}{join '.', 6, int($1), int($2||0)}e;
 version($version);
 
 makemaker_args  (
@@ -52,8 +52,21 @@ WritePugs       (5);
 ################################################################################
 sub set_postamble {
     my @srcfiles = grep !/MainCC/, map glob("$_/*.*hs"), @srcdirs;
+    push @srcfiles, grep !/MainCC/, map glob("$_/*.*hs-boot"), @srcdirs;
 
     my ($ghc, $ghc_version, $ghc_flags) = assert_ghc();
+    $ghc_flags .= ' -ignore-package eval-0.9.8';
+    # $ghc_flags .= ' -dcore-lint -ignore-package eval-0.9.8';
+	if (!has_ghc_package('plugins')) {
+	  warn << '.';
+*** Inline Haskell support disabled.  If you want dynamic loading
+    of haskell modules, please install the hs-plugins library,
+	ftp://ftp.cse.unsw.edu.au/pub/users/dons/hs-plugins/snapshots/ ,
+    dated 2005-04-10 or later -- remember to "make register" too!
+.
+	} else {
+	  $ghc_flags .= ' -DPUGS_HAVE_HSPLUGINS=1';
+	}
     my $ghc_output = "-o pugs$Config{_exe} src/Main.hs";
 
     my $pcre = "src/pcre/pcre.o";

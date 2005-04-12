@@ -13,12 +13,12 @@ like C<join "\n"> concatenation .
 =cut
 
 my @examples = (
-   '-e print -e qq.Hello -e Pugs.'
- , '-e print -we qq.Hello -e Pugs.'
- , '-e print -wle qq.Hello -e Pugs.'
- , '-e print -weqq.Hello -e Pugs.'
- , '-e print -e qq.Hel. -e ";print" -e qq.lo. -e ";print" -e "qq.\nPugs."'
- , '-e print -e qq.Hel. -w -e ";print" -e qq.lo. -w -e ";print" -e "qq.\nPugs."'
+ '-e print -e qq.Hello -e Pugs.',
+ '-e print -we qq.Hello -e Pugs.',
+ '-e print -wle qq.Hello -e Pugs.',
+ '-e print -weqq.Hello -e Pugs.',
+ '-e print -e qq.Hel. -e ";print" -e qq.lo. -e ";print" -e "qq.\nPugs."',
+ '-e print -e qq.Hel. -w -e ";print" -e qq.lo. -w -e ";print" -e "qq.\nPugs."',
 );
 
 plan +@examples +1;
@@ -27,7 +27,7 @@ diag "Running under $?OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
   $redir = '>';
 };
@@ -48,6 +48,13 @@ diag $command;
 system $command;
 
 my @expected = <Hello Pugs>;
-my @got      = eval slurp "temp-ex-output";
-is @got, @expected, "-e '' does not eat a following argument";
+my $got      = slurp "temp-ex-output";;
+chomp $got;
+if (substr($got,0,1) ~~ "\\") {
+  $got = substr($got,1);
+};
+
+my @got      = eval $got;
+fail "FIXME platform specific";
+# is @got, @expected, "-e '' does not eat a following argument";
 

@@ -33,7 +33,7 @@ Tests the given block, as defined in L<S04/"Switch statements">
 	}';
 
 	ok(!$two, "5 is not two");
-	todo_ok($five, "5 is five");
+	ok($five, "5 is five");
 	todo_ok($int, "short fell-through to next true when using 'next'");
 	ok(!$unreached, "but didn't do so normally");
 };
@@ -147,14 +147,13 @@ Tests the given block, as defined in L<S04/"Switch statements">
 {
     my ($foo, $bar, $baz, $bad) = (0, 0, -1, 0);
     my $quux = 0;
-    eval '
     for (0, 1, 2) {
         when (0) { $foo++; continue }
         when (1) { $bar++; break }
         when (2) { $quux++; }
         default { $baz = $_ }
         $bad = 1;
-    }';
+    };
     is($foo, 1, 'first iteration');
     is($bar, 1, 'second iteration');
     is($baz, 0, 'continue worked');
@@ -172,6 +171,6 @@ Tests the given block, as defined in L<S04/"Switch statements">
       }
     }
 
-   todo_is ret_test("a"), "A", "given returns the correct value (1)"; # unTODOme
-   todo_is ret_test("b"), "B", "given returns the correct value (2)"; # unTODOme
+   is ret_test("a"), "A", "given returns the correct value (1)"; # unTODOme
+   is ret_test("b"), "B", "given returns the correct value (2)"; # unTODOme
 }

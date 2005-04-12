@@ -12,14 +12,13 @@ C<-e> fragments.
 
 =cut
 
-my @examples;
-push @examples,
+my @examples = (
   '-ce "print qq,Code got interpreted!,"',
   '-c -e "print qq,Code got interpreted!,"',
   '-e "print qq,Code got interpreted!," -c',
   '-eprint -c',
-  '-ceprint'
-  ;
+  '-ceprint',
+);
 
 plan +@examples;
 
@@ -27,7 +26,7 @@ diag "Running under $?OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
   $redir = '>';
 };

@@ -1,11 +1,11 @@
-{-# OPTIONS_GHC -fglasgow-exts -fth -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -fth -cpp -package plugins -package hi #-}
 
 module External.Haskell where
 import AST
 
 #undef PUGS_HAVE_TH
-#include "pugs_config.h"
-#ifndef PUGS_HAVE_TH
+#include "../pugs_config.h"
+#if !defined(PUGS_HAVE_TH) || !defined(PUGS_HAVE_HSPLUGINS)
 externalizeHaskell :: String -> String -> IO String
 externalizeHaskell  = error "Template Haskell support not compiled in"
 loadHaskell :: FilePath -> IO [(String, [Val] -> Eval Val)]
@@ -16,17 +16,52 @@ import Internals
 import Language.Haskell.TH as TH
 import Language.Haskell.Parser
 import Language.Haskell.Syntax
-import External.Haskell.PathLoader
+import Plugins
+import Config
+
+{- ourPackageConfigs :: [PackageConfig]
+ourPackageConfigs = [
+    PackageConfig {
+        hs_libraries = ["Unicode.o"]
+        extra_libraries = ["UnicodeC.o"]
+    }
+] -}
+ourPackageConfigs = []
+
+loadOrDie 
+     :: FilePath                -- ^ object file
+     -> [FilePath]              -- ^ any include paths
+     -> [FilePath]              -- ^ list of package.conf paths
+     -> String                  -- ^ symbol to find
+     -> IO (a)
+loadOrDie obj includes configs symbol = do
+    stat <- load obj includes configs symbol
+    case stat of
+        LoadFailure errs -> error $ unlines $ ["Error loading "++symbol++" from "++obj] ++ errs
+        LoadSuccess _ a  -> return a
 
 loadHaskell :: FilePath -> IO [(String, [Val] -> Eval Val)]
 loadHaskell file = do
-    loadModule "/usr/local/lib/ghc-6.4/HSbase.o" MT_Package
-    loadModule "/usr/local/lib/ghc-6.4/HShaskell98.o" MT_Package
-    loadModule "/usr/local/lib/ghc-6.4/HSmtl.o" MT_Package
-    mod     <- loadModule file MT_Module
-    func    <- loadFunction mod "extern__"
-    (`mapM` func) $ \name -> do
-        func <- loadFunction mod $ "extern__" ++ name
+    let coredir   = getConfig "installarchlib" ++ "/CORE/pugs/"
+        objDir    = getConfig "installsitearch"
+        objFile   = (objDir ++ "/" ++ file)
+        loadpaths = [coredir, objDir]
+    -- For Unicode
+    loadRawObject $ coredir++"UnicodeC.o"
+    -- For RRegex
+    loadRawObject $ coredir++"pcre/pcre.o"
+    
+    -- AST has early requirements and late requirements, because of recrusivity.  
+    -- The logic for this should probably be moved to hs-plugins, but do it here 
+    -- for now.
+    mapM 
+        (\n -> load (coredir++n++".o") loadpaths ourPackageConfigs "")
+        ["Compat", "Cont", "Embed", "Embed/Perl5", "Internals", "RRegex", "RRegex/PCRE", "RRegex/Syntax", "Rule/Pos", "UTF8", "Unicode", "AST"]
+
+    (extern :: [String]) <- loadOrDie objFile loadpaths ourPackageConfigs "extern__"
+    -- print (">"++(show extern)++"<")
+    (`mapM` extern) $ \name -> do
+        func <- loadOrDie objFile loadpaths ourPackageConfigs ("extern__" ++ name)
         return (name, func)
 
 externalizeHaskell :: String -> String -> IO String
@@ -67,5 +102,6 @@ wrap fun = do
 munge (ValD _ x y) name = ValD (VarP (mkName name)) x y
 munge _ _ = error "impossible"
 
-#endif
 
+
+#endif

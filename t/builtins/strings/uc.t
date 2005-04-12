@@ -3,13 +3,24 @@
 use v6;
 require Test;
 
-plan(5);
+plan 8;
 
-ok(uc "Hello World" eq "HELLO WORLD", "simple");
-ok(uc "" eq "", "empty string"); 
-ok(uc "åäö" eq "ÅÄÖ", "some finnish non-ascii chars");
-ok(uc "óòúù" eq "ÓÒÚÙ", "accented chars");
+is(uc("Hello World"), "HELLO WORLD", "simple");
+is(uc(""), "", "empty string"); 
+is(uc("åäö"), "ÅÄÖ", "some finnish non-ascii chars");
+is(uc("óòúù"), "ÓÒÚÙ", "accented chars");
+
+# given does not return proper value yet
+$_ = "Hello World";
+my $x = uc;
+is $x, "HELLO WORLD", 'uc uses the default $_';
+
+{   
+    my $x = "Hello World";
+    is $x.uc, "HELLO WORLD", '$x.uc works';
+    is "Hello World".uc, "HELLO WORLD", '"Hello World".uc works';
+}
 
 # Bug: GERMAN SHARP S ("ß") should uc() to "SS", but it doesn't
 # Compare with: perl -we 'use utf8; print uc "ß"'
-todo_ok(uc "ß" eq "SS", "uc() of non-ascii chars may result in two chars"); # unTODOme
+is(uc("ß"), "SS", "uc() of non-ascii chars may result in two chars");

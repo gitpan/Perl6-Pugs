@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -O #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 {-
@@ -13,9 +13,11 @@
 module Parser where
 import Internals
 import AST
+import Types.Code as Code
 import Help
 import Lexer
 import Rule
+import Rule.Expr
 import Rule.Error
 
 -- Lexical units --------------------------------------------------
@@ -123,7 +125,11 @@ ruleDocBody = (try ruleDocCut) <|> eof <|> do
     many1 newline -- XXX - paragraph mode
     ruleDocBody
     return ()
-   
+
+ruleQualifiedIdentifier :: RuleParser [String]
+ruleQualifiedIdentifier = rule "qualified identifer" $ do
+    identifier `sepBy1` (try $ string "::")
+
 -- Declarations ------------------------------------------------
 
 ruleBlockDeclaration :: RuleParser Exp
@@ -175,12 +181,12 @@ ruleSubDeclaration = rule "subroutine declaration" $ do
     _       <- many $ ruleTrait -- traits; not yet used
     body    <- ruleBlock
     let (fun, names) = extract (body, [])
-        params = map nameToParam names ++ (maybe [defaultArrayParam] id formal) 
+        params = map nameToParam (sort names) ++ (maybe [defaultArrayParam] id formal) 
     -- Check for placeholder vs formal parameters
     unless (isNothing formal || null names || names == ["$_"] ) $
         fail "Cannot mix placeholder variables with formal parameters"
     env <- getState
-    let subExp = Val . VSub $ Sub
+    let subExp = Val . VCode $ Sub
             { isMulti       = multi
             , subName       = name
             , subPad        = envLexical env
@@ -234,14 +240,18 @@ ruleFormalParam = rule "formal parameter" $ do
     cxt     <- option "" $ ruleContext
     sigil   <- option "" $ choice . map symbol $ words " ? * + ++ "
     name    <- ruleVarName -- XXX support *[...]
+    trait   <- option id $ try $ do
+        symbol "is"
+        symbol "rw"
+        return $ \x -> x { isLValue = True }
     let required = (sigil /=) `all` ["?", "+"]
     exp     <- ruleParamDefault required
-    return $ buildParam cxt sigil name exp
+    return $ trait $ buildParam cxt sigil name exp
 
 ruleParamDefault True  = return $ Val VUndef
 ruleParamDefault False = rule "default value" $ option (Val VUndef) $ do
     symbol "="
-    ruleExpression
+    parseLitOp
 
 ruleVarDeclaration :: RuleParser Exp
 ruleVarDeclaration = rule "variable declaration" $ do
@@ -252,16 +262,13 @@ ruleVarDeclaration = rule "variable declaration" $ do
 
 ruleVarDeclarationSingle scope = do
     name <- parseVarName
-    exp  <- option (Syn "mval" [emptyExp]) $ do
+    exp  <- option emptyExp $ do
         sym <- tryChoice $ map string $ words " = := ::= "
         when (sym == "=") $ do
             lookAhead (satisfy (/= '='))
             return ()
         whiteSpace
-        exp <- ruleExpression
-        return $ case sym of
-            "=" -> (Syn "mval" [exp])
-            _   -> exp
+        ruleExpression
     return $ Sym [SymExp scope name exp]
 
 ruleVarDeclarationMultiple scope = do
@@ -282,7 +289,7 @@ ruleVarDeclarationMultiple scope = do
         Just exp -> Syn ";" [syn, Syn sym [lhs, exp]]
         Nothing  -> syn
     where
-    mvalSym scope n e = SymExp scope n (Syn "mval" [e])
+    mvalSym scope n e = SymExp scope n e
     alignAssign scope names exps = doAssign scope names exps
     doAssign _ [] _ = []
     doAssign scope ns [] =
@@ -310,9 +317,18 @@ ruleUseVersion = rule "use version" $ do
         error $ "Perl v" ++ version ++ " required--this is only v" ++ versnum ++ ", stopped at " ++ (show pos)
     return $ Syn "noop" []
 
+{- 
 ruleUsePackage = rule "use package" $ do
     _ <- identifier -- package -- XXX - ::
     return $ Syn "noop" []
+-}
+
+ruleUsePackage = rule "use package" $ do
+    names <- identifier `sepBy1` (try $ string "::")
+    _ <- option "" $ do -- version - XXX
+        char '-'
+        many1 (choice [ digit, char '.' ])
+    return $ App "&require" [] [Val . VStr $ concat (intersperse "/" names) ++ ".pm"]
 
 ruleInlineDeclaration = tryRule "inline declaration" $ do
     symbol "inline"
@@ -360,7 +376,7 @@ ruleClosureTrait = rule "closure trait" $ do
                   , subBindings   = []
                   , subFun        = fun
                   }
-    return $ App "&unshift" [Var "@*END"] [Syn "sub" [Val $ VSub sub]]
+    return $ App "&unshift" [Var "@*END"] [Syn "sub" [Val $ VCode sub]]
 
 rulePackageDeclaration = rule "package declaration" $ fail ""
 
@@ -390,7 +406,7 @@ ruleTryConstruct = ruleKeywordConsturct "try"
 
 ruleForConstruct = rule "for construct" $ do
     symbol "for"
-    list <- maybeParens $ ruleExpression
+    list  <- maybeParens ruleExpression
     block <- ruleBlockLiteral
     retSyn "for" [list, block]
 
@@ -479,9 +495,18 @@ ruleBlockLiteral = rule "block construct" $ do
     body <- ruleBlock
     retBlock typ formal body
 
+extractHash :: Exp -> Maybe Exp
+extractHash (Syn "block" [exp]) = extractHash exp
+extractHash (Statements [(exp@(App "&pair" _ _), _)]) = Just exp
+extractHash (Statements [(exp@(App "&infix:=>" _ _), _)]) = Just exp
+extractHash (Statements [(exp@(Syn "," (App "&pair" _ _:_)), _)]) = Just exp
+extractHash (Statements [(exp@(Syn "," (App "&infix:=>" _ _:_)), _)]) = Just exp
+extractHash _ = Nothing
+
+retBlock SubBlock Nothing exp | Just hashExp <- extractHash exp = return $ Syn "\\{}" [hashExp]
 retBlock typ formal body = do
     let (fun, names) = extract (body, [])
-        params = (maybe [] id formal) ++ map nameToParam names
+        params = (maybe [] id formal) ++ map nameToParam (sort names)
     -- Check for placeholder vs formal parameters
     unless (isNothing formal || null names || names == ["$_"] ) $
         fail "Cannot mix placeholder variables with formal parameters"
@@ -495,7 +520,7 @@ retBlock typ formal body = do
                   , subBindings   = []
                   , subFun        = fun
                   }
-    return (Syn "sub" [Val $ VSub sub])
+    return (Syn "sub" [Val $ VCode sub])
 
 ruleBlockFormalStandard = rule "standard block parameters" $ do
     symbol "sub"
@@ -528,12 +553,14 @@ ruleBlockFormalPointy = rule "pointy block parameters" $ do
 -- Not yet transcribed ------------------------------------------------
 
 tightOperators = do
-  unary <- currentUnaryFunctions
+  (optionary, unary) <- currentUnaryFunctions
   return $
     [ methOps  " . .+ .? .* .+ .() .[] .{} .<<>> .= "   -- Method postfix
     , postOps  " ++ -- " ++ preOps " ++ -- "            -- Auto-Increment
     , rightOps " ** "                                   -- Exponentiation
-    , preSyn "* **" ++ preOps   " = ! + - ~ ? +^ ~^ ?^ \\ "         -- Symbolic Unary
+    , preSyn "* **"
+      ++ preOps (concatMap (\x -> " -" ++ [x]) "rwxoRWXOezsfdlpSbctugkTBMAC")
+      ++ preOps " = ! + - ~ ? +^ ~^ ?^ \\ "             -- Symbolic Unary
     , leftOps $
                " »*« »/« »x« »xx« " ++
                " >>*<< >>/<< >>x<< >>xx<< " ++
@@ -541,8 +568,8 @@ tightOperators = do
     , leftOps  " »+« >>+<< + - ~ +| +^ ~| ~^ ?| "       -- Additive
     , listOps  " & ! "                                  -- Junctive And
     , listOps  " ^ | "                                  -- Junctive Or
-    , preOps   unary                                    -- Named Unary
-    , noneOps  " is but does "                          -- Traits
+    , optOps optionary, preOps unary                    -- Named Unary
+    , noneSyn  " is but does "                          -- Traits
       ++ rightOps " => "                                -- Pair constructor
       ++ noneOps " cmp <=> .. ^.. ..^ ^..^ "            -- Non-chaining Binary
       ++ postOps "..."                                  -- Infinite range
@@ -552,7 +579,11 @@ tightOperators = do
     , leftOps  " && !! "                                -- Tight And
     , leftOps  " || ^^ // "                             -- Tight Or
     , [ternOp "??" "::" "if"]                           -- Ternary
-    , rightSyn " = := ::= ~= += -= *= /= x= Y= ¥= **= xx= ||= &&= //= "-- Assignment
+    -- Assignment
+    , rightSyn $
+               " = := ::= " ++
+               " ~= += -= *= /= %= x= Y= ¥= **= xx= ||= &&= //= ^^= " ++
+               " +&= +|= +^= ~&= ~|= ~^= ?|= ?^= "
     ]
 
 looseOperators = do
@@ -586,14 +617,20 @@ currentFunctions = do
 
 currentUnaryFunctions = do
     funs <- currentFunctions
-    return $ unwords [
-        encodeUTF8 name | f@(SymVal _ _ (VSub sub)) <- funs
-        , subAssoc sub == "pre"
-        , length (subParams sub) == 1
-        , isNothing $ find isSlurpy $ subParams sub
-        , let name = parseName $ symName f
-        , name /= "undef" -- XXX Wrong
+    return . mapPair munge . partition fst . sort $
+        [ (opt, encodeUTF8 name) | f@(SymVar _ _ (MkRef (ICode code))) <- funs
+        , Code.assoc code == "pre"
+        , length (Code.params code) == 1
+        , let param = head $ Code.params code
+        , let opt   = isOptional param
+        , let name  = parseName $ symName f
+        -- XXX: find other MMD duplicates
+        , name /= "say" && name /= "print" && name /= "reverse"
+        , not $ isSlurpy param
         ]
+    where
+    munge = unwords . map snd
+    mapPair f (x, y) = (f x, f y)
 
 parseName str
     | (_, (_:name)) <- break (== ':') str
@@ -607,7 +644,7 @@ currentListFunctions = do
 {-
     funs <- currentFunctions
     return $ unwords [
-        encodeUTF8 name | f@Symbol{ symExp = Val (VSub sub) } <- funs
+        encodeUTF8 name | f@Symbol{ symExp = Val (VCode sub) } <- funs
         , subAssoc sub == "pre"
         , isJust $ find isSlurpy $ subParams sub
         , let name = parseName $ symName f
@@ -617,11 +654,15 @@ currentListFunctions = do
 
 parseOp = do
     ops <- operators
-    buildExpressionParser ops parseTerm
+    buildExpressionParser ops parseTerm (Syn "" [])
 
 parseTightOp = do
     ops <- tightOperators
-    buildExpressionParser ops parseTerm
+    buildExpressionParser ops parseTerm (Syn "" [])
+
+parseLitOp = do
+    ops <- litOperators
+    buildExpressionParser ops parseTerm (Syn "" [])
 
 ops f s = [f n | n <- sortBy revLength (words $ decodeUTF8 s)]
     where
@@ -632,6 +673,7 @@ doApp str args = App str args []
 preSyn      = ops $ makeOp1 Prefix "" Syn
 preOps      = ops $ makeOp1 Prefix "&prefix:" doApp
 postOps     = ops $ makeOp1 Postfix "&postfix:" doApp
+optOps      = ops $ makeOp1 OptionalPrefix "&prefix:" doApp
 leftOps     = ops $ makeOp2 AssocLeft "&infix:" doApp
 rightOps    = ops $ makeOp2 AssocRight "&infix:" doApp
 noneOps     = ops $ makeOp2 AssocNone "&infix:" doApp
@@ -639,14 +681,21 @@ listOps     = leftOps
 chainOps    = leftOps
 leftSyn     = ops $ makeOp2 AssocLeft "" Syn
 rightSyn    = ops $ makeOp2 AssocRight "" Syn
-listSyn     = leftSyn
+noneSyn     = ops $ makeOp2 AssocNone "" Syn
+listSyn     = ops $ makeOp0 AssocList "" Syn
 chainSyn    = leftSyn
 
 -- chainOps    = ops $ makeOpChained
 
-makeOp1 prec sigil con name = prec $ do
+makeOp1 prec sigil con name = prec $ try $ do
     symbol name
-    return $ \x -> con fullName [x]
+    -- `int(3)+4` should not be parsed as `int((3)+4)`
+    when (isWordAny (last name)) $ do
+        lookAhead (satisfy (/= '('))
+        return ()
+    return $ \x -> con fullName $ case x of
+        Syn "" []   -> []
+        _           -> [x]
     where
     fullName
         | isAlpha (head name)
@@ -658,6 +707,16 @@ makeOp1 prec sigil con name = prec $ do
 makeOp2 prec sigil con name = (`Infix` prec) $ do
     symbol name
     return $ \x y -> con (sigil ++ name) [x,y]
+
+makeOp0 prec sigil con name = (`Infix` prec) $ do
+    many1 $ do
+        string name
+        whiteSpace
+    return make
+    where
+    make x (Syn syn xs) | syn == name = con (sigil ++ name) (x:xs)
+    make x (Syn "" []) = con (sigil ++ name) [x]
+    make x y = con (sigil ++ name) [x,y]
 
 parseTerm = rule "term" $ do
     term <- choice
@@ -680,7 +739,7 @@ rulePostTerm = tryRule "term postfix" $ do
 ruleInvocation = tryVerbatimRule "invocation" $ do
     hasEqual <- option False $ do char '='; whiteSpace; return True
     name            <- ruleSubName
-    (invs,args)     <- option ([],[]) $ parseParenParamList ruleExpression
+    (invs,args)     <- option ([],[]) $ parseParenParamList
     return $ \x -> if hasEqual
         then Syn "=" [x, App name (x:invs) args]
         else App name (x:invs) args
@@ -688,7 +747,7 @@ ruleInvocation = tryVerbatimRule "invocation" $ do
 ruleInvocationParens = do
     hasEqual <- option False $ do char '='; whiteSpace; return True
     name            <- ruleSubName
-    (invs,args)     <- parens $ parseNoParenParamList ruleExpression
+    (invs,args)     <- parens $ parseNoParenParamList
     -- XXX we just append the adverbial block onto the end of the arg list
     -- it really goes into the *& slot if there is one. -lp
     return $ \x -> if hasEqual
@@ -713,21 +772,23 @@ ruleHashSubscriptQW = do
     return $ \x -> Syn "{}" [x, exp]
 
 ruleCodeSubscript = tryRule "code subscript" $ do
-    (invs,args) <- parens $ parseParamList ruleExpression
+    (invs,args) <- parens $ parseParamList
     return $ \x -> Syn "()" [x, Syn "invs" invs, Syn "args" args]
 
 parseApply = lexeme $ do
     name            <- ruleSubName
     option ' ' $ char '.'
-    (invs,args)   <- parseParamList ruleExpression
+    (invs,args)   <- parseParamList
     return $ App name invs args
 
-parseParamList parse =    parseParenParamList parse
-                      <|> parseNoParenParamList parse
+parseParamList = parseParenParamList <|> parseNoParenParamList
 
-parseParenParamList parse = do
-    (inv, norm) <- maybeParens $ parseNoParenParamList parse
-    block <- option [] ruleAdverb
+parseParenParamList = try $ do
+    params <- option Nothing $ do
+        return . Just =<< parens parseNoParenParamList
+    block       <- option [] ruleAdverb
+    when (isNothing params && null block) $ fail ""
+    let (inv, norm) = maybe ([], []) id params
     -- XXX we just append the adverbial block onto the end of the arg list
     -- it really goes into the *& slot if there is one. -lp
     processFormals [inv, norm ++ block]
@@ -738,8 +799,18 @@ ruleAdverb = tryRule "adverb" $ do
     next <- option [] ruleAdverb
     return (rblock:next)
 
-parseNoParenParamList parse = do
-    formal <- (parse `sepEndBy` symbol ",") `sepEndBy` symbol ":"
+parseNoParenParamList = do
+    formal <- (`sepEndBy` symbol ":") $ fix $ \rec -> do
+        rv <- option Nothing $ do
+            return . Just =<< choice [ ruleBlockLiteral, ruleExpression ]
+        case rv of
+            Nothing  -> return []
+            Just exp -> do
+                let f = case exp of
+                        Syn "sub" _ -> optional
+                        _ -> (>> return ())
+                rest <- option [] $ do { f $ symbol ","; rec }
+                return (exp:rest)
     processFormals formal 
 
 processFormals :: Monad m => [[Exp]] -> m ([Exp], [Exp])
@@ -829,7 +900,7 @@ ruleLit = choice
 
 undefLiteral = try $ do
     symbol "undef"
-    (invs,args)   <- maybeParens $ parseParamList ruleExpression
+    (invs,args)   <- maybeParens $ parseParamList
     return $ if null (invs ++ args)
         then Val VUndef
         else App "&undef" invs args    
@@ -847,7 +918,8 @@ listLiteral = tryRule "list literal" $ do -- XXX Wrong
 
 arrayLiteral = do
     items   <- brackets $ ruleExpression `sepEndBy` symbol ","
-    return $ App "&prefix:\\" [] [Syn "cxt" [Val (VStr "List"), Syn "," items]]
+    -- return $ App "&prefix:\\" [] [Syn "cxt" [Val (VStr "List"), Syn "," items]]
+    return $ Syn "\\[]" [Syn "," items]
 
 pairLiteral = try $
     do
@@ -955,7 +1027,10 @@ rxLiteral = try $ do
 
 qwLiteral = try $ do
     str <- qwText
-    return $ App "&prefix:\\" [] [Syn "," $ map (Val . VStr) (words str)]
+    return $ case words str of
+        []  -> Val (VStr "")
+        [x] -> Val (VStr x)
+        xs  -> Syn "," $ map (Val . VStr) xs
         where qwText = do string "qw"
                           text <- balanced
                           return text

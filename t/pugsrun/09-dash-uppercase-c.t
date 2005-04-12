@@ -13,7 +13,7 @@ my @t_good = (
   '-C'
     ~ any('Pugs')
     ~ ' '
-    ~ any('-e1', map( {"examples/$_.p6"},<
+    ~ any('-e1', map( {"examples/$_.p6"}<
   fp
   hanoi
   junctions/1
@@ -24,11 +24,11 @@ my @t_good = (
 >)), '-CParrot ' ~ any('-e1')
 );
 
-my @t_todo = (
+my @t_todo = map{$_.values} (map{$_.values} (
   '-C'
     ~ any('Parrot')
-    ~ ' '
-    ~ any( map( {"examples/$_.p6"},<
+    ~ ' examples/'
+    ~ any(<
   fp
   hanoi
   junctions/1
@@ -36,7 +36,7 @@ my @t_todo = (
   junctions/all-all
   junctions/all-any junctions/any-any
   junctions/any-any2 junctions/grades
->)));
+  >) ~ '.p6'));
 
 # I don't know (yet) how to force a junction into expansion
 my (@tests_ok,@tests_todo);
@@ -55,7 +55,7 @@ diag "Running under $?OS";
 
 # 2>&1 only works on WinNT upwards (cmd.exe) !
 my ($pugs,$redir, $redir_stderr) = ("./pugs", ">", "2>&1");
-if ($?OS ~~ rx:perl5{MSWin32|msys|mingw}) {
+if($?OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 

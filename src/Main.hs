@@ -18,6 +18,7 @@ import Internals
 import Config
 import Run
 import AST
+import Types
 import Eval
 import External
 import Shell
@@ -32,7 +33,7 @@ main :: IO ()
 main = do
     hSetBuffering stdout NoBuffering
     runWithArgs run
-{-    
+{-
     __run args
 
 __run x = do
@@ -88,7 +89,9 @@ run []                          = do
 
 -- convenience functions for GHCi
 eval :: String -> IO ()
-eval = runProgramWith id (putStrLn . pretty) "<interactive>" []
+eval prog = do
+    args <- getArgs
+    runProgramWith id (putStrLn . pretty) "<interactive>" args prog
 
 parse :: String -> IO ()
 parse = doParse "-"
@@ -113,7 +116,7 @@ repLoop = do
             CmdHelp           -> printInteractiveHelp >> loop
             CmdReset          -> tabulaRasa >>= writeIORef env >> loop
 
-tabulaRasa :: IO AST.Env
+tabulaRasa :: IO Env
 tabulaRasa = prepareEnv "<interactive>" []
 
 doCheck :: FilePath -> String -> IO ()
@@ -207,7 +210,8 @@ doRun = do
         hPutStrLn stderr str
         hPutStrLn stderr (show exp)
         exitFailure
-    end _               = return ()
+    end (VControl (ControlExit exit)) = exitWith exit
+    end _ = return ()
 
 runFile :: String -> IO ()
 runFile file = do
@@ -238,4 +242,3 @@ printConfigInfo [] = do
 
 printConfigInfo (item:_) = do
 	putStrLn $ createConfigLine item
-

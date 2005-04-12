@@ -14,7 +14,7 @@ L<S03/"Precedence">
 
 =cut
 
-plan 39;
+plan 40;
 
 
 # 1. terms
@@ -57,12 +57,11 @@ ok((2 + 2 | 4) == 4, "and + binds tigher than |");
 
 # 8. junctive and
 
-# FIXME: without the evals this doesn't compile
-# but inside the evals it appears to work
-ok(eval '(1 & 2 | 3) < 3', "& bind tighter than |");
+# FIXME: The eval() is needed because of t/pugsbugs/listquote.t
+ok(       (1 & 2 | 3) !=3, '& binds tighter than |');
 ok(eval'!(1 & 2 | 3) < 2', "ditto");
 ok(eval '(1 & 2 ^ 3) < 3', "and also ^");
-ok(eval '!(1 & 2 ^ 4) != 3', "blah blah blah");
+ok(     !(1 & 2 ^ 4) != 3, "blah blah blah");
 
 # 9. junctive or
 
@@ -155,3 +154,13 @@ is((1 && 0 ?? 2 :: 3), 3, "&& binds tighter than ??");
 # 21. loose or
 
 # 22. expr terminator
+
+# 23. uc|ucfirst|lc|lcfirst
+# t/builtins/strings/uc|ucfirst|lc|lcfirst.t didn't compile because of this bug.
+# Compare:
+#   $ perl -we 'print uc "a" eq "A"'
+#   1
+# opposed to Pugs parses it:
+#   $ perl -we 'print uc("a" eq "A")'
+#   $    (no output)
+eval_ok 'uc "a" eq "A"';

@@ -9,7 +9,7 @@ Tests for Synopsis 6
 
 =cut
 
-plan 18;
+plan 16;
 
 sub foobar ($var) {
     return $var;
@@ -38,7 +38,7 @@ sub callerunderscore {
     return "wrong one, needed to avoid errors"
 }
 
-sub callerunderscore (?$foo = $CALLER::_) { 
+sub callerunderscore (?$foo = $CALLER::_) {
     return "-" ~ $foo ~ "-"
 }
 
@@ -48,7 +48,7 @@ $_ = "foo";
 is(callerunderscore(), "-foo-", 'CALLER:: $_ set once');
 $_ = "bar";
 is(callerunderscore(), "-bar-", 'CALLER:: $_ set twice');
-for ("quux") { 
+for ("quux") {
   todo_is(callerunderscore(), '-quux-', 'CALLER:: $_ set by for');
 }
 is(callerunderscore(), '-bar-', 'CALLER:: $_ reset after for');
@@ -73,11 +73,11 @@ is($_, "-quux-", 'block closures close');
 
 my @result;
 sub perl5sub {
-    push @result , $_[0]; 
-    push @result, $_[1];
+    push @result, @_[0];
+    push @result, @_[1];
 }
 perl5sub(<foo bar>);
-todo_is(@result, <foo bar>, 'use @_ in sub');
+is(@result, <foo bar>, 'use @_ in sub');
 
 =pod
 
@@ -93,13 +93,10 @@ sub argShifter (@a) {
 todo_fail("FIXME parsefail"); # actually exe fail... # unTODOme
 #is eval 'argShifter(3..5)', 3, "use shift on an array argument";
 
-todo_eval_ok    # unTODOme
-'sub unpack_array ([$first, @rest]) {
-	return $first;
-}', 'splitting array arguments';
+eval 'sub unpack_array ([$first, *@rest]) { return $first; }';
 
 my @array = 3..7;
-todo_is eval 'unpack_array(@array)', 3, 'unpacking an array parameter'; # unTODOme
+todo_is(eval 'unpack_array(@array)', 3, 'unpacking an array parameter'); # unTODOme
 
 =pod
 
@@ -107,10 +104,7 @@ L<S06/"Unpacking hash parameters">
 
 =cut
 
-todo_eval_ok    # unTODOme
-'sub unpack_hash({+$yo, *%other}){
-	return $yo;
-}', 'splitting hash arguments';
+eval 'sub unpack_hash({+$yo, *%other}){ return $yo; }';
 
 my %params = yo => 3, nope => 4;
-todo_is eval 'unpack_hash(%params)', 3, 'unpacking a hash parameter'; # unTODOme
+todo_is(eval 'unpack_hash(%params)', 3, 'unpacking a hash parameter'); # unTODOme
