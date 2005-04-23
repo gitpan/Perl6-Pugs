@@ -75,8 +75,8 @@ sub set_blib {
       File::Spec->catfile($path, "man1");
     $self->makemaker_args->{INST_MAN3DIR} =
       File::Spec->catfile($path, "man3");
-    $self->makemaker_args->{MAN1PODS} = {};
-    $self->makemaker_args->{MAN3PODS} = {};
+    $self->makemaker_args->{MAN1PODS} = {} if $perl_version == 6;
+    $self->makemaker_args->{MAN3PODS} = {} if $perl_version == 6;
     $self->{MM}{INST_AUTODIR} = '$(INST_LIB)/$(BASEEXT)';
     $self->{MM}{INST_ARCHAUTODIR} = '$(INST_ARCHLIB)/$(FULLEXT)';
 }
@@ -173,7 +173,16 @@ sub assert_ghc {
 
 sub has_ghc_package {
     my ($self, $package) = @_;
-    `ghc-pkg describe $package` =~ /package-url/;
+    my $ghc_pkg = $ENV{GHC_PKG};
+
+    unless($ghc_pkg) {
+        $ghc_pkg = ($ENV{GHC} || 'ghc');
+        $ghc_pkg =~ s/\bghc(?=[^\\\/]*$)/ghc-pkg/  # ghc-6.5 => ghc-pkg-6.5
+            or $ghc_pkg = 'ghc-pkg'; # fallback if !/^ghc/
+        $ghc_pkg = $self->can_run($ghc_pkg) || $self->can_run('ghc-pkg');
+    }
+
+    `$ghc_pkg describe $package` =~ /package-url/;
 }
 
 sub fixpaths {

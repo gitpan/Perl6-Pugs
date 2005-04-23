@@ -2,12 +2,12 @@
 
 module IMC.Compile where
 
-import Rule
-import Lexer
-import Text.PrettyPrint hiding (char)
 import IMC.AST
+import Pugs.Lexer
+import Pugs.Rule
 import Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
+import Text.PrettyPrint hiding (char)
 
 nested = nest 4
 

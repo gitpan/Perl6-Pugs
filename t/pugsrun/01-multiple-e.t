@@ -23,11 +23,11 @@ my @examples = (
 
 plan +@examples +1;
 
-diag "Running under $?OS";
+diag "Running under $*OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if($?OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
   $redir = '>';
 };
@@ -55,6 +55,7 @@ if (substr($got,0,1) ~~ "\\") {
 };
 
 my @got      = eval $got;
-fail "FIXME platform specific";
-# is @got, @expected, "-e '' does not eat a following argument";
+# fail "FIXME platform specific";
+# ??? Worksforme on win32 (CORION)
+is @got, @expected, "-e '' does not eat a following argument";
 

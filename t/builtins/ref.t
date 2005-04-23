@@ -41,21 +41,16 @@ isa_ok($s1, 'Sub', 'it is a Sub type');
 #      |     |       |       |    |     |          |      |
 #     Sub Method Submethod Multi Rule Macro      Bare Parametric
 
-# L<S06/"Types" /    Bare        Basic Perl block/>
+# L<S06/"Types" /Bare\s*Basic Perl block/>
 my $s2 = {};
-todo_isa_ok($s2, 'Bare', 'it is a Sub type (bare block)');
+isa_ok($s2, 'Bare', 'it is a Sub type (bare block)', :todo(1));
 
-# L<S06/"Types" /    Parametric  Basic Perl block with placeholder parameters/>
+# L<S06/"Types" /Parametric\s+Basic Perl block with placeholder parameters/>
 my $s2a = { $^a };
-todo_isa_ok($s2a, 'Parametric', 'it is a Parametric type (bare block with placeholder parameters)');
-
-# NOTE:
-# I changed this from testing for 'Block' to testing for 'Sub' 
-# based on my understanding that point subs are really just shortcuts
-# for sub {...}.
+isa_ok($s2a, 'Parametric', 'it is a Parametric type (bare block with placeholder parameters)', :todo(1));
 
 my $s3 = -> {};
-isa_ok($s3, 'Sub', 'it is a Sub type (pointy sub)');
+isa_ok($s3, 'Block', 'it is a Block type (pointy block)');
 
 # ref() on different types of scalars
 

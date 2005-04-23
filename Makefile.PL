@@ -7,9 +7,9 @@ use lib 'lib';
 use inc::Module::Install;
 
 my $pugs = "pugs$Config{_exe}";
-my $version_h = "src/pugs_version.h";
-my $config_h = "src/pugs_config.h";
-my @srcdirs = ("src", grep(-d, glob "src/*"), grep(-d, glob "src/*/*"));
+my $version_h = "src/Pugs/pugs_version.h";
+my $config_h = "src/Pugs/pugs_config.h";
+my @srcdirs = (grep(-d, glob "src/*"), grep(-d, glob "src/*/*"), grep(-d, glob "src/*/*/*"));
 
 deny_cygwin     ();
 
@@ -38,8 +38,8 @@ makemaker_args  (
     MAN1PODS => {},
 );
 clean_files     (map fixpaths($_),
-    "pugs*", "src/pugs_config.h", $version_h, $config_h,
-    'src/Config.hs', 'blib6',
+    "pugs*", "src/Pugs/pugs_config.h", $version_h, $config_h,
+    'src/Pugs/Config.hs', 'blib6',
     'test.log',
     map {("$_/*.hi", "$_/*.o*")} @srcdirs
 );
@@ -55,8 +55,8 @@ sub set_postamble {
     push @srcfiles, grep !/MainCC/, map glob("$_/*.*hs-boot"), @srcdirs;
 
     my ($ghc, $ghc_version, $ghc_flags) = assert_ghc();
-    $ghc_flags .= ' -ignore-package eval-0.9.8';
-    # $ghc_flags .= ' -dcore-lint -ignore-package eval-0.9.8';
+    # $ghc_flags .= ' -dcore-lint';
+    $ghc_flags .= " -keep-tmp-files";
 	if (!has_ghc_package('plugins')) {
 	  warn << '.';
 *** Inline Haskell support disabled.  If you want dynamic loading
@@ -67,6 +67,12 @@ sub set_postamble {
 	} else {
 	  $ghc_flags .= ' -DPUGS_HAVE_HSPLUGINS=1';
 	}
+
+# XXX - this probing is incorrect.
+#	if (has_ghc_package('readline')) {
+#	  $ghc_flags .= ' -package readline';
+#	}
+
     my $ghc_output = "-o pugs$Config{_exe} src/Main.hs";
 
     my $pcre = "src/pcre/pcre.o";
@@ -84,10 +90,10 @@ sub set_postamble {
 
     postamble(fixpaths(<< "."));
 $config_h : lib/Perl6/Pugs.pm util/config_h.pl
-	\$(PERL) util/config_h.pl
+	\$(PERL) util/config_h.pl "$ghc $ghc_flags" 
 
 $version_h : .svn/entries util/version_h.pl
-	\$(PERL) util/version_h.pl
+	\$(PERL) util/version_h.pl $version_h
 
 .svn/entries :
 	\$(NOOP)
@@ -98,20 +104,23 @@ $pcre : $pcre_c
 $unicode : $unicode_c
 	$ghc $threaded -no-link -no-hs-main -O -o $unicode $unicode_c
 
-src/Config.hs : util/PugsConfig.pm
-	\$(PERL) -Iutil -MPugsConfig -e "PugsConfig->write_config_module" > src/Config.hs
+src/Pugs/Config.hs : util/PugsConfig.pm
+	\$(PERL) -Iutil -MPugsConfig -e "PugsConfig->write_config_module" > src/Pugs/Config.hs
 
-profiled :: src/Config.hs @srcfiles $version_h @prereqs
+profiled :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
 	$ghc $threaded -auto-all -prof --make $ghc_flags $ghc_output
 
-optimized :: src/Config.hs @srcfiles $version_h @prereqs
+optimized :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
 	$ghc $threaded -O1 --make $ghc_flags $ghc_output
 
-unoptimized :: src/Config.hs @srcfiles $version_h @prereqs
+unoptimized :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
 	$ghc $threaded -O0 --make $ghc_flags $ghc_output
 
-$pugs : src/Config.hs @srcfiles $version_h @prereqs
+$pugs : src/Pugs/Config.hs @srcfiles $version_h @prereqs
 	$ghc $threaded --make $ghc_flags $ghc_output
+
+smoke : util/run-smoke.pl
+	\$(PERL) util/run-smoke.pl . smoke.html
 
 ghci ::
 	$ghc --interactive $ghc_flags $ghc_output

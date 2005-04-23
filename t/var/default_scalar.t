@@ -1,8 +1,11 @@
+#!/usr/bin/pugs
+
 use v6;
 
 require Test;
 
 plan 4;
+force_todo 4;
 
 	my $a := $_; 
 	for 1 .. 3 { $a++ }; 
@@ -11,7 +14,7 @@ plan 4;
 # work around missing capabilities
 # to get the output of 'say' into a test; 
 	my $out = open ">tmpfile" ;  
-	say $out, ;  
+	$out.say(3);
 	close $out; 
 	my$in = open "<tmpfile"; 
 	my $s = =$in; close $in; 

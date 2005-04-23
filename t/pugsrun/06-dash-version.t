@@ -10,18 +10,18 @@ works.
 
 =cut
 
-my @tests = any< -v --version >;
+my @tests = any(< -v --version >);
 @tests = map { $_.values }
          map { $_, "-w $_", "$_ -w", "-w $_ -w" }
          @tests;
 
 plan +@tests;
 
-diag "Running under $?OS";
+diag "Running under $*OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if($?OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 
@@ -33,5 +33,5 @@ for @tests -> $ex {
   my $got = slurp "temp-ex-output";
   unlink "temp-ex-output";
 
-  like($got, rx:perl5/Version: 6\.\d+\.\d+/, "'$ex' displays version");
+  like($got, rx:perl5/Version:.6\.\d+\.\d+/, "'$ex' displays version");
 };

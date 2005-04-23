@@ -14,34 +14,25 @@
 -}
 
 module Main where
-import Internals
-import Config
-import Run
-import AST
-import Types
-import Eval
-import External
-import Shell
-import Parser
-import Help
-import Pretty
-import Compile
-import IO
+import Pugs.Internals
+import Pugs.Config
+import Pugs.Run
+import Pugs.AST
+import Pugs.Types
+import Pugs.Eval
+import Pugs.External
+import Pugs.Shell
+import Pugs.Parser
+import Pugs.Help
+import Pugs.Pretty
+import Pugs.Compile
 import qualified Data.Map as Map
 
 main :: IO ()
 main = do
     hSetBuffering stdout NoBuffering
     runWithArgs run
-{-
-    __run args
 
-__run x = do
-            warn $ canonicalArgs x
-            warn $ gatherArgs . unpackOptions $ x
-            warn $ unpackOptions x
-            run $ canonicalArgs x
--}
 warn x = do
             hPrint stderr $ show x
 
@@ -104,6 +95,7 @@ comp = (doParseWith $ \exp _ -> putStrLn =<< compile "Haskell" exp) "-"
 
 repLoop :: IO ()
 repLoop = do
+    initializeShell
     env <- tabulaRasa >>= newIORef
     modifyIORef env $ \e -> e{ envDebug = Nothing }
     fix $ \loop -> do
@@ -133,7 +125,7 @@ doCompile backend = doParseWith $ \exp _ -> do
     str <- compile backend exp
     writeFile "dump.ast" str
 
-doParseWith :: (AST.Exp -> FilePath -> IO a) -> FilePath -> String -> IO a
+doParseWith :: (Pugs.AST.Exp -> FilePath -> IO a) -> FilePath -> String -> IO a
 doParseWith f name prog = do
     env <- emptyEnv []
     runRule env (f' . envBody) ruleProgram name $ decodeUTF8 prog
@@ -229,8 +221,7 @@ createConfigLine item = "\t" ++ item ++ ": " ++ (Map.findWithDefault "UNKNOWN" i
 
 printConfigInfo :: [String] -> IO ()
 printConfigInfo [] = do
-    environ <- getEnvironment
-    libs <- getLibs environ
+    libs <- getLibs
     putStrLn $ unlines $
         ["This is " ++ version ++ " built for " ++ getConfig "archname"
         ,""

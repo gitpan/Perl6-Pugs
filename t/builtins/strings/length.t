@@ -14,24 +14,27 @@ http://www.unicode.org/unicode/reports/tr11/
 
 =cut
 
-plan 19;
+plan 31;
 
 # string literals, for sanity
 
 is("".bytes,         0, "empty string");
 is("moose".bytes,    5, "moose");
 my $x = undef; 
-eval_is('$x.bytes',  undef, "undef"); #  test for warning
+is($x.bytes, 0, "undef"); #  test for warning
 
 # and the real tests.
 
 # Please add test strings in your favorite script, especially if
 # it is boustrophedonic or otherwise interesting.
-
+my @stringy = <@stringy>;
 my @data = (
     # string       octets codepoints grapheme chars
     ",               0,        0,         0,  0",
     "moose,          5,        5,         5,  5",
+    "C:\\Program Files,           16,        16,         16,  16",
+    ~@stringy ~ ",           8,          8,         8,   8",
+    "\x020ac \\x020ac,           11,        9,         9,  9",
     "בדיקה,         10,        5,         5,  5",
     "בדיקה 123,     14,        9,         9,  9",
 );

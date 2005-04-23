@@ -14,7 +14,7 @@ my @t_good = (
     ~ any('Pugs')
     ~ ' '
     ~ any('-e1', map( {"examples/$_.p6"}<
-  fp
+  fp/fp
   hanoi
   junctions/1
   junctions/all-all
@@ -51,11 +51,11 @@ for @t_todo -> $test {
 
 plan ((+@tests_ok+@tests_todo)*3);
 
-diag "Running under $?OS";
+diag "Running under $*OS";
 
 # 2>&1 only works on WinNT upwards (cmd.exe) !
 my ($pugs,$redir, $redir_stderr) = ("./pugs", ">", "2>&1");
-if($?OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any(<MSWin32 mingw msys cygwin>)) {
   $pugs = 'pugs.exe';
 };
 
@@ -93,14 +93,14 @@ for @tests_todo -> $test {
   $fh.close();
 
   my $output = run_pugs($test);
-  if (todo_is( $output, "", "No error output")) {
+  if (is( $output, "", "No error output", :todo(1))) {
 
     my $f = slurp $dump_file;
     ok( defined $f, "dump.ast was created" );
-    todo_ok( $f ~~ rx:perl5/.../, "... and it contains some output" );
+    ok( $f ~~ rx:perl5/.../, "... and it contains some output" , :todo(1));
   } else {
-    todo_fail("No clean compile");
-    todo_fail("No clean compile");
+    fail("No clean compile", :todo(1));
+    fail("No clean compile", :todo(1));
   };
 
   unlink($dump_file)

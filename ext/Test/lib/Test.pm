@@ -1,203 +1,177 @@
-module Test-0.0.3;
+module Test-0.0.5;
 use v6;
 
-my $loop = 0;
-my $plan;
-my $failed = 0;
-my $log_file = %ENV{'TEST_LOG_FILE'};
-my $always_caller = %ENV{'TEST_ALWAYS_CALLER'};
+### GLOBALS
 
-# If @forcetodo_tests[$testnum] is true, test $testnum is always todo_ed. This
-# is to ease release preparation.
-# We fill this array with actual data at the end of this file.
-my @forcetodo_tests;
-# Example:
-# Test 17 of t/foo/bar.t is:
-#   ok some_sub(), "some_sub worked";
-# If we want to forcetodo that test, we add a line to t/force_todo:
-#   t/foo/bar.t 17
-# Now, Test.pm will treat that test 17 of t/foo/bar.t as you'd have written:
-#   todo_ok some_sub(), "some_sub worked";
+# globals to keep track of our tests
+my $NUM_OF_TESTS_RUN    = 0; 
+my $NUM_OF_TESTS_FAILED = 0;
+my $NUM_OF_TESTS_PLANNED;
 
-sub plan (Int $number_of_tests) returns Int is export {
-    $plan = $number_of_tests;
+# some options available through the environment
+my $ALWAYS_CALLER = %ENV<TEST_ALWAYS_CALLER>;
+
+# a Junction to hold our FORCE_TODO tests
+my $FORCE_TODO_TEST_JUNCTION;
+
+### FUNCTIONS
+
+## plan
+
+sub plan (Int $number_of_tests) returns Void is export {
+    $NUM_OF_TESTS_PLANNED = $number_of_tests;
     say "1..$number_of_tests";
-    return $number_of_tests;
+}
+
+sub force_todo (*@todo_tests) returns Void is export {
+     $FORCE_TODO_TEST_JUNCTION = any(@todo_tests);
 }
 
 ## ok
 
-sub ok (Bool $cond, Str ?$desc) returns Bool is export {
-    proclaim($cond, $desc, undef);
-}
-
-sub todo_ok (Bool $cond, Str ?$desc) returns Bool is export {
-    proclaim($cond, $desc, "TODO");
+sub ok (Bool $cond, Str +$desc, Bool +$todo) returns Bool is export {
+    proclaim($cond, $desc, $todo ?? 'TODO' :: undef);
 }
 
 ## is
 
-sub is (Str $got, Str $expected, Str ?$desc) returns Bool is export {
+sub is (Str $got, Str $expected, Str +$desc, Bool +$todo) returns Bool is export {
     my $test := $got eq $expected;
-    proclaim($test, $desc, undef, $got, $expected);
+    proclaim($test, $desc, $todo ?? 'TODO' :: undef, $got, $expected);
 }
 
-sub todo_is (Str $got, Str $expected, Str ?$desc) returns Bool is export {
-    my $test = $got eq $expected;
-    proclaim($test, $desc, "TODO", $got, $expected);
-}
+## isnt
 
-sub isnt (Str $got, Str $expected, Str ?$desc) returns Bool is export {
+sub isnt (Str $got, Str $expected, Str +$desc, Bool +$todo) returns Bool is export {
     my $test := not($got eq $expected);
-    proclaim($test, "SHOULD FAIL: $desc", undef, $got, $expected);
-}
-
-sub todo_isnt (Str $got, Str $expected, Str ?$desc) returns Bool is export {
-    my $test := not($got eq $expected);
-    proclaim($test, "SHOULD FAIL: $desc", "TODO", $got, $expected);
+    proclaim($test, "FAILS by matching expected: $desc", $todo ?? 'TODO' :: undef, $got, $expected);
 }
 
 ## like
 
-sub like (Str $got, Rule $expected, Str ?$desc) returns Bool is export {
+sub like (Str $got, Rule $expected, Str +$desc, Bool +$todo) returns Bool is export {
     my $test := $got ~~ $expected;
-    proclaim($test, $desc, undef, $got, $expected);
+    proclaim($test, $desc, $todo ?? 'TODO' :: undef, $got, $expected);
 }
 
-sub todo_like (Str $got, Rule $expected, Str ?$desc) returns Bool is export {
-    my $test = $got ~~ $expected;
-    proclaim($test, $desc, "TODO", $got, $expected);
-}
+## unlike
 
-sub unlike (Str $got, Rule $expected, Str ?$desc) returns Bool is export {
+sub unlike (Str $got, Rule $expected, Str +$desc, Bool +$todo) returns Bool is export {
     my $test := not($got ~~ $expected);
-    proclaim($test, $desc, undef, $got, $expected);
-}
-
-sub todo_unlike (Str $got, Rule $expected, Str ?$desc) returns Bool is export {
-    my $test := not($got ~~ $expected);
-    proclaim($test, $desc, "TODO", $got, $expected);
+    proclaim($test, $desc, $todo ?? 'TODO' :: undef, $got, $expected);
 }
 
 ## eval_ok
 
-sub eval_ok (Str $code, Str ?$desc) returns Bool is export {
-    my $result = eval $code;
+sub eval_ok (Str $code, Str +$desc, Bool +$todo) returns Bool is export {
+    my $result := eval $code;
     if ($!) {
-	    proclaim(undef, $desc, undef, "eval was fatal");
-    } 
-    else {
-	    &ok.goto($result, $desc);
+	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "eval was fatal");
     }
-}
-
-sub todo_eval_ok (Str $code, Str ?$desc) returns Bool is export {
-    my $result = eval $code;
-    if ($!) {
-	    proclaim(undef, $desc, "TODO", "eval was fatal");
-    } 
     else {
-	    &todo_ok.goto($result, $desc);
+        #diag "'$desc' was non-fatal and maybe shouldn't use eval_ok()";
+	    &ok.goto($result, $desc, $todo);
     }
 }
 
 ## eval_is
 
-sub eval_is (Str $code, $expected, Str ?$desc) returns Bool is export {
-    my $result = eval $code;
+sub eval_is (Str $code, Str $expected, Str +$desc, Bool +$todo) returns Bool is export {
+    my $result := eval $code;
     if ($!) {
-	    proclaim(undef, $desc, undef, "eval was fatal", $expected);
-    } 
-    else {
-	    &is.goto($result, $expected, $desc);
+	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "eval was fatal", $expected);
     }
-}
-
-sub todo_eval_is (Str $code, $expected, Str ?$desc) returns Bool is export {
-    my $result = eval $code;
-    if ($!) {
-        proclaim(undef, $desc, "TODO", "was fatal", $expected);
-    } 
     else {
-        &todo_is.goto($result, $expected, $desc);
+        #diag "'$desc' was non-fatal and maybe shouldn't use eval_is()";
+	    &is.goto($result, $expected, $desc, $todo);
     }
 }
 
 ## cmp_ok
 
-sub cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool is export {
+sub cmp_ok (Str $got, Code $compare_func, Str $expected, Str +$desc, Bool +$todo) returns Bool is export {
     my $test := $compare_func($got, $expected);
-    proclaim($test, $desc, undef); # << needs better error message handling
-}
-
-sub todo_cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool is export {
-    my $test := $compare_func($got, $expected);
-    proclaim($test, $desc, "TODO", 4, 5); # << needs better error message handling
+    proclaim($test, $desc, $todo ?? 'TODO' :: undef); # << needs better error message handling
 }
 
 ## isa_ok
 
-sub isa_ok ($ref is rw, Str $expected_type, Str ?$desc) returns Bool is export {
+sub isa_ok ($ref is rw, Str $expected_type, Str +$desc, Bool +$todo) returns Bool is export {
     my $out := defined($desc) ?? $desc :: "The object is-a '$expected_type'";
     my $test := $ref.isa($expected_type);
-    proclaim($test, $out, undef, $ref.ref, $expected_type);
-}
-
-sub todo_isa_ok ($ref is rw, Str $expected_type, Str ?$desc) returns Bool is export {
-    my $out := defined($desc) ?? $desc :: "The object is-a '$expected_type'";
-    my $test := $ref.isa($expected_type);
-    proclaim($test, $out, "TODO", $ref.ref, $expected_type);
+    proclaim($test, $out, $todo ?? 'TODO' :: undef, $ref.ref, $expected_type);
 }
 
 ## use_ok
 
-sub use_ok (Str $module) is export {
+sub use_ok (Str $module, Bool +$todo) is export {
     eval "require $module";
     if ($!) {
-	    proclaim(undef, "require $module;", undef, "Import error when loading $module: $!");
-    } 
+	    proclaim(undef, "require $module;", $todo ?? 'TODO' :: undef, "Import error when loading $module: $!");
+    }
     else {
-        &ok.goto(1, "$module imported OK");
+        &ok.goto(1, "$module imported OK", $todo);
     }
 }
 
-sub todo_use_ok (Str $module) is export {
-    eval "require $module";
+## throws ok
+
+sub throws_ok (Sub $code, Any $match, Str +$desc, Bool +$todo) returns Bool is export {
+    try { $code() };
     if ($!) {
-	    proclaim(undef, "require $module;", undef, "Import error when loading $module: $!");
-    } 
+        &ok.goto($! ~~ $match, $desc, $todo);            
+    }
     else {
-        &todo_ok.goto(1, "$module imported OK");
+	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "No exception thrown");
+    }
+}
+
+## dies_ok
+
+sub dies_ok (Sub $code, Str +$desc, Bool +$todo) returns Bool is export {
+    try { $code() };
+    if ($!) {
+        &ok.goto(1, $desc, $todo);
+    }
+    else {
+	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "No exception thrown");
+    }
+}
+
+## lives ok
+
+sub lives_ok (Sub $code, Str +$desc, Bool +$todo) returns Bool is export {
+    try { $code() };
+    if ($!) {
+        proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "An exception was thrown : $!");
+    }
+    else {
+        &ok.goto(1, $desc, $todo);
     }
 }
 
 ## misc. test utilities
 
-sub skip (Str ?$reason) returns Bool is export {
+multi sub skip (Str ?$reason) returns Bool is export {
     proclaim(1, "", "skip $reason");
 }
 
-sub skip (Int $count, Str $reason) returns Bool is export {
-  for (1..$count) {
-    skip $reason;
-  }
+multi sub skip (Int $count, Str $reason) returns Bool is export {
+    for (1 .. $count) {
+        skip $reason;
+    }
 }
 
-sub pass (Str ?$desc) returns Bool is export {
+sub skip_rest (Str ?$reason) returns Bool is export {
+    skip($NUM_OF_TESTS_PLANNED - $NUM_OF_TESTS_RUN, $reason // "");
+}
+
+sub pass (Str +$desc) returns Bool is export {
     proclaim(1, $desc);
 }
 
-sub fail (Str ?$desc) returns Bool is export {
-    proclaim(0, $desc);
-}
-
-sub todo_fail (Str ?$desc) returns Bool is export {
-    proclaim(0, $desc, 'TODO');
-}
-
-sub test_log_file (Str $filename) returns Str is export {
-    $log_file = $filename;
-    return $log_file;
+sub fail (Str +$desc, Bool +$todo) returns Bool is export {
+    proclaim(0, $desc, $todo ?? 'TODO' :: undef);
 }
 
 sub diag (Str $diag) is export {
@@ -210,22 +184,21 @@ sub diag (Str $diag) is export {
 
 sub proclaim (Bool $cond, Str ?$desc, Str ?$c, Str ?$got, Str ?$expected) returns Bool {
     my $context = $c; # no C<is rw> yet
-    $loop++;
+    $NUM_OF_TESTS_RUN++;
 
-    # Check if we have to forcetodo this test because we're preparing for a
-    # release.
-    $context = "TODO for release" if @forcetodo_tests[$loop];
+    # Check if we have to forcetodo this test 
+    # because we're preparing for a release.
+    $context = "TODO for release" if $NUM_OF_TESTS_RUN == $FORCE_TODO_TEST_JUNCTION;
 
     my $ok := $cond ?? "ok " :: "not ok ";
     my $out = defined($desc) ?? " - $desc" :: "";
-    $out = "$out <pos:$?CALLER::CALLER::POSITION>" if $always_caller;
+    $out = "$out <pos:$?CALLER::CALLER::POSITION>" if $ALWAYS_CALLER;
 
     my $context_out = defined($context) ?? " # $context" :: "";
 
-    say $ok, $loop, $out, $context_out;
+    say $ok, $NUM_OF_TESTS_RUN, $out, $context_out;
 
-    report_failure($context, $got, $expected) if (!$cond);
-    write_log(got => $got, expected => $expected, desc => $desc, context => $context) if $log_file and !$cond;
+    report_failure($context, $got, $expected) unless $cond;
 
     return $cond;
 }
@@ -233,92 +206,33 @@ sub proclaim (Bool $cond, Str ?$desc, Str ?$c, Str ?$got, Str ?$expected) return
 sub report_failure (Str ?$todo, Str ?$got, Str ?$expected) returns Bool {
     if ($todo) {
         diag("  Failed ($todo) test ($?CALLER::CALLER::CALLER::POSITION)");
-    } 
+    }
     else {
 	    diag("  Failed test ($?CALLER::CALLER::CALLER::POSITION)");
-        $failed++;
+        $NUM_OF_TESTS_FAILED++;
     }
 
-    if ($?CALLER::CALLER::SUBNAME eq ('&is' | '&todo_is' | '&cmp_ok' | '&todo_cmp_ok' | '&eval_is' | '&todo_eval_is' | '&isa_ok' | '&todo_isa_ok')) {
+    if ($?CALLER::CALLER::SUBNAME eq ('&is' | '&isnt' | '&cmp_ok' | '&eval_is' | '&isa_ok' | '&todo_is' | '&todo_isnt' | '&todo_cmp_ok' | '&todo_eval_is' | '&todo_isa_ok')) {
         diag("  Expected: " ~ ($expected.defined ?? $expected :: "undef"));
         diag("       Got: " ~ ($got.defined ?? $got :: "undef"));
-    } 
+    }
     else {
         diag("       Got: " ~ ($got.defined ?? $got :: "undef"));
     }
 }
 
-sub write_log (+$got, +$expected, Str +$desc, Str +$errstr, Str +$context, Str +$operator = 'eq') returns Bool {
-    # return 0 but true unless $log_file; # not yet implemented
-    return 1 unless $log_file;
-    # until we have 'given'/'when'
-    my $status = 'FAILED';
-    if (index($?CALLER::CALLER::SUBNAME, 'todo') >= 0) {
-        $status = 'TODO';
-    }
-    if (index($?CALLER::CALLER::SUBNAME, 'skip') >= 0) {
-        $status = 'SKIPPED';
-    }
-    my $out;
-    if ($out = open(">>$log_file")) {
-        $out.say("$?CALLER::CALLER::CALLER::FILE $loop $status");
-        $out.say($desc) if $desc;
-        $out.say($errstr) if $errstr;
-        $out.say($context) if $context;
-        $out.say('### Expected ###');
-        $out.say($expected);
-        $out.say('### Actual Results ###');
-        $out.say($got, "\n");
-        $out.close;
-        return 1;
-    }
-    return 0;
-}
 
-sub read_forcetodo_tests() {
-    # In the file describing which tests to "force todo", we only use Unix
-    # filenames. So, we (may) have to convert our win32 filename:
-    my $unixfn = $?FILE;
-    $unixfn ~~ s:perl5:g{\\}{/};
-
-    my $force_todo_fh = open "< t/force_todo";
-    # If the file doesn't exist, simply return -- there's nothing we could
-    # read from that file.
-    return() unless $force_todo_fh;
-
-    # Otherwise, continue:
-    my @tests_to_forcetodo;
-    for =$force_todo_fh -> $l {
-    	my $line = $l; # no C<is rw> yet
-    	# FYI, an example line might look like:
-    	#   t/foo/bar.t 13 15 42
-    	# If $line is not a comment and concerns us...
-    	if(substr($line, 0, 1) ne "#" and index($line, $unixfn) >= 0) {
-    	    chomp $line;
-    	    my @tests = split " ", $line;
-    	    # We have to shift @tests to remove the test filename.
-    	    shift @tests;
-    	    push @tests_to_forcetodo, @tests;
-    	}
-    }
-
-    if(@tests_to_forcetodo) {
-	    @forcetodo_tests[$_] = 1 for @tests_to_forcetodo;
-	    diag "Will forcetodo test(s) @tests_to_forcetodo[]."
-    }
-}
-read_forcetodo_tests();
 
 END {
-    if (!defined($plan)) {
-        say("1..$loop");
-    } 
-    elsif ($plan != $loop) {
-	    $*ERR.say("# Looks like you planned $plan tests, but ran $loop");
+    if (!defined($NUM_OF_TESTS_PLANNED)) {
+        say("1..$NUM_OF_TESTS_RUN");
     }
-    
-    if ($failed) {
-        $*ERR.say("# Looks like you failed $failed tests of $loop");
+    elsif ($NUM_OF_TESTS_PLANNED != $NUM_OF_TESTS_RUN) {
+	    $*ERR.say("# Looks like you planned $NUM_OF_TESTS_PLANNED tests, but ran $NUM_OF_TESTS_RUN");
+    }
+
+    if ($NUM_OF_TESTS_FAILED) {
+        $*ERR.say("# Looks like you failed $NUM_OF_TESTS_FAILED tests of $NUM_OF_TESTS_RUN");
     }
 }
 
@@ -334,18 +248,18 @@ Test - Test support module for perl6
   require Test;
 
   plan 10;
-  test_log_file('test.log');
+  force_todo(1, 3 .. 5, 9);
 
   use_ok('Some::Module');
-  todo_use_ok('Some::Other::Module');
+  use_ok('Some::Other::Module', todo => 1);
 
   ok(2 + 2 == 4, '2 and 2 make 4');
   is(2 + 2, 4, '2 and 2 make 4');
   isa_ok([1, 2, 3], 'List');
 
-  todo_ok(2 + 2 == 5, '2 and 2 make 5');
-  todo_is(2 + 2, 5, '2 and 2 make 5');
-  todo_isa_ok({'one' => 1}, 'Hash');
+  ok(2 + 2 == 5, '2 and 2 make 5', :todo(1));
+  is(2 + 2, 5, desc => '2 and 2 make 5', todo => 1);
+  isa_ok({'one' => 1}, 'Hash', :todo(1));
 
   use_ok('My::Module');
 
@@ -354,7 +268,7 @@ Test - Test support module for perl6
 
   skip('skip this test for now');
 
-  todo_fail('this fails, but might work soon');
+  fail('this fails, but might work soon', :todo(1));
 
   diag('some misc comments and documentation');
 
@@ -373,37 +287,38 @@ section of this document.
 
 = FUNCTIONS
 
-- `plan (Int $number_of_tests) returns Int`
+- `plan (Int $number_of_tests) returns Void`
 
 All tests need a plan. A plan is simply the number of tests which are
 expected to run. This should be specified at the very top of your tests.
 
-- `test_log_file (Str $filename) returns Str`
+- `force_todo (*@todo_tests) returns Void`
 
-If you specify a log file, any failed tests will log some diagnostics
-there.  The filename 'test.log' is recommended.
+If you have some tests which you would like to force into being TODO tests
+then you can pass them through this function. This is primarily a release
+tool, but can be useful in other contexts as well. 
 
 == Testing Functions
 
-- `use_ok (Str $module) returns Bool`
+- `use_ok (Str $module, Bool +$todo) returns Bool`
 
 *NOTE:* This function currently uses `require()` since Pugs does not yet have
 a proper `use()` builtin.
 
-- `ok (Bool $cond, Str ?$desc) returns Bool`
+- `ok (Bool $cond, Str +$desc, Bool +$todo) returns Bool`
 
-- `is (Str $got, Str $expected, Str ?$desc) returns Bool`
+- `is (Str $got, Str $expected, Str +$desc, Bool +$todo) returns Bool`
 
-- `isnt (Str $got, Str $expected, Str ?$desc) returns Bool`
+- `isnt (Str $got, Str $expected, Str +$desc, Bool +$todo) returns Bool`
 
-- `like (Str $got, Rule $expected, Str ?$desc) returns Bool is export`
-- `unlike (Str $got, Rule $expected, Str ?$desc) returns Bool is export`
+- `like (Str $got, Rule $expected, Str +$desc, Bool +$todo) returns Bool is export`
+- `unlike (Str $got, Rule $expected, Str +$desc, Bool +$todo) returns Bool is export`
 
 These functions should work with most reg-exps, but given that they are still a
 somewhat experimental feature in Pugs, it is suggested you don't try anything
 too funky.
 
-- `cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool`
+- `cmp_ok (Str $got, Code $compare_func, Str $expected, Str +$desc, Bool +$todo) returns Bool`
 
 This function will compare `$got` and `$expected` using `$compare_func`. This will
 eventually allow Test::More-style cmp_ok() though the following syntax:
@@ -415,49 +330,38 @@ a little while. Until then, you can just write your own functions like this:
 
   cmp_ok('test', sub ($a, $b) { ?($a gt $b) }, 'me', '... testing gt on two strings');
 
-- `isa_ok ($ref, Str $expected_type, Str ?$desc) returns Bool`
+- `isa_ok ($ref, Str $expected_type, Str +$desc, Bool +$todo) returns Bool`
 
 This function currently on checks with ref() since we do not yet have
 object support. Once object support is created, we will add it here, and
 maintain backwards compatibility as well.
 
-- `eval_ok (Str $code, Str ?$desc) returns Bool`
+- `eval_ok (Str $code, Str +$desc, Bool +$todo) returns Bool`
 
-- `eval_is (Str $code, $expected, Str ?$desc) returns Bool`
+- `eval_is (Str $code, Str $expected, Str +$desc, Bool +$todo) returns Bool`
 
 These functions will eval a code snippet, and then pass the result to is or ok
 on success, or report that the eval was not successful on failure.
 
-== TODO Testing functions
+- `throws_ok (Sub $code, Any $expected, Str +$desc, Bool +$todo) returns Bool`
+
+This function takes a block of code and runs it. It then smart-matches (`~~`) any `$!` 
+value with the `$expected` value.
+
+- `dies_ok (Sub $code, Str +$desc, Bool +$todo) returns Bool`
+
+- `lives_ok (Sub $code, Str +$desc, Bool +$todo) returns Bool`
+
+These functions both take blocks of code, run the code, and test whether they live or die.
+
+=== A Note about TODO-ing tests
 
 Sometimes a test is broken because something is not implemented yet. So
 in order to still allow that to be tested, and those tests to knowingly
-fail, we provide a set of todo_* functions for all the basic test
-functions.
+fail, we provide the `:todo(1)` named parameter for all these  functions.
 
-- `todo_use_ok(Str $module) returns Bool`
-
-- `todo_ok (Bool $cond, Str ?$desc) returns Bool`
-
-- `todo_is (Str $got, Str $expected, Str ?$desc) returns Bool`
-
-- `todo_isnt (Str $got, Str $expected, Str ?$desc) returns Bool`
-
-- `todo_like (Str $got, Rule $expected, Str ?$desc) returns Bool is export`
-
-- `todo_unlike (Str $got, Rule $expected, Str ?$desc) returns Bool is export`
-
-- `todo_cmp_ok (Str $got, Code $compare_func, Str $expected, Str ?$desc) returns Bool`
-
-- `todo_isa_ok ($ref, Str $expected_type, Str ?$desc) returns Bool`
-
-- `todo_eval_ok (Str $code, Str ?$desc) returns Bool`
-
-- `todo_eval_is (Str $code, $expected, Str ?$desc) returns Bool`
-
-You can use `t/force_todo` to set the tests which should get a temporary
-`todo_`-prefix because of release preparation. See `t/force_todo` for more
-information.
+It is also possible to use the `force_todo()` function to do large scale 
+TODO-ing of tests.
 
 == Misc. Functions
 
@@ -473,14 +377,9 @@ Sometimes what you need to test does not fit into one of the standard
 testing functions. In that case, you can use the rather blunt pass()
 functions and its compliment the fail() function.
 
-- `fail (Str ?$desc) returns Bool`
+- `fail (Str +$desc, Bool +$todo) returns Bool`
 
 This is the opposite of pass()
-
-- `todo_fail (Str ?$desc) returns Bool`
-
-On occasion, one of these odd tests might fail, but actually be a TODO
-item. So we give you todo_fail() for just such an occasion.
 
 - `diag (Str $diag)`
 
@@ -516,16 +415,10 @@ Because these functions will be mutually recursive, they will easily be
 able handle arbitrarily complex data structures automatically (at least
 that is what I hope).
 
-- throws_ok, lives_ok
-
-These are functions taken directly from Test::Exception. They will
-accept a block to execute and then either an Exception type, a reg-exp
-or a string to match against the error.
-
 = ENVIRONMENT
 
-Setting the environment variable TEST_LOG_FILE sets the default
-filename where test diagnostics should be written.
+Setting the environment variable TEST_ALWAYS_CALLER to force Test.pm to always
+append the caller information to the test's `$desc`.
 
 = SEE ALSO
 

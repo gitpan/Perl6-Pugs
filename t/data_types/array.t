@@ -9,7 +9,8 @@ Arrays
 
 =cut
 
-plan 52;
+plan 58;
+force_todo 48 .. 52;
 
 # array of strings
 
@@ -38,12 +39,12 @@ is(@array2[2], undef,  'got the right value at array2 index 2');
 my @array3 = (@array1, @array2);
 isa_ok(@array3, 'Array');
 
-is(+@array3, 6, 'the array3 has 6 elements'); # unTODOme
-is(@array3[0], 'foo', 'got the right value at array3 index 0'); # unTODOme
-is(@array3[1], 'bar', 'got the right value at array3 index 1'); # unTODOme
-is(@array3[2], 'baz', 'got the right value at array3 index 2'); # unTODOme
-is(@array3[3], 'test', 'got the right value at array3 index 3'); # unTODOme
-is(@array3[4], 1,      'got the right value at array3 index 4'); # unTODOme
+is(+@array3, 6, 'the array3 has 6 elements'); 
+is(@array3[0], 'foo', 'got the right value at array3 index 0'); 
+is(@array3[1], 'bar', 'got the right value at array3 index 1'); 
+is(@array3[2], 'baz', 'got the right value at array3 index 2'); 
+is(@array3[3], 'test', 'got the right value at array3 index 3'); 
+is(@array3[4], 1,      'got the right value at array3 index 4'); 
 is(@array3[5], undef,  'got the right value at array3 index 5');
 
 # array slice
@@ -75,10 +76,10 @@ my @slice = (2, 0, 1);
 my @array6 = @array1[@slice];
 isa_ok(@array6, 'Array');
 
-is(+@array6, 3, 'the array6 has 3 elements'); # unTODOme
-is(@array6[0], 'baz', 'got the right value at array6 index 0'); # unTODOme
-is(@array6[1], 'foo', 'got the right value at array6 index 1'); # unTODOme
-is(@array6[2], 'bar', 'got the right value at array6 index 2'); # unTODOme
+is(+@array6, 3, 'the array6 has 3 elements'); 
+is(@array6[0], 'baz', 'got the right value at array6 index 0'); 
+is(@array6[1], 'foo', 'got the right value at array6 index 1'); 
+is(@array6[2], 'bar', 'got the right value at array6 index 2'); 
 
 # create an array slice with an array constructed with ()
 
@@ -107,13 +108,42 @@ isa_ok(@array9, 'Array');
 is(+@array9, 0, "new arrays are empty");
 
 my @array10 = (1, 2, 3,);
-is(+@array10, 3, "trailing commas make correct list"); # unTODOme
+is(+@array10, 3, "trailing commas make correct list"); 
 
-# declear a multidimension array
-todo_eval_ok('@array11[0...3; 0...1]', "multidimension array");
-todo_eval_ok('@array11[2,0] = 12', "push the value to a multidimension array");
-todo_eval_ok('@array12 is shape(2,4)', "another way to declare a multidimension array");
+# declare a multidimension array
+eval_ok('@array11[0...3; 0...1]', "multidimension array", :todo(1));
+eval_ok('@array11[2,0] = 12', "push the value to a multidimension array", :todo(1));
+eval_ok('@array12 is shape(2,4)', "another way to declare a multidimension array", :todo(1));
 
 # declare the array with data type
-todo_eval_ok('my Int @array', "declare a array for integer only");
-todo_eval_ok('@array[0] = 23', "declare the array value");
+eval_ok('my Int @array', "declare a array for integer only", :todo(1));
+eval_ok('@array[0] = 23', "declare the array value", :todo(1));
+
+# negative index
+my @array11 = ('a', 'b', 'c', 'e'); 
+is @array11[-1],'e', "negative index [-1]";
+
+# negative index range
+is ~@array11[-4 .. -2], 'a b c', "negative index [-4 .. -2]";
+
+# negative index as lvalue
+@array11[-1]   = 'd';
+is @array11[-1], 'd', "assigns to the correct negative slice index"; 
+is ~@array11,'a b c d', "assignment to neg index correctly alters the array";
+
+my @array12 = ('a', 'b', 'c', 'd'); 
+# negative index range as lvalue
+@array12[-4 .. -1]   = ('d', 'c', 'b', 'a'); #('a'..'d').reverse
+is ~@array12, 'd c b a', "negative range as lvalue"; 
+
+#hat trick
+my @array13 = ('a', 'b', 'c', 'd');
+my @b = 0..3;
+((@b[-3,-2,-1,-4] = @array13)= @array13[-1,-2,-3,-4]);
+
+is ~@b, 
+	'a d c b', 
+	"hat trick:
+	assign to a negatively indexed slice array from array  
+	lvalue in assignment is then lvalue to negatively indexed slice as rvalue"; 
+#

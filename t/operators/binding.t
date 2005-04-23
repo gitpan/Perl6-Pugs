@@ -13,7 +13,7 @@ L<S03/"Binding">
 
 =cut
 
-plan 9;
+plan 21;
 
 # L<S03/"Binding" /replaces the container itself.  For instance:/>
 
@@ -23,12 +23,12 @@ is($x, 'Just Another', 'normal assignment works');
 my $y := $x;
 is($y, 'Just Another', 'y is now bound to x');
 
-todo_ok(eval '$y =:= $x', 'y is bound to x (we checked with the =:= identity op)');
+ok(eval '$y =:= $x', 'y is bound to x (we checked with the =:= identity op)', :todo(1));
 
 my $z = $x;
 is($z, 'Just Another', 'z is not bound to x');
 
-todo_ok(eval '!($z =:= $x)', 'z is not bound to x (we checked with the =:= identity op)');
+ok(eval '!($z =:= $x)', 'z is not bound to x (we checked with the =:= identity op)', :todo(1));
 
 $y = 'Perl Hacker';
 is($y, 'Perl Hacker', 'y has been changed to "Perl Hacker"');
@@ -47,3 +47,47 @@ sub foo {
 }
 
 ok(foo(), "CALLER resolves bindings in caller's dynamic scope");
+
+# Binding to swap
+{
+  my $a = "a";
+  my $b = "b";
+  ($a, $b) := ($b,$a);
+  is($a, 'b', '$a has been changed to "b"');
+  is($b, 'a', '$b has been changed to "a"');
+}
+
+# Binding subroutine parameters
+# XXX! When executed in interactive Pugs, the following test works!
+{
+  my $a;
+  my $b = sub($arg) { $a := $arg };
+  my $val = 42;
+
+  $b($val);
+  is $a, 42, "bound readonly sub param was bound correctly (1)";
+  $val++;
+  is $a, 43, "bound readonly sub param was bound correctly (2)";
+
+  dies_ok { $a = 23 },
+    "bound readonly sub param remains readonly (1)";
+  is $a, 43,
+    "bound readonly sub param remains readonly (2)";
+  is $val, 43,
+    "bound readonly sub param remains readonly (3)";
+}
+
+{
+  my $a;
+  my $b = sub($arg is rw) { $a := $arg };
+  my $val = 42;
+
+  $b($val);
+  is $a, 42, "bound rw sub param was bound correctly (1)";
+  $val++;
+  is $a, 43, "bound rw sub param was bound correctly (2)";
+
+  lives_ok { $a = 23 }, "bound rw sub param remains rw (1)";
+  is $a, 23,            "bound rw sub param remains rw (2)";
+  is $val, 23,          "bound rw sub param remains rw (3)";
+}

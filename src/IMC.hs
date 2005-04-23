@@ -11,7 +11,6 @@
 
 module IMC (
     module IMC.Compile,
-    yow,
 ) where
 import IMC.AST
 import IMC.Compile
@@ -19,10 +18,11 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Ppr
 -- import IMC.Lexer
 
+run = $( imcX prog )
 
-runFoo = undefined
+{-
 yow :: String -> IO ()
 yow str = do
     prog' <- runFoo
     $( imcX prog' ) -- how to get str into prog?
-
+-}

@@ -10,13 +10,12 @@ my $CONTENT_LENGTH;
 my $CONTENT_TYPE;
 my $QUERY_STRING;
 my $QS_DELIMITER = ';';
+my $URL_ENCODING = 'iso-8859-1';
+my $IS_PARAMS_LOADED = 0;
 
 ## functions
 
 # information functions
-
-multi sub param returns Array is export { %PARAMS.keys }
-multi sub param (Str $key) returns Array is export { (%PARAMS{$key}) }
 
 sub clear_params returns Void is export { %PARAMS = () }
 
@@ -41,6 +40,14 @@ sub set_delimiter(Str $delimiter) is export {
         die "Query string delimiter must be a semi-colon or ampersand";
     }
     $QS_DELIMITER = $delimiter;
+}
+
+# set GET and POST parameters encoding
+sub set_url_encoding(Str $encoding) is export {
+    unless $encoding eq ('iso-8859-1' | 'utf-8') {
+    die "Currently iso-8859-1 and utf-8 encodings supported";
+    }
+    $URL_ENCODING = $encoding;
 }
 
 # utility functions
@@ -76,19 +83,45 @@ sub redirect (Str $location) returns Str is export {
 sub url_decode (Str $to_decode) returns Str is export {
     my $decoded = $to_decode;
     $decoded ~~ s:perl5:g/\+/ /;
-    $decoded ~~ s:perl5:g/%([\da-fA-F][\da-fA-F])/{chr(hex($1))}/;
+    given $URL_ENCODING {
+        when 'iso-8859-1' {
+            $decoded ~~ s:perl5:g/%([\da-fA-F][\da-fA-F])/{chr(hex($1))}/;
+        }
+        when 'utf-8' {
+            $decoded ~~ s:perl5:g:i/%(F[CD])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($1)+&1)*1073741824+(hex($2)+&63)*16777216+(hex($3)+&63)*262144+(hex($4)+&63)*4096+(hex($5)+&63)*64+(hex($6)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%(F[8-B])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($1)+&3)*16777216+(hex($2)+&63)*262144+(hex($3)+&63)*4096+(hex($4)+&63)*64+(hex($5)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%(F[0-7])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($1)+&7)*262144+(hex($2)+&63)*4096+(hex($3)+&63)*64+(hex($4)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%(E[\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($1)+&15)*4096+(hex($2)+&63)*64+(hex($3)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%([CD][\dA-F])%([8-9AB][\dA-F])/{chr((hex($1)+&31)*64+(hex($2)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%([0-7][\dA-F])/{chr(hex($1))}/;
+        }
+    }
     return $decoded;
 }
 
-sub url_encode (Str $to_encode) returns Str is export  {
+sub url_encode (Str $to_encode) returns Str is export {
     my $encoded = $to_encode;
     # create a simplistic dec-to-hex converter
-    # which will be able to handle the ASCII
-    # character set (0 - 128)
+    # which will be able to handle the 0-255 values
     my @hex = <0 1 2 3 4 5 6 7 8 9 A B C D E F>;
-    my $dec2hex = -> $dec { @hex[int($dec / 16)] ~ @hex[$dec % 16] };    
-    $encoded ~~ s:perl5:g/([^-.\w ])/\%$dec2hex(ord($1))/;
-    $encoded ~~ s:perl5:g/ /%20/;
+    my $dec2hex = -> $dec { '%' ~ @hex[int($dec / 16)+&15] ~ @hex[$dec % 16]; };
+    # create 
+    my $utf82hex = -> $num {
+        if ($num < 128) { $dec2hex($num); }
+        elsif ($num < 2048) { $dec2hex(192+$num/64)~$dec2hex(128+$num%64); }
+        elsif ($num < 65536) { $dec2hex(224+$num/4096)~$dec2hex(128+($num/64)%64)~$dec2hex(128+$num%64); }
+        elsif ($num < 2097152) { $dec2hex(240+$num/262144)~$dec2hex(128+($num/4096)%64)~$dec2hex(128+($num/64)%64)~$dec2hex(128+$num%64); }
+        elsif ($num < 67108864) { $dec2hex(248+$num/16777216)~$dec2hex(128+($num/262144)%64)~$dec2hex(128+($num/4096)%64)~$dec2hex(128+($num/64)%64)~$dec2hex(128+$num%64); }
+        else { $dec2hex(252+$num/1073741824)~$dec2hex(248+($num/16777216)%64)~$dec2hex(128+($num/262144)%64)~$dec2hex(128+($num/4096)%64)~$dec2hex(128+($num/64)%64)~$dec2hex(128+$num%64); }
+    };
+    given $URL_ENCODING {
+        when 'iso-8859-1' {
+            $encoded ~~ s:perl5:g/([^-.\w])/$dec2hex(ord($1))/;
+        }
+        when 'utf-8' {
+            $encoded ~~ s:perl5:g/([^-.\w])/$utf82hex(ord($1))/;
+        }
+    }
     return $encoded;
 }
 
@@ -117,36 +150,43 @@ sub unpack_params (Str $data) returns Str is export {
     }  
 }
 
-## now initialize all the globals
-
-try {
-    $REQUEST_METHOD = %*ENV<REQUEST_METHOD>;
-    $CONTENT_TYPE   = %*ENV<CONTENT_TYPE>;    
-    $CONTENT_LENGTH = %*ENV<CONTENT_LENGTH>;   
-        
-    if (lc($REQUEST_METHOD) eq ('get' | 'head')) {
-        $QUERY_STRING = %*ENV<QUERY_STRING>;
-        unpack_params($QUERY_STRING) if $QUERY_STRING;
-    }
-    elsif (lc($REQUEST_METHOD) eq 'post') { 
-        if (!$CONTENT_TYPE || $CONTENT_TYPE eq 'application/x-www-form-urlencoded') {
-            my $content; # = read($*IN, $CONTENT_LENGTH);
-            unpack_params($content) if $content;
+sub load_params {
+    $IS_PARAMS_LOADED = 1; 
+    ## initialize all the globals
+    try {
+        $REQUEST_METHOD = %*ENV<REQUEST_METHOD>;
+        $CONTENT_TYPE   = %*ENV<CONTENT_TYPE>;    
+        $CONTENT_LENGTH = %*ENV<CONTENT_LENGTH>;   
+            
+        if (lc($REQUEST_METHOD) eq ('get' | 'head')) {
+            $QUERY_STRING = %*ENV<QUERY_STRING>;
+            unpack_params($QUERY_STRING) if $QUERY_STRING;
+        }
+        elsif (lc($REQUEST_METHOD) eq 'post') { 
+            if (!$CONTENT_TYPE || $CONTENT_TYPE eq 'application/x-www-form-urlencoded') {
+                my $content; # = read($*IN, $CONTENT_LENGTH);
+                unpack_params($content) if $content;
+            }
+        }
+        elsif (@ARGS) {
+            my $input = join('', @ARGS);
+            unpack_params($input);
+        }
+        else {
+            die "Invalid Content Type" if $REQUEST_METHOD; # only die if we are running under CGI
         }
     }
-    elsif (@ARGS) {
-        my $input = join('', @ARGS);
-        unpack_params($input);
-    }
-    else {
-        die "Invalid Content Type" if $REQUEST_METHOD; # only die if we are running under CGI
-    }
+    if ($!) {
+        print header;
+        say "There was an error getting the params:\n\t" ~ $!;
+        exit();
+    }    
 }
-if ($!) {
-    print header;
-    say "There was an error getting the params:\n\t" ~ $!;
-    exit();
-}	
+
+# information functions (again)
+
+multi sub param returns Array is export { unless($IS_PARAMS_LOADED) {load_params}; %PARAMS.keys; }
+multi sub param (Str $key) returns Array is export { unless($IS_PARAMS_LOADED) {load_params}; (%PARAMS{$key}); }
 
 =pod
 
@@ -251,6 +291,8 @@ Autrijus Tang, E<lt>autrijus@autrijus.comE<gt>
 
 Curtis "Ovid" Poe
  
+Andras Barthazi, E<lt>andras@barthazi.huE<gt>
+
 =head1 COPYRIGHT
 
 Copyright (c) 2005. Stevan Little. All rights reserved.

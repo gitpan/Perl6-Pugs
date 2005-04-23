@@ -16,9 +16,9 @@ plan 1;
 
 my ($pugs,$redir,$squo) = ("./pugs", ">", "'");
 
-if($?OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any<MSWin32 mingw msys cygwin>) {
     $pugs = 'pugs.exe';
-    skip 1, '$*PID is not implemented for Win32'; # unTODOme
+    skip 1, '$*PID is not implemented for Win32'; 
     exit;
 };
 

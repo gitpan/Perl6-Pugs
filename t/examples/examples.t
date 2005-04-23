@@ -13,7 +13,7 @@ with a expected output.
 =cut
 
 my @examples = <
-  fp hanoi quicksort
+  fp/fp hanoi quicksort
   junctions/1 junctions/3 junctions/all-all junctions/all-any junctions/any-any
   junctions/any-any2 junctions/grades
 >;
@@ -24,13 +24,13 @@ plan +@examples;
 # -- awaiting v6 File::Spec
 # Actually, nobody really needs the path separator
 
-diag "Running under $?OS";
+diag "Running under $*OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if($?OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any(<MSWin32 mingw msys cygwin>)) {
   $pugs = 'pugs.exe';
-  $redir = '>';
+  # $redir = '>';
 };
 
 for @examples -> $ex {
