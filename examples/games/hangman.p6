@@ -105,7 +105,8 @@ $msg";
 ## main loop
 unshift @*INC, 'ext/File-Spec/lib', '../ext/File-Spec/lib', '../../ext/File-Spec/lib';
 require File::Spec;
-my $progdir = splitpath($*PROGRAM_NAME)[1];
+my @path_parts = splitpath($*PROGRAM_NAME);
+my $progdir = @path_parts[1];
 my $dict = canonpath("$progdir../../AUTHORS");
 my @committers = get_committer_list($dict);
 my $current_committer = pick_committer(@committers);
@@ -155,7 +156,7 @@ using the Pugs AUTHORS file as a word list.
 
 stevan little, E<lt>stevan@iinteractive.comE<gt>
 
-Aurtrijus Tang E<lt>autrijus@autrijus.orgE<gt>
+Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>
 
 Ingo Blechschmidt
 

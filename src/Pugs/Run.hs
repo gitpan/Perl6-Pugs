@@ -23,25 +23,19 @@ runWithArgs f = do
     args <- getArgs
     f $ canonicalArgs args
 
-runEval :: Env -> Eval Val -> IO Val
-runEval env eval = withSocketsDo $ do
-    my_perl <- initPerl5 ""
-    val <- (`runReaderT` env) $ do
-        (`runContT` return) $
-            resetT eval
-    freePerl5 my_perl
-    return val
-
 runEnv :: Env -> IO Val
-runEnv env = runEval env $ evaluateMain (envBody env)
+runEnv env = runEvalMain env $ evaluateMain (envBody env)
 
-runAST :: Exp -> IO Val
-runAST ast = do
+runAST :: Pad -> Exp -> IO Val
+runAST glob ast = do
     hSetBuffering stdout NoBuffering
-    name <- getProgName
-    args <- getArgs
-    env  <- prepareEnv name args
-    runEnv env{ envBody = ast, envDebug = Nothing }
+    name    <- getProgName
+    args    <- getArgs
+    env     <- prepareEnv name args
+    globRef <- liftSTM $ do
+        glob' <- readTVar $ envGlobal env
+        newTVar (glob `unionPads` glob')
+    runEnv env{ envBody = ast, envGlobal = globRef, envDebug = Nothing }
 
 runComp :: Eval Val -> IO Val
 runComp comp = do
@@ -49,11 +43,11 @@ runComp comp = do
     name <- getProgName
     args <- getArgs
     env  <- prepareEnv name args
-    runEval env{ envDebug = Nothing } comp
+    runEvalMain env{ envDebug = Nothing } comp
 
 prepareEnv :: VStr -> [VStr] -> IO Env
 prepareEnv name args = do
-    let confHV = [ (k, VStr v) | (k, v) <- Map.toList config ]
+    let confHV = Map.map VStr config
     exec    <- getArg0
     libs    <- getLibs
     pid     <- getProcessID
@@ -68,7 +62,6 @@ prepareEnv name args = do
     egidSV  <- newScalar (VInt $ toInteger egid)
     execSV  <- newScalar (VStr exec)
     progSV  <- newScalar (VStr name)
-    modSV   <- newScalar (VStr "main")
     endAV   <- newArray []
     matchAV <- newArray []
     incAV   <- newArray (map VStr libs)
@@ -87,7 +80,7 @@ prepareEnv name args = do
     let subExit = \x -> case x of
             [x] -> op1 "exit" x
             _   -> op1 "exit" undef
-    emptyEnv
+    emptyEnv name $
         [ genSym "@*ARGS"       $ MkRef argsAV
         , genSym "@*INC"        $ MkRef incAV
         , genSym "$*PUGS_HAS_HSPLUGINS" $ MkRef hspluginsSV
@@ -106,25 +99,20 @@ prepareEnv name args = do
         , genSym "$*ARGS"       $ MkRef argsGV
         , genSym "$!"           $ MkRef errSV
         , genSym "$/"           $ MkRef matchAV
-        , genSym "%*ENV"        $ hashRef (undefined :: IHashEnv)
-        , genSym "$*CWD"        $ scalarRef (undefined :: IScalarCwd)
+        , genSym "%*ENV"        $ hashRef MkHashEnv
+        , genSym "$*CWD"        $ scalarRef MkScalarCwd
         -- XXX What would this even do?
         -- , genSym "%=POD"        (Val . VHash $ emptyHV)
         , genSym "@=POD"        $ MkRef $ constArray []
         , genSym "$=POD"        $ MkRef $ constScalar (VStr "")
-        , genSym "$?OS"         $ MkRef $ constScalar (VStr $ getConfig "osname")
         , genSym "$*OS"         $ MkRef $ constScalar (VStr $ getConfig "osname")
-        , genSym "$?MODULE"     $ MkRef modSV
         , genSym "&?BLOCK_EXIT" $ codeRef $ mkPrim
             { subName = "&?BLOCK_EXIT"
-            , subFun = Prim subExit
+            , subBody = Prim subExit
             }
         , genSym "%?CONFIG" $ hashRef confHV
-        , genSym "$_" $ MkRef defSV
-        , genSym "$?FILE" $ MkRef progSV
+        , genSym "$*_" $ MkRef defSV
         ]
-
-
 
 getLibs :: IO [String]
 getLibs = do

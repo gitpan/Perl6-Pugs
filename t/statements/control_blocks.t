@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 =pod
 
@@ -35,9 +35,8 @@ plan 20;
 
 my $var = 1;
 # defined in BEGIN
-my $bvar = 1; # FIXME: this parses as a sub: my $bvar = BEGIN { 3 };
+my $bvar_at_begin = BEGIN { 3 };
 my $var_at_begin;
-my $bvar_at_begin;
 # defined in CHECK
 my $cvar;
 my $cvar_at_begin;
@@ -57,22 +56,20 @@ my $var_at_end;
 	$ivar_at_check = $ivar;
 };
 
-# FIXME: BEGIN {
-{
+BEGIN {
 	$var_at_begin = $var;
-	$bvar_at_begin = $bvar;
 	$cvar_at_begin = $cvar;
 };
 
 # L<S04/"Closure traits" /BEGIN/>
-is($var_at_begin, undef, '{ $var = 1 } not yet assigned when BEGIN block run', :todo(1));
+is($var_at_begin, undef, '{ $var = 1 } not yet assigned when BEGIN block run');
 # L<S04/"Closure traits" /can also be used within an expression/>
 ok($bvar_at_begin, 'but { $bvar = BEGIN { 1 } } was');
 # L<S04/"Closure traits" /CHECK/>
-is($cvar_at_begin, undef, 'CHECK var not defined at BEGIN time', :todo(1));
+is($cvar_at_begin, undef, 'CHECK var not defined at BEGIN time');
 
 # L<S04/"Closure traits" /INIT/>
-ok($ivar, "INIT var defined at begining of runtime", :todo(1));
+ok($ivar, "INIT var defined at begining of runtime", :todo);
 is($var_at_init, undef, 'INIT block ran before { $var = 1 }');
 
 # FIXME: INIT {
@@ -110,24 +107,24 @@ for (1 .. 3) -> $i {
 }
 
 # L<S04/"Closure traits" /FIRST/>
-is(+@first, 1, "FIRST ran once", :todo(1));
-is(@first[0], 1, "only on 1", :todo(1));
+is(+@first, 1, "FIRST ran once", :todo);
+is(@first[0], 1, "only on 1", :todo);
 
 # L<S04/"Closure traits" /LAST/>
-is(+@last, 1, "LAST ran once", :todo(1));
-is(@last[0], 1, "only on 3", :todo(1));
+is(+@last, 1, "LAST ran once", :todo);
+is(@last[0], 1, "only on 3", :todo);
 
 # L<S04/"Closure traits" /ENTER/>
-is(+@enter, 3, "ENTER ran thrice", :todo(1));
+is(+@enter, 3, "ENTER ran thrice", :todo);
 
 # L<S04/"Closure traits" /LEAVE/>
-is(+@leave, 3, "ENTER ran thrice", :todo(1));
+is(+@leave, 3, "ENTER ran thrice", :todo);
 
-is(@enter[0][1], 0, "enter and leave are in proper order", :todo(1));
-is(@enter[2][1], 2, "...", :todo(1));
-is(@leave[0][1], 1, "...", :todo(1));
-is(@leave[2][1], 3, "...", :todo(1));
+is(@enter[0][1], 0, "enter and leave are in proper order", :todo);
+is(@enter[2][1], 2, "...", :todo);
+is(@leave[0][1], 1, "...", :todo);
+is(@leave[2][1], 3, "...", :todo);
 
 # L<S04/"Closure traits" /NEXT/>
-is(+@next, 2, "NEXT ran twice, for each odd number in loop", :todo(1));
+is(+@next, 2, "NEXT ran twice, for each odd number in loop", :todo);
 

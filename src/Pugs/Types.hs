@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -funbox-strict-fields #-}
 
 {-
     Implementation Types.
@@ -14,38 +14,51 @@ module Pugs.Types where
 import Pugs.Internals
 
 data Type
-    = MkType String
-    | TypeOr  Type Type
-    | TypeAnd Type Type
+    = MkType !String
+    | TypeOr  !Type !Type
+    | TypeAnd !Type !Type
     deriving (Eq, Ord)
 
 instance Show Type where
-    show (MkType typ)    = typ
-    show (TypeOr t1 t2)  = show t1 ++ "|" ++ show t2
-    show (TypeAnd t1 t2) = show t1 ++ "&" ++ show t2
+    show t = "(mkType \"" ++ showType t ++ "\")"
+
+showType :: Type -> String
+showType (MkType typ)    = typ
+showType (TypeOr t1 t2)  = showType t1 ++ "|" ++ showType t2
+showType (TypeAnd t1 t2) = showType t1 ++ "&" ++ showType t2
 
 type ClassTree = Tree Type
 
-data Cxt = CxtVoid | CxtItem Type | CxtSlurpy Type
+data Cxt = CxtVoid | CxtItem !Type | CxtSlurpy !Type
     deriving (Eq, Show, Ord)
 
+anyType :: Type
 anyType = mkType "Any"
 
+cxtItem   :: String -> Cxt
 cxtItem   = CxtItem . mkType
+cxtSlurpy :: String -> Cxt
 cxtSlurpy = CxtItem . mkType
+cxtVoid   :: Cxt
 cxtVoid   = CxtVoid
 
+typeOfCxt :: Cxt -> Type
 typeOfCxt CxtVoid           = anyType
 typeOfCxt (CxtItem typ)     = typ
 typeOfCxt (CxtSlurpy typ)   = typ
 
+cxtItemAny :: Cxt
 cxtItemAny   = CxtItem anyType
+cxtSlurpyAny :: Cxt
 cxtSlurpyAny = CxtSlurpy anyType
 
+isSlurpyCxt :: Cxt -> Bool
 isSlurpyCxt (CxtSlurpy _) = True
 isSlurpyCxt _             = False
+isItemCxt :: Cxt -> Bool
 isItemCxt   (CxtItem _)   = True
 isItemCxt   _             = False
+isVoidCxt :: Cxt -> Bool
 isVoidCxt   CxtVoid       = True
 isVoidCxt   _             = False
 
@@ -69,8 +82,8 @@ type VHandle = Handle
 type VSocket = Socket
 type VThread = ThreadId
 data VRule     = MkRule
-    { rxRegex     :: Regex
-    , rxGlobal    :: Bool
+    { rxRegex     :: !Regex
+    , rxGlobal    :: !Bool
     }
     deriving (Show, Eq, Ord)
 
@@ -78,3 +91,5 @@ instance Ord VHandle where
     compare x y = compare (show x) (show y)
 instance Ord VSocket where
     compare x y = compare (show x) (show y)
+instance (Ord a) => Ord (Tree a) where
+    compare _ _ = EQ

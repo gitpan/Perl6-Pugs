@@ -20,17 +20,14 @@ import Pugs.Parser
 import Pugs.External
 import Text.Printf
 import qualified Data.Set as Set
-import qualified Pugs.Types.Array  as Array
-import qualified Pugs.Types.Hash   as Hash
-import qualified Pugs.Types.Scalar as Scalar
-import qualified Pugs.Types.Pair   as Pair
+import qualified Data.Map as Map
 
 op0 :: Ident -> [Val] -> Eval Val
-op0 "!"  = (return . opJuncNone =<<) . mapM fromVal
-op0 "&"  = (return . opJuncAll =<<) . mapM fromVal
-op0 "^"  = (return . opJuncOne =<<) . mapM fromVal
-op0 "|"  = (return . opJuncAny =<<) . mapM fromVal
-op0 "want"  = const $ return . VStr =<< asks envWant
+op0 "!"  = fmap opJuncNone . mapM fromVal
+op0 "&"  = fmap opJuncAll  . mapM fromVal
+op0 "^"  = fmap opJuncOne  . mapM fromVal
+op0 "|"  = fmap opJuncAny  . mapM fromVal
+op0 "want"  = const $ fmap VStr (asks envWant)
 op0 "time"  = const $ do
     clkt <- liftIO getClockTime
     return $ VInt $ toInteger $ tdSec $ diffClockTimes clkt epochClkT
@@ -39,12 +36,15 @@ op0 "time"  = const $ do
     epoch = CalendarTime 2000 January 1 0 0 0 0 Saturday 0 "UTC" 0 False
 op0 "not" = const retEmpty
 op0 "so" = const (return $ VBool True)
-op0 "¥" = (return . VList . concat . op0Zip =<<) . mapM fromVal
+op0 "¥" = fmap (VList . concat . op0Zip) . mapM fromVal
 op0 "Y" = op0 "¥"
 op0 "File::Spec::cwd" = const $ do
-    mycwd <- liftIO getCurrentDirectory
-    return $ VStr mycwd
-op0 "pi" = const $ return . VNum $ pi
+    cwd <- liftIO getCurrentDirectory
+    return $ VStr cwd
+op0 "File::Spec::tmpdir" = const $ do
+    tmp <- liftIO getTemporaryDirectory
+    return $ VStr tmp
+op0 "pi" = const $ return (VNum pi)
 op0 "say" = const $ op1 "say" =<< readVar "$_"
 op0 "print" = const $ op1 "print" =<< readVar "$_"
 op0 "return" = \v -> return (VError "cannot return() outside a subroutine" (Val $ VList v))
@@ -96,7 +96,7 @@ op1 "post:++" = \x -> do
     val <- fromVal x
     ref <- fromVal x
     val' <- case val of
-        (VStr str)  -> return . VStr $ strInc str
+        (VStr str)  -> return (VStr $ strInc str)
         _           -> op1Numeric (+1) val
     writeRef ref val'
     case val of
@@ -145,11 +145,11 @@ op1 "reverse" = \v -> do
                 (do ref     <- fromVal v
                     val     <- readRef ref
                     str     <- fromVal val
-                    return . VStr $ reverse str)
+                    return (VStr $ reverse str))
                 (do ref     <- fromVal v
                     vals    <- readRef ref
                     vlist   <- fromVal vals
-                    return . VList $ reverse vlist)
+                    return (VList $ reverse vlist))
         _ -> ifListContext
             (op1Cast (VList . reverse) v)
             (op1Cast (VStr . reverse) v)
@@ -161,7 +161,12 @@ op1 "int"  = op1Cast VInt
 op1 "+^"   = op1Cast (VInt . (toInteger . (complement :: Word -> Word)))
 op1 "~^"   = op1Cast (VStr . mapStr complement)
 op1 "?^"   = op1 "!"
-op1 "\\"   = return . VRef . scalarRef -- XXX
+op1 "\\"   = \v -> do
+    return $ case v of
+        (VRef (MkRef (IScalar _))) -> VRef . scalarRef $ v
+        (VRef _)    -> v
+        (VList vs)  -> VRef . arrayRef $ vs
+        _           -> VRef . scalarRef $ v
 op1 "post:..."  = op1Cast op1Range
 op1 "not"  = op1 "!"
 op1 "true" = op1 "?"
@@ -169,7 +174,7 @@ op1 "any"  = op1Cast opJuncAny
 op1 "all"  = op1Cast opJuncAll
 op1 "one"  = op1Cast opJuncOne
 op1 "none" = op1Cast opJuncNone
-op1 "perl" = (return . VStr =<<) . (prettyVal 0)
+op1 "perl" = fmap VStr . prettyVal 0
 op1 "require_haskell" = \v -> do
     name    <- fromVal v
     externRequire "Haskell" name
@@ -213,7 +218,7 @@ op1 "print" = op1Print hPutStr
 op1 "say" = op1Print hPutStrLn
 op1 "die" = \v -> do
     strs <- fromVal v
-    retError (concat strs) (Val v)
+    fail (concat strs)
 op1 "exit" = \v -> do
     rv <- fromVal v
     if rv /= 0
@@ -221,7 +226,7 @@ op1 "exit" = \v -> do
         else shiftT . const . return . VControl . ControlExit $ ExitSuccess
 op1 "readlink" = \v -> do
     str  <- fromVal v
-    tryIO undef $ return . VStr =<< readSymbolicLink str
+    tryIO undef $ fmap VStr (readSymbolicLink str)
 op1 "sleep" = boolIO (threadDelay . (* 1000000))
 op1 "mkdir" = boolIO createDirectory
 op1 "rmdir" = boolIO removeDirectory
@@ -234,11 +239,13 @@ op1 "-z"    = fileTestIO fileTestSizeIsZero
 op1 "-s"    = fileTestIO fileTestFileSize
 op1 "-f"    = fileTestIO fileTestIsFile
 op1 "-d"    = fileTestIO fileTestIsDirectory
+op1 "end"   = op1Cast (VInt . (-1 +) . (genericLength :: VList -> VInt))
 op1 "elems" = op1Cast (VInt . (genericLength :: VList -> VInt))
 op1 "graphs"= op1Cast (VInt . (genericLength :: String -> VInt)) -- XXX Wrong
 op1 "codes" = op1Cast (VInt . (genericLength :: String -> VInt))
 op1 "chars" = op1Cast (VInt . (genericLength :: String -> VInt))
 op1 "bytes" = op1Cast (VInt . (genericLength :: String -> VInt) . encodeUTF8)
+
 op1 "unlink" = \v -> do
     vals <- fromVals v
     rets <- mapM (doBoolIO removeFile) vals
@@ -253,7 +260,7 @@ op1 "slurp" = \v -> do
         (VHandle h) -> do
             ifListContext
                 (op1 "=" val)
-                (return . VStr =<< (liftIO $ hGetContents h))
+                (fmap VStr (liftIO $ hGetContents h))
         _ -> do
             fileName    <- fromVal val
             ifListContext
@@ -277,6 +284,15 @@ op1 "open" = \v -> do
     modeOf ">>" = AppendMode
     modeOf "+>" = ReadWriteMode
     modeOf m    = error $ "unknown mode: " ++ m
+op1 "Pugs::Internals::runInteractiveCommand" = \v -> do
+    str <- fromVal v
+    tryIO undef $ do
+        (inp,out,err,phand) <- runInteractiveCommand str
+        return $ VList [ VHandle inp
+                       , VHandle out
+                       , VHandle err
+                       , VProcess (MkProcess phand)
+                       ]
 op1 "system" = boolIO system
 op1 "accept" = \v -> do
     socket      <- fromVal v
@@ -289,7 +305,7 @@ op1 "async" = \v -> do
     env     <- ask
     code    <- fromVal v
     tid     <- liftIO . (if rtsSupportsBoundThreads then forkOS else forkIO) $ do
-        (`runReaderT` env) $ (`runContT` return) $ resetT $ do
+        runEvalIO env $ do
             evl <- asks envEval
             local (\e -> e{ envContext = CxtVoid }) $ do
                 evl (Syn "()" [Val code, Syn "invs" [], Syn "args" []])
@@ -301,12 +317,13 @@ op1 "listen" = \v -> do
     return $ VSocket socket
 op1 "flush" = boolIO hFlush
 op1 "close" = \v -> do
-    val <- fromVal v
-    case val of
-        (VSocket _) -> boolIO sClose val
-        _           -> boolIO hClose val
-op1 "key" = (return . fst =<<) . (fromVal :: Val -> Eval VPair)
-op1 "value" = (return . snd =<<) . (fromVal :: Val -> Eval VPair)
+    case v of
+        (VSocket _) -> boolIO sClose v
+        _           -> boolIO hClose v
+op1 "key" = fmap fst . (fromVal :: Val -> Eval VPair)
+op1 "value" = \v -> do
+    ivar <- join $ doPair v pair_fetchElem
+    return . VRef . MkRef $ ivar
 op1 "pairs" = \v -> do
     pairs <- op1Pairs v
     return $ VList pairs
@@ -315,7 +332,7 @@ op1 "kv" = \v -> do
     kvs   <- forM pairs $ \(VRef ref) -> do
         pair   <- readRef ref
         fromVal pair
-    return . VList $ concat kvs 
+    return (VList $ concat kvs)
 op1 "keys" = op1Keys
 op1 "values" = op1Values
 op1 "readline" = op1 "="
@@ -335,7 +352,7 @@ op1 "=" = \v -> do
             else return $ VList []
     getLine :: VHandle -> Eval Val
     getLine fh = tryIO undef $
-        (return . VStr . (++ "\n") =<< hGetLine fh)
+        fmap (VStr . (++ "\n")) (hGetLine fh)
     handleOf VUndef = handleOf (VList [])
     handleOf (VList []) = do
         argsGV  <- readVar "$*ARGS"
@@ -352,15 +369,15 @@ op1 "=" = \v -> do
                         writeVar "$*ARGS" (VHandle hdl)
                         return hdl
     handleOf (VStr x) = do
-        rv <- tryIO Nothing (return . Just =<< openFile x ReadMode)
+        rv <- tryIO Nothing (fmap Just $ openFile x ReadMode)
         case rv of
-            Nothing  -> retError "No such file or directory" (Val $ VStr x)
+            Nothing  -> retError "No such file or directory" x
             Just hdl -> return hdl
     handleOf (VList [x]) = handleOf x
     handleOf v = fromVal v
-op1 "ref"   = (return . VStr . show =<<) . evalValType
-op1 "pop"   = \x -> join $ doArray x Array.pop -- monadic join
-op1 "shift" = \x -> join $ doArray x Array.shift -- monadic join
+op1 "ref"   = fmap (VStr . showType) . evalValType
+op1 "pop"   = \x -> join $ doArray x array_pop -- monadic join
+op1 "shift" = \x -> join $ doArray x array_shift -- monadic join
 op1 "pick"  = op1Pick
 op1 "sum"   = op1Sum
 op1 "chr"   = op1Cast (VStr . (:[]) . chr)
@@ -385,7 +402,7 @@ op1EvalHaskell cv = do
             retEmpty
 
 op1Cast :: (Value n) => (n -> Val) -> Val -> Eval Val
-op1Cast f val = return . f =<< fromVal =<< fromVal' val
+op1Cast f val = fmap f (fromVal =<< fromVal' val)
 
 op2Cast :: (Value n, Value m) => (n -> m -> Val) -> Val -> Val -> Eval Val
 op2Cast f x y = do
@@ -400,18 +417,21 @@ op1Pairs v = do
     return vals
 
 op1Keys :: Val -> Eval Val
-op1Keys v = do
-    ref  <- fromVal v
+op1Keys (VList vs) = return . VList $ map VInt [0 .. (genericLength vs) - 1]
+op1Keys (VRef ref) = do
     vals <- keysFromRef ref
     return $ VList vals
+op1Keys v = retError "Not a keyed reference" v
 
 op1Values :: Val -> Eval Val
 op1Values (VJunc j) = return . VList . Set.elems $ juncSet j
-op1Values v = do
-    ref  <- fromVal v
+op1Values v@(VList _) = return v
+op1Values (VRef ref) = do
     vals <- valuesFromRef ref
     return $ VList vals
+op1Values v = retError "Not a keyed reference" v
 
+op1StrFirst :: (Char -> Char) -> Val -> Eval Val
 op1StrFirst f = op1Cast $ VStr .
     \str -> case str of
         []      -> []
@@ -420,14 +440,19 @@ op1StrFirst f = op1Cast $ VStr .
 op1Pick :: Val -> Eval Val
 op1Pick (VRef r) = op1Pick =<< readRef r
 op1Pick (VJunc (Junc JAny _ set)) = do -- pick mainly works on 'any'
-    rand <- liftIO $ randomRIO (0 :: Int, (Set.cardinality set) - 1)
+    rand <- liftIO $ randomRIO (0 :: Int, (Set.size set) - 1)
     return $ (Set.elems set) !! rand
 op1Pick (VJunc (Junc JNone _ _)) = return undef
-op1Pick (VJunc (Junc _ _ set)) =
-    if (Set.cardinality $ set) > 1 then return undef
-    else return $ head $ Set.elems set
+op1Pick (VJunc (Junc JAll _ set)) =
+    if (Set.size $ set) == 1 then return $ head $ Set.elems set
+    else return undef
+op1Pick (VJunc (Junc JOne dups set)) =
+    if (Set.size $ set) == 1 && (Set.size $ dups) == 0
+    then return $ head $ Set.elems set
+    else return undef
 op1Pick v = return $ VError "pick not defined" (Val v)
 
+op1Sum :: Val -> Eval Val
 op1Sum list = do
     vals <- fromVal list
     foldM (op2 "+") undef vals
@@ -450,31 +475,31 @@ op1Print f v = do
         f handle . concatMap encodeUTF8 $ vs'
         return $ VBool True
 
+bool2n :: Bool -> VInt
 bool2n v = if v
   then 1
   else 0
 
+doBoolIO :: Value a => (a -> IO b) -> Val -> Eval Bool
 doBoolIO f v = do
     x <- fromVal v
     tryIO False $ do
         f x
         return True
 
+boolIO :: Value a => (a -> IO b) -> Val -> Eval Val
 boolIO f v = do
     ok <- doBoolIO f v
     return $ VBool ok
 
+boolIO2 :: (Value a, Value b) 
+    => (a -> b -> IO c) -> Val -> Val -> Eval Val
 boolIO2 f u v = do
     x <- fromVal u
     y <- fromVal v
     tryIO (VBool False) $ do
         f x y
         return (VBool True)
-
-boolIO3 f v = do
-    x <- fromVal v
-    ok <- tryIO False $ f x
-    return $ VBool ok
 
 opEval :: Bool -> String -> String -> Eval Val
 opEval fatal name str = do
@@ -485,15 +510,13 @@ opEval fatal name str = do
         evl (envBody env')
     retEvalResult fatal val
 
+retEvalResult :: Bool -> Val -> Eval Val
 retEvalResult fatal val = do
     glob <- askGlobal
     errSV <- findSymRef "$!" glob
     case val of
-        VError _ (Val errval) | not fatal  -> do
-            writeRef errSV errval
-            retEmpty
-        VError _ _ | not fatal  -> do
-            writeRef errSV (VStr $ show val)
+        VError str _ | not fatal  -> do
+            writeRef errSV (VStr str)
             retEmpty
         _ -> do
             writeRef errSV VUndef
@@ -522,7 +545,7 @@ op2 "symlink" = boolIO2 createSymbolicLink
 op2 "link" = boolIO2 createLink
 op2 "*"  = op2Numeric (*)
 op2 "/"  = op2Divide
-op2 "%"  = op2Int mod
+op2 "%"  = op2Modulus
 op2 "x"  = op2Cast (\x y -> VStr . concat $ (y :: VInt) `genericReplicate` x)
 op2 "xx" = op2Cast (\x y -> VList . concat $ (y :: VInt) `genericReplicate` x)
 op2 "+&" = op2Int (.&.)
@@ -601,9 +624,9 @@ op2 "delete" = \x y -> do
     deleteFromRef ref y
 op2 "exists" = \x y -> do
     ref <- fromVal x
-    return . VBool =<< existsFromRef ref y
-op2 "unshift" = op2Array Array.unshift
-op2 "push" = op2Array Array.push
+    fmap VBool (existsFromRef ref y)
+op2 "unshift" = op2Array array_unshift
+op2 "push" = op2Array array_push
 op2 "split"= \x y -> do
     val <- fromVal x
     str <- fromVal y
@@ -623,6 +646,18 @@ op2 "connect" = \x y -> do
     port <- fromVal y
     hdl  <- liftIO $ connectTo host (PortNumber $ fromInteger port)
     return $ VHandle hdl
+op2 "Pugs::Internals::openFile" = \x y -> do
+    mode     <- fromVal x
+    filename <- fromVal y
+    tryIO undef $ do
+        fh <- openFile filename (modeOf mode)
+        return $ VHandle fh
+    where
+    modeOf "<"  = ReadMode
+    modeOf ">"  = WriteMode
+    modeOf ">>" = AppendMode
+    modeOf "+>" = ReadWriteMode
+    modeOf m    = error $ "unknown mode: " ++ m
 op2 "exp" = \x y -> if defined y
     then op2Num (**) x y
     else op1Cast (VNum . exp) x
@@ -642,10 +677,11 @@ op2 "chmod" = \x y -> do
     rets  <- mapM (doBoolIO . flip setFileMode $ toEnum mode) files
     return . VInt . sum $ map bool2n rets
 op2 "splice" = \x y -> do
-    fetchSize   <- doArray x Array.fetchSize
-    len         <- fromVal y
+    fetchSize   <- doArray x array_fetchSize
+    len'        <- fromVal y
     sz          <- fetchSize
-    op4 "splice" x y (castV (sz - (len `mod` sz))) (VList []) 
+    let len = if len' < 0 then if sz > 0 then (len' `mod` sz) else 0 else len'
+    op4 "splice" x y (castV (sz - len)) (VList [])
 op2 "sort" = \x y -> do
     xs <- fromVals x
     ys <- fromVals y
@@ -653,6 +689,7 @@ op2 "sort" = \x y -> do
 op2 other = \x y -> return $ VError ("unimplemented binaryOp: " ++ other) (App other [Val x, Val y] [])
 
 -- XXX - need to generalise this
+op2Match :: Val -> Val -> Eval Val
 op2Match x (VRef y) = do
     y' <- readRef y
     op2Match x y'
@@ -767,7 +804,7 @@ op3 "rindex" = \x y z -> do
         | otherwise        = doRindex (init a) b 0
 
 op3 "splice" = \x y z -> do
-    op4 "splice" x y z (VList []) 
+    op4 "splice" x y z (VList [])
 op3 other = \x y z -> return $ VError ("unimplemented 3-ary op: " ++ other) (App other [Val x, Val y, Val z] [])
 
 op4 :: Ident -> Val -> Val -> Val -> Val -> Eval Val
@@ -792,8 +829,8 @@ op4 "substr" = \x y z w -> do
         | otherwise = ((take pos str), VStr (take len $ drop pos str), (drop (pos + len) str))
 
 -- op4 "splice" = \x y z w-> do
-op4 "splice" = \x y z w -> do 
-    splice  <- doArray x Array.splice
+op4 "splice" = \x y z w -> do
+    splice  <- doArray x array_splice
     start   <- fromVal y
     count   <- fromVal z
     vals    <- fromVals w
@@ -804,13 +841,14 @@ op4 "splice" = \x y z w -> do
 
 op4 other = \x y z w -> return $ VError ("unimplemented 4-ary op: " ++ other) (App other [Val x, Val y, Val z, Val w] [])
 
+op2Hyper :: Ident -> Val -> Val -> Eval Val
 op2Hyper op x y
     | VList x' <- x, VList y' <- y
-    = hyperLists x' y' >>= (return . VList)
+    = fmap VList $ hyperLists x' y'
     | VList x' <- x
-    = mapM ((flip (op2 op)) y) x' >>= (return . VList)
+    = fmap VList $ mapM ((flip (op2 op)) y) x'
     | VList y' <- y
-    = mapM (op2 op x) y' >>= (return . VList)
+    = fmap VList $ mapM (op2 op x) y'
     | otherwise
     = return $ VError "Hyper OP only works on lists" (Val VUndef)
     where
@@ -822,15 +860,16 @@ op2Hyper op x y
         rest <- hyperLists xs ys
         return (val:rest)
 
-op2Array :: (forall a. Array.Class a => a -> [Val] -> Eval ()) -> Val -> Val -> Eval Val
+op2Array :: (forall a. ArrayClass a => a -> [Val] -> Eval ()) -> Val -> Val -> Eval Val
 op2Array f x y = do
     f    <- doArray x f
     vals <- fromVal y
     f vals
-    size <- doArray x Array.fetchSize
+    size <- doArray x array_fetchSize
     idx  <- size
     return $ castV idx
 
+op2Grep :: Val -> Val -> Eval Val
 op2Grep sub@(VCode _) list = op2Grep list sub
 op2Grep list sub = do
     args <- fromVal list
@@ -841,6 +880,7 @@ op2Grep list sub = do
         fromVal rv
     return $ VList vals
 
+op2Map :: Val -> Val -> Eval Val
 op2Map sub@(VCode _) list = op2Map list sub
 op2Map list sub = do
     args <- fromVal list
@@ -851,6 +891,7 @@ op2Map list sub = do
         fromVal rv
     return $ VList $ concat vals
 
+op2Join :: Val -> Val -> Eval Val
 op2Join x y = do
     (strVal, listVal) <- ifValTypeIsa x "Scalar"
         (return (x, y))
@@ -866,16 +907,25 @@ vCastStr = fromVal
 vCastRat :: Val -> Eval VRat
 vCastRat = fromVal
 
+op2Str :: (Value v1, Value v2) => (v1 -> v2 -> VStr) -> Val -> Val -> Eval Val
 op2Str f x y = do
     x' <- fromVal x
     y' <- fromVal y
     return $ VStr $ f x' y'
 
+op2Num    :: (Value v1, Value v2) => (v1 -> v2 -> VNum) -> Val -> Val -> Eval Val
 op2Num  f = op2Cast $ (VNum .) . f
+
+op2Bool   :: (Value v1, Value v2) => (v1 -> v2 -> VBool) -> Val -> Val -> Eval Val
 op2Bool f = op2Cast $ (VBool .) . f
+
+op2Int    :: (Value v1, Value v2) => (v1 -> v2 -> VInt) -> Val -> Val -> Eval Val
 op2Int  f = op2Cast $ (VInt .) . f
+
+op2Rat    :: (Value v1, Value v2) => (v1 -> v2 -> VRat) -> Val -> Val -> Eval Val
 op2Rat  f = op2Cast $ (VRat .) . f
 
+op2Exp :: Val -> Val -> Eval Val
 op2Exp x y = do
     num2 <- fromVal =<< fromVal' y
     case reverse $ show (num2 :: VNum) of
@@ -886,11 +936,13 @@ op2Exp x y = do
                 else op2Num ((**) :: VNum -> VNum -> VNum) x y
         _ -> op2Num ((**) :: VNum -> VNum -> VNum) x y
 
+op1Range :: Val -> Val
 op1Range (VStr s)    = VList $ map VStr $ strRangeInf s
 op1Range (VRat n)    = VList $ map VRat [n ..]
 op1Range (VNum n)    = VList $ map VNum [n ..]
 op1Range x           = VList $ map VInt [vCast x ..]
 
+op2Range :: Val -> Val -> Val
 op2Range (VStr s) y  = VList $ map VStr $ strRange s (vCast y)
 op2Range (VNum n) y  = VList $ map VNum [n .. vCast y]
 op2Range x (VNum n)  = VList $ map VNum [vCast x .. n]
@@ -898,6 +950,7 @@ op2Range (VRat n) y  = VList $ map VRat [n .. vCast y]
 op2Range x (VRat n)  = VList $ map VRat [vCast x .. n]
 op2Range x y         = VList $ map VInt [vCast x .. vCast y]
 
+op2Divide :: Val -> Val -> Eval Val
 op2Divide x y
     | VInt x' <- x, VInt y' <- y
     = return $ if y' == 0 then err else VRat $ x' % y'
@@ -912,12 +965,38 @@ op2Divide x y
     where
     err = VError ("Illegal division by zero: " ++ "/") (App "/" [] [Val x, Val y])
 
+op2Modulus :: Val -> Val -> Eval Val
+op2Modulus x y
+    | VInt x' <- x, VInt y' <- y
+    = return $ if y' == 0 then err else VInt $ x' `mod` y'
+    | VInt x' <- x, VRat y' <- y
+    = return $ if y' == 0 then err else VInt $ x' `mod` (truncate y')
+    | VRat x' <- x, VInt y' <- y
+    = return $ if y' == 0 then err else VInt $ (truncate x') `mod` y'
+    | VRat x' <- x, VRat y' <- y
+    = return $ if y' == 0 then err else VInt $ (truncate x') `mod` (truncate y')
+    | VRef ref <- x
+    = do
+        x' <- readRef ref
+        op2Modulus x' y
+    | VRef ref <- y
+    = do
+        y' <- readRef ref
+        op2Modulus x y'
+    | otherwise      -- pray for the best
+    = op2Int mod x y -- typeErr
+    where
+    err = VError ("Illegal modulus zero: " ++ "%") (App "%" [] [Val x, Val y])
+    -- typeErr = VError ("Illegal types for modulus: " ++ "%") (App "%" [] [Val x, Val y])
+
+op2ChainedList :: Val -> Val -> Val
 op2ChainedList x y
     | VList xs <- x, VList ys <- y  = VList $ xs ++ ys
     | VList xs <- x                 = VList $ xs ++ [y]
     | VList ys <- y                 = VList (x:ys)
     | otherwise                     = VList [x, y]
 
+op2Logical :: (Value v) => (v -> Bool) -> Val -> Val -> Eval Val
 op2Logical f x y = do
     vx   <- fromVal x
     bool <- fromVal vx
@@ -925,13 +1004,16 @@ op2Logical f x y = do
         then return vx
         else fromVal y
 
+op2DefinedOr :: Val
 op2DefinedOr = undefined
 
+op2Cmp :: (a -> Eval b) -> (b -> b -> VBool) -> a -> a -> Eval Val
 op2Cmp f cmp x y = do
     x' <- f x
     y' <- f y
     return $ VBool $ x' `cmp` y'
 
+op2Ord :: (Ord ord) => (a -> Eval ord) -> a -> a -> Eval Val
 op2Ord f x y = do
     x' <- f x
     y' <- f y
@@ -948,10 +1030,10 @@ op1Floating f v = do
 op1Numeric :: (forall a. (Num a) => a -> a) -> Val -> Eval Val
 op1Numeric f VUndef     = return . VInt $ f 0
 op1Numeric f (VInt x)   = return . VInt $ f x
-op1Numeric f l@(VList _)= return . VInt . f =<< fromVal l
+op1Numeric f l@(VList _)= fmap (VInt . f) (fromVal l)
 op1Numeric f (VRat x)   = return . VRat $ f x
 op1Numeric f (VRef x)   = op1Numeric f =<< readRef x
-op1Numeric f x          = return . VNum . f =<< fromVal x
+op1Numeric f x          = fmap (VNum . f) (fromVal x)
 
 --- XXX wrong: try num first, then int, then vcast to Rat (I think)
 op2Numeric :: (forall a. (Num a) => a -> a -> a) -> Val -> Val -> Eval Val
@@ -973,8 +1055,8 @@ op2Numeric f x y
         y' <- fromVal y
         return . VNum $ f x' y'
 
-primOp :: String -> String -> Params -> String -> IO Symbol
-primOp sym assoc prms ret = return . MkSym name =<< newIORef sub
+primOp :: String -> String -> Params -> String -> STM (Pad -> Pad)
+primOp sym assoc prms ret = genMultiSym name sub
     where
     name | isAlpha (head sym)
          , fixity == "prefix"
@@ -987,7 +1069,7 @@ primOp sym assoc prms ret = return . MkSym name =<< newIORef sub
         , subAssoc    = assoc
         , subParams   = prms
         , subReturns  = mkType ret
-        , subFun      = (Prim f)
+        , subBody     = Prim f
         }
     symStr = encodeUTF8 sym
     f :: [Val] -> Eval Val
@@ -1016,6 +1098,7 @@ primOp sym assoc prms ret = return . MkSym name =<< newIORef sub
         "list"      -> (0, "infix", False)
         other       -> (0, other, True)
 
+primDecl :: String -> STM (Pad -> Pad)
 primDecl str = primOp sym assoc params ret
     where
     (ret:assoc:sym:prms) = words str
@@ -1025,6 +1108,7 @@ primDecl str = primOp sym assoc params ret
     prms'' = foldr foldParam [] prms'
     params = map (\p -> p{ isWritable = isLValue p }) prms''
 
+doFoldParam :: String -> String -> [Param] -> [Param]
 doFoldParam cxt [] []       = [(buildParam cxt "" "$?1" (Val VUndef)) { isLValue = False }]
 doFoldParam cxt [] (p:ps)   = ((buildParam cxt "" (strInc $ paramName p) (Val VUndef)) { isLValue = False }:p:ps)
 doFoldParam cxt (s:name) ps = ((buildParam cxt [s] name (Val VUndef)) { isLValue = False } : ps)
@@ -1049,7 +1133,7 @@ foldParam ('?':str)
       in \ps -> ((buildParam typ "?" "$?1" (readVal typ def)) { isLValue = False }:ps)
     | otherwise
     = \ps -> (buildParam str "?" "$?1" (Val VUndef):ps)
-foldParam ('~':str) = \ps -> (((buildParam str "" "$?1" (Val VUndef)) { isLValue = False }) { isThunk = True }:ps)
+foldParam ('~':str) = \ps -> (((buildParam str "" "$?1" (Val VUndef)) { isLValue = False }) { isLazy = True }:ps)
 foldParam x         = doFoldParam x []
 
 -- filetest operators --
@@ -1068,38 +1152,46 @@ fileTestIO f v = do
     str <- fromVal =<< fromVal' v
     tryIO undef $ f str
 
+fileTestIsReadable :: FilePath -> IO Val
 fileTestIsReadable f = do
     p <- getPermissions f
     let b = readable p
     return $ if b then castV f else VBool False
 
+fileTestIsWritable :: FilePath -> IO Val
 fileTestIsWritable f = do
     p <- getPermissions f
     let b = writable p
     return $ if b then castV f else VBool False
 
+fileTestIsExecutable :: FilePath -> IO Val
 fileTestIsExecutable f = do
     p <- getPermissions f
     let b = executable p || searchable p
     return $ if b then castV f else VBool False
 
+fileTestExists :: FilePath -> IO Val
 fileTestExists f = do
     b1 <- doesFileExist f
     b2 <- doesDirectoryExist f
     return $ if b1 || b2 then castV f else VBool False
 
+fileTestIsFile :: FilePath -> IO Val
 fileTestIsFile f = do
     b <- doesFileExist f
     return $ if b then castV f else VBool False
 
+fileTestIsDirectory :: FilePath -> IO Val
 fileTestIsDirectory f = do
     b <- doesDirectoryExist f
     return $ if b then castV f else VBool False
 
+fileTestFileSize :: FilePath -> IO Val
 fileTestFileSize f = do
     n <- statFileSize f
     return $ VInt n
 
+fileTestSizeIsZero :: FilePath -> IO Val
 fileTestSizeIsZero f = do
     n <- statFileSize f
     return $ if n == 0 then VBool True else VBool False
@@ -1110,81 +1202,82 @@ pairsFromRef :: VRef -> Eval [Val]
 pairsFromRef r@(MkRef (IPair _)) = do
     return [VRef r]
 pairsFromRef (MkRef (IHash hv)) = do
-    pairs   <- Hash.fetch hv
-    return $ map (\(k, v) -> castV (castV k, v)) pairs
+    keys    <- hash_fetchKeys hv
+    elems   <- mapM (hash_fetchElem hv) keys
+    return $ map (VRef . MkRef . IPair) (keys `zip` elems)
 pairsFromRef (MkRef (IArray av)) = do
-    vals    <- Array.fetch av
+    vals    <- array_fetch av
     return $ map castV ((map VInt [0..]) `zip` vals)
 pairsFromRef (MkRef (IScalar sv)) = do
-    refVal  <- Scalar.fetch sv
+    refVal  <- scalar_fetch sv
     op1Pairs refVal
-pairsFromRef ref = retError "Not a keyed reference" (Val $ VRef ref)
+pairsFromRef ref = retError "Not a keyed reference" ref
 
 keysFromRef :: VRef -> Eval [Val]
 keysFromRef (MkRef (IPair pv)) = do
-    key     <- Pair.fetchKey pv
+    key     <- pair_fetchKey pv
     return [key]
 keysFromRef (MkRef (IHash hv)) = do
-    keys    <- Hash.fetchKeys hv
+    keys    <- hash_fetchKeys hv
     return $ map castV keys
 keysFromRef (MkRef (IArray av)) = do
-    keys    <- Array.fetchKeys av
+    keys    <- array_fetchKeys av
     return $ map castV keys
 keysFromRef (MkRef (IScalar sv)) = do
-    refVal  <- Scalar.fetch sv
+    refVal  <- scalar_fetch sv
     if defined refVal
         then fromVal =<< op1Keys refVal
         else return []
-keysFromRef ref = retError "Not a keyed reference" (Val $ VRef ref)
+keysFromRef ref = retError "Not a keyed reference" ref
 
 valuesFromRef :: VRef -> Eval [Val]
 valuesFromRef (MkRef (IPair pv)) = do
-    val   <- Pair.fetchVal pv
+    val   <- pair_fetchVal pv
     return [val]
 valuesFromRef (MkRef (IHash hv)) = do
-    pairs <- Hash.fetch hv
-    return $ map snd pairs
-valuesFromRef (MkRef (IArray av)) = Array.fetch av
+    pairs <- hash_fetch hv
+    return $ Map.elems pairs
+valuesFromRef (MkRef (IArray av)) = array_fetch av
 valuesFromRef (MkRef (IScalar sv)) = do
-    refVal  <- Scalar.fetch sv
+    refVal  <- scalar_fetch sv
     if defined refVal
         then fromVal =<< op1Values refVal
         else return []
-valuesFromRef ref = retError "Not a keyed reference" (Val $ VRef ref)
+valuesFromRef ref = retError "Not a keyed reference" ref
 
 existsFromRef :: VRef -> Val -> Eval VBool
 existsFromRef (MkRef (IHash hv)) val = do
     idx     <- fromVal val
-    Hash.existsElem hv idx
+    hash_existsElem hv idx
 existsFromRef (MkRef (IArray av)) val = do
     idx     <- fromVal val
-    Array.existsElem av idx
+    array_existsElem av idx
 existsFromRef (MkRef (IScalar sv)) val = do
-    refVal  <- Scalar.fetch sv
+    refVal  <- scalar_fetch sv
     ref     <- fromVal refVal
     existsFromRef ref val
-existsFromRef ref _ = retError "Not a keyed reference" (Val $ VRef ref)
+existsFromRef ref _ = retError "Not a keyed reference" ref
 
 deleteFromRef :: VRef -> Val -> Eval Val
 deleteFromRef (MkRef (IHash hv)) val = do
     idxs    <- fromVals val
     rv      <- forM idxs $ \idx -> do
-        val <- Hash.fetchVal hv idx
-        Hash.deleteElem hv idx
+        val <- hash_fetchVal hv idx
+        hash_deleteElem hv idx
         return val
     return $ VList rv
 deleteFromRef (MkRef (IArray av)) val = do
     idxs    <- fromVals val
     rv      <- forM idxs $ \idx -> do
-        val <- Array.fetchVal av idx
-        Array.deleteElem av idx
+        val <- array_fetchVal av idx
+        array_deleteElem av idx
         return val
     return $ VList rv
 deleteFromRef (MkRef (IScalar sv)) val = do
-    refVal  <- Scalar.fetch sv
+    refVal  <- scalar_fetch sv
     ref     <- fromVal refVal
     deleteFromRef ref val
-deleteFromRef ref _ = retError "Not a keyed reference" (Val $ VRef ref)
+deleteFromRef ref _ = retError "Not a keyed reference" ref
 
 prettyVal :: Int -> Val -> Eval VStr
 prettyVal 10 _ = return "..."
@@ -1192,12 +1285,6 @@ prettyVal d (VRef r) = do
     v'  <- readRef r
     str <- prettyVal (d+1) v'
     return ('\\':str)
-{-
-prettyVal d (VPair (k, v)) = do
-    k'  <- prettyVal (d+1) k
-    v'  <- prettyVal (d+1) v
-    return $ concat ["(", k', " => ", v', ")"]
--}
 prettyVal d (VList vs) = do
     vs' <- mapM (prettyVal (d+1)) vs
     return $ "(" ++ concat (intersperse ", " vs') ++ ")"
@@ -1231,6 +1318,7 @@ sortByM f xs  = do
 -- already been assigned in Parser.hs
 
 --    ret_val   assoc   op_name args
+initSyms :: STM [Pad -> Pad]
 initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      spre    !       (Bool)\
 \\n   Num       spre    +       (Num)\
@@ -1334,6 +1422,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Num       pre     time    ()\
 \\n   Str       pre     want    ()\
 \\n   Str       pre     File::Spec::cwd  ()\
+\\n   Str       pre     File::Spec::tmpdir  ()\
 \\n   Bool      pre     print   (rw!IO)\
 \\n   Bool      pre     print   (rw!IO: List)\
 \\n   Bool      pre     print   ()\
@@ -1369,6 +1458,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     mkdir   (Str)\
 \\n   Bool      pre     chdir   (Str)\
 \\n   Int       pre     elems   (Array)\
+\\n   Int       pre     end     (Array)\
 \\n   Int       pre     graphs  (?Str=$_)\
 \\n   Int       pre     codes   (?Str=$_)\
 \\n   Int       pre     chars   (?Str=$_)\
@@ -1391,7 +1481,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      spre    =       (IO)\
 \\n   Junction  list    |       (Any|Junction)\
 \\n   Junction  list    &       (Any|Junction)\
-\\n   Junction  list    ^       (Any)\
+\\n   Junction  list    ^       (Any|Junction)\
 \\n   Junction  list    !       (Any|Junction)\
 \\n   Num       left    *       (Num, Num)\
 \\n   Num       left    /       (Num, Num)\
@@ -1470,4 +1560,6 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     yield   (?Thread)\
 \\n   Int       pre     sign    (Num)\
 \\n   Int       pre     kill    (Int, List)\
+\\n   List      pre     Pugs::Internals::runInteractiveCommand    (?Str=$_)\
+\\n   List      pre     Pugs::Internals::openFile    (?Str,?Str=$_)\
 \\n"

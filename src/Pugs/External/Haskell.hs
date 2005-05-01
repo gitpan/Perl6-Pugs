@@ -54,9 +54,11 @@ loadHaskell file = do
     -- AST has early requirements and late requirements, because of recrusivity.  
     -- The logic for this should probably be moved to hs-plugins, but do it here 
     -- for now.
+    {-
     mapM 
         (\n -> load (coredir++n++".o") loadpaths ourPackageConfigs "")
         ["Compat", "Cont", "Embed", "Embed/Perl5", "Internals", "RRegex", "RRegex/PCRE", "RRegex/Syntax", "Rule/Pos", "UTF8", "Unicode", "AST"]
+    -}
 
     (extern :: [String]) <- loadOrDie objFile loadpaths ourPackageConfigs "extern__"
     -- print (">"++(show extern)++"<")
@@ -65,6 +67,7 @@ loadHaskell file = do
         return (name, func)
 
 externalizeHaskell :: String -> String -> IO String
+#ifndef HADDOCK
 externalizeHaskell mod code = do
     let names = map snd exports
     symTable <- runQ [d| extern__ = names |]
@@ -89,8 +92,10 @@ externalizeHaskell mod code = do
     parsed = case parseModule code of
         ParseOk (HsModule _ _ _ _ decls) -> decls
         ParseFailed _ err -> error err
+#endif
 
 wrap :: String -> IO Dec
+#ifndef HADDOCK
 wrap fun = do
     [quoted] <- runQ [d|
             name = \[v] -> do
@@ -98,6 +103,7 @@ wrap fun = do
                 return (castV ($(dyn fun) s))
         |]
     return $ munge quoted ("extern__" ++ fun)
+#endif
 
 munge (ValD _ x y) name = ValD (VarP (mkName name)) x y
 munge _ _ = error "impossible"

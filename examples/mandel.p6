@@ -28,13 +28,12 @@ use v6;
 ### Should be fixed in a couple days ###
 
 my ($x, $y, $k);
-# no substr now
 my $b = ' .:,;!/>)|&IH%*#';
 
 my ($P, $Q, $X, $L);
 my ($r, $i, $z, $Z, $t, $c, $C);
 loop ($L = 0;; $L++) {
-    last() if $L > 100;
+    last() if $L > 0;
 loop ($y=30;
     $P = $y * 0.1, $C = $P - 1.5;
     ) {

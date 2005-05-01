@@ -16,9 +16,9 @@
 module Pugs.Internals (
     module UTF8,
     module Unicode,
-    module Pugs.Cont,
     module Pugs.Embed,
     module Pugs.Compat,
+    module Pugs.Cont,
     module RRegex,
     module RRegex.Syntax,
     module Pugs.Rule.Pos,
@@ -34,9 +34,11 @@ module Pugs.Internals (
     module System.Time,
     module System.Directory,
     module System.Cmd,
+    module System.Process,
     module Control.Monad.RWS,
     module Control.Monad.Error,
     module Control.Concurrent,
+    module Control.Concurrent.STM,
     module Data.Array,
     module Data.Bits,
     module Data.List,
@@ -49,7 +51,6 @@ module Pugs.Internals (
     module Data.Complex,
     module Data.Set,
     module Data.Map,
-    module Data.IORef,
     module Debug.Trace,
     module Network,
     internalError,
@@ -61,11 +62,14 @@ module Pugs.Internals (
     forM,
     forM_,
     tryIO,
+    combine,
+    modifyTVar,
+    unsafePerformSTM,
 ) where
 
 import UTF8
 import Unicode
-import Pugs.Cont
+import Pugs.Cont hiding (shiftT, resetT)
 import Pugs.Embed
 import Pugs.Compat
 import RRegex
@@ -78,6 +82,7 @@ import System.Random hiding (split)
 import System.Exit
 import System.Time
 import System.Cmd
+import System.Process
 import System.IO (
     Handle, stdin, stdout, hClose, hGetLine, hGetContents,
     openFile, hPutStr, hPutStrLn, IOMode(..), stderr, SeekMode(..),
@@ -90,13 +95,14 @@ import Control.Exception (catchJust, errorCalls)
 import Control.Monad.RWS
 import Control.Monad.Error (MonadError(..))
 import Control.Concurrent
+import Control.Concurrent.STM
 import Data.Bits hiding (shift)
 import Data.Maybe
 import Data.Either
 import Data.List (
     (\\), find, genericLength, insert, sortBy, intersperse,
     partition, group, sort, genericReplicate, isPrefixOf, isSuffixOf,
-    genericTake, genericDrop, unfoldr, nub, nubBy, transpose
+    genericTake, genericDrop, unfoldr, nub, nubBy, transpose, delete
     )
 import Data.Unique
 import Data.Ratio
@@ -105,11 +111,11 @@ import Data.Char (chr, ord, digitToInt)
 import Data.Ratio
 import Data.Complex
 import Data.Tree
-import Data.IORef
 import Data.Set (Set)
 import Data.Map (Map)
 import Debug.Trace
 import Pugs.Rule.Pos
+-- import GHC.Conc (unsafeIOToSTM)
 
 -- Instances.
 instance Show Unique where
@@ -166,3 +172,16 @@ forM_ = flip mapM_
 tryIO :: (MonadIO m) => a -> IO a -> m a
 tryIO err = liftIO . (`catch` (const $ return err))
 
+combine :: [a->a] -> a -> a
+combine = foldr (.) id
+
+unsafePerformSTM :: STM a -> a
+unsafePerformSTM = unsafePerformIO . atomically
+
+modifyTVar :: TVar a -> (a -> a) -> STM ()
+modifyTVar var f = do
+    x <- readTVar var
+    writeTVar var (f x)
+
+-- instance MonadIO STM where
+--     liftIO = unsafeIOToSTM

@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -O #-}
+{-# OPTIONS_GHC -fglasgow-exts #-}
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 {-
@@ -22,6 +22,7 @@ type RuleParser a = GenParser Char Env a
 data ParensOption = ParensMandatory | ParensOptional
     deriving (Show, Eq)
 
+perl6Def  :: LanguageDef st
 perl6Def  = javaStyle
           { P.commentStart   = [] -- "=pod"
           , P.commentEnd     = [] -- "=cut"
@@ -32,14 +33,19 @@ perl6Def  = javaStyle
           , P.caseSensitive  = False
           }
 
+literalIdentifier :: GenParser Char st String
 literalIdentifier = do
     c <- wordAlpha
     cs <- many wordAny
     return (c:cs)
     
+wordAlpha   :: GenParser Char st Char
+wordAny     :: GenParser Char st Char
 wordAlpha   = satisfy isWordAlpha <?> "alphabetic word character"
 wordAny     = satisfy isWordAny <?> "word character"
 
+isWordAny   :: Char -> Bool
+isWordAlpha :: Char -> Bool
 isWordAny x = (isAlphaNum x || x == '_')
 isWordAlpha x = (isAlpha x || x == '_')
 
@@ -56,8 +62,8 @@ getVar = do
     error ""    
 
 perl6Lexer = P.makeTokenParser perl6Def
-whiteSpace = P.whiteSpace perl6Lexer
 parens     = P.parens perl6Lexer
+whiteSpace = P.whiteSpace perl6Lexer
 lexeme     = P.lexeme perl6Lexer
 identifier = P.identifier perl6Lexer
 braces     = P.braces perl6Lexer
@@ -66,6 +72,10 @@ angles     = P.angles perl6Lexer
 balanced   = P.balanced perl6Lexer
 balancedDelim = P.balancedDelim perl6Lexer
 decimal    = P.decimal perl6Lexer
+verbatimIdentifier = (<?> "identifier") $ do
+    c  <- identStart perl6Def
+    cs <- many (identLetter perl6Def)
+    return (c:cs)
 
 ruleWhiteSpaceLine = do
     many $ satisfy (\x -> isSpace x && x /= '\n')
@@ -183,6 +193,7 @@ literalRule name action = (<?> name) $ postSpace $ action
 
 tryRule name action = (<?> name) $ lexeme $ try action
 
+tryVerbatimRule :: Ident -> GenParser tok st a -> GenParser tok st a
 tryVerbatimRule name action = (<?> name) $ try action
 
 ruleScope :: RuleParser Scope
@@ -198,6 +209,7 @@ ruleScope = tryRule "scope" $ do
         | otherwise
         = SGlobal
 
+postSpace :: GenParser Char st a -> GenParser Char st a
 postSpace rule = try $ do
     rv <- rule
     notFollowedBy wordAny

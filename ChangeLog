@@ -1,3 +1,62 @@
+== Changes for 6.2.2 - May 1, 2005
+
+=== Pugs Internals
+
+* Many performance speed-ups, including:
+** New, much much faster implementation type for Pad
+** Replace Data.HashTable with STM Map
+** Restructured the Eval monad to be reusable on compilers and interpreters
+** Position handling and statement reduction logic re-written
+** Add strictness to core Monad and object structures
+* Functions declared as unary are now parsed as such
+* Global subroutine declaration is now visible in the whole file
+* Improved Parrot compiler backend support for mod_pugs
+* Much better error messages, tracking source file range for expressions
+* New loop control routines: `next` and `redo`
+* On Win32, `-s` and `-z` now work correctly
+* Optimized build is now default; use `make unoptimized` to turn it off
+* Pugs can now build on Cygwin
+* `#line 123` and `#line 123 "filename"` both work
+* `&infix:<%>` raises trappable exception when modulus is zero
+* `(undef, $x) = (1, 2)` is now supported
+* `@array.end` implemented
+* `BEGIN {...}` blocks now work on both statement-level and term level
+* `for @a { say }` is now parsed as `for @a -> $_ is rw { say }`
+* `for @a -> () { ... }` now consumes one element at a time
+* `my $var ::= expr` works
+* `print (4)+4` now prints 8, because the whitespace is no longer skipped
+* `use Module;` supported and happens at `BEGIN` time
+* `|=` `^=` `&=` for junctions
+
+=== Tests, Examples and Documentations
+
+* Many new tests and cleanup of older tests, we are now at 4600+ tests
+* API documentation available in `docs/haddock/`
+* Added an example of IRC bot into `examples/network`
+* Added simple POD parser into `ext/Pod-Stream-Parser`
+* Added support for generating Haskell documentation with `make haddock`
+* Added the tic-tac-toe game from perlmonks into `examples/games/`
+* Parallel `make smoke` when `%ENV<PUGS_TESTS_CONCURRENT>` is greater than 1
+* Patched local `Test::Harness` to display number of TODO tests
+* Progressive powerset generator from perlmonks added to `examples/`
+* Smoke testing tool now includes timing data in YAML harness data
+* German talk /Perl 6, genau jetzt!/ finished
+
+=== Bug Fixes
+
+* Constant references now automatically dereference when used in rvalue context
+* Junctive `^` should join junctions instead of autothread them
+* Lone block does not count as `simple expression` anymore
+* Repair single statements in shell to preserve lexical context
+* Repair the `list` context hinter
+* The dot in `123.ref` is now parsed correctly as `(123).ref`
+* `$_` in subroutine signatures is no longer slurpy by default
+* `$x = \$x` no longer causes an infinite loop
+* `NaN` calculations no longer causes infinite loop
+* `last if foo` now means `last() if foo()` instead of `last(if(foo()))`
+* `one(1,1).pick` bug fixed; it should return `undef`
+* `splice([], 1)` no longer causes division by zero errors
+
 == Changes for 6.2.1 - April 24, 2005
 
 === Pugs Internals
@@ -9,11 +68,10 @@
 ** This means interpolation, etc. is done just like `q:w` or `qq:ww`
 ** `$<delim>` not interpolate in quoting constructs
 ** `$)`, `$]`, `$#` and `$<ws>` do not interpolate in `rx:P5//` constructs
-* Assigning a List into a Scalar vivifies it into an Array
 * Assigning a `List` into a `Scalar` now vivifies it into an `Array`
 * Assigning to pairs now works as expected
 * Autoextracted `$_` is now `rw` by default
-* Better handling for size extensions and `exists()` for negative indecies
+* Better handling for size extensions and `exists()` for negative indices
 * Bindings implemented for multiple variables
 * Experimental support for `eval_haskell()` builtin
 * First stab at a lexical `$*CWD` variable 
@@ -28,7 +86,7 @@
 * The `Any` parameter type no longer inhibits juctive autothreading
 * Variables in rvalue context no longer returns its references
 * `%h<>` now acts just like `%h{}` in both lhs and rhs
-* `%h<x>` now mean `%h{'x'}` instead of `%h{'x',}`
+* `%h<x>` now means `%h{'x'}` instead of `%h{'x',}`
 * `'key' => val` now works as named param just like `key => val` did
 * `(sub {3} | sub {2})()` implemented
 * `:P5` flags now work as `:P5<imsgx>` and `:i` `:g` works too

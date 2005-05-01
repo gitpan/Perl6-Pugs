@@ -1,9 +1,9 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
-plan 47;
+plan 56;
 
 =pod
 
@@ -140,20 +140,28 @@ L<S03/"Junctive operators">
 
 Tests junction examples from Synopsis 03 
 
+j() is used to convert a junction to canonical string form, currently
+just using .perl until a better approach presents itself.
+
 L<S03/"Junctive operators">
 
 =cut
+
+# Canonical stringification of a junction
+sub j (*@j is Junction) { 
+    return map { $_.perl } @j;
+}
 
 {
     # L<S03/"Junctive operators"/"They thread through operations">
     my ($got, $want);
     $got = ((1|2|3)+4);
     $want = (5|6|7);
-    is( $got.perl, $want.perl, 'thread + returning junctive result');
+    is( j($got), j($want), 'thread + returning junctive result');
 
     $got = ((1|2) + (3&4));
     $want = ((4|5) & (5|6));
-    is( $got.perl, $want.perl, 'thread + returning junctive combination of results');
+    is( j($got), j($want), 'thread + returning junctive combination of results');
 
     # L<S03/"Junctive operators"/"This opens doors for constructions like">
     # unless $roll == any(1..6) { print "Invalid roll" }
@@ -199,7 +207,6 @@ L<S03/"Junctive operators">
     #my %got = ('1' => 1); # Hashes are unordered too
     #@foo = (2,3,4);
     #for all(@foo) { %got{$_} = 1; };
-    ##is_deeply(\%got, { la => 1, di => 1, da =>1 },
     #is( %got.keys.sort.join(','), '1,2,3,4',
     #    'for all(...) { ...} as parallelizable');
 }
@@ -220,35 +227,27 @@ L<S03/"Junctive operators"/"They thread through operations">
 =cut
 
 {
-	# XXX when this works the tests might autothread, then use $got to avoid
-	my @subs = (sub {3}, sub {2});
+    my @subs = (sub {3}, sub {2});
 
     my ($got, $want);
 
-	# $want = (3|2).perl;
-    # $got = any(@subs)();
-    # is($got.perl, $want, '.() on any() junction of subs');
-    eval_is('any(@subs)().perl', "('2' | '3')", '.() on any() junction of subs', :todo(1));
+    is(j(any(@subs)()), j(3|2), '.() on any() junction of subs');
 
-	# $want = (3&2).perl;
-    # $got = all(@subs)();
-    # is($got.perl, $want, '.() on all() junction of subs');
-    eval_is('all(@subs)().perl', "('2' & '3')", '.() on all() junction of subs', :todo(1));
+    $want = (3&2);
+    $got = all(@subs)();
+    is(j($got), j($want), '.() on all() junction of subs');
 
-	# $want = (3^2).perl;
-    # $got = one(@subs)();
-    # is($got.perl, $want, '.() on one() junction of subs');
-    eval_is('one(@subs)().perl', "('2' ^ '3')", '.() on one() junction of subs', :todo(1));
+    $want = (3^2);
+    $got = one(@subs)();
+    is(j($got), j($want), '.() on one() junction of subs');
 
-	# $want = none(3,2).perl;
-    # $got = none(@subs)();
-    # is($got.perl, $want, '.() on none() junction of subs');
-    eval_is('none(@subs)().perl', "('2' ! '3')", '.() on none() junction of subs', :todo(1));
+    $want = none(3,2);
+    $got = none(@subs)();
+    is(j($got), j($want), '.() on none() junction of subs');
 
-	# $want = ((3|2)^(3&2)).perl;
-    # $got = one( any(@subs), all(@subs) )();
-    # is($got.perl, $want, '.() on complex junction of subs');
-    eval_is('one( any(@subs), all(@subs) ).perl', "((('2' ^ '3') | ('2' ^ '2')) & (('2' ^ '3') | ('3' ^ '3')))", '.() on complex junction of subs', :todo(1));
+    $want = one( any(3,2), all(3,2) );
+    $got = one( any(@subs), all(@subs) )();
+    is(j($got), j($want), '.() on complex junction of subs');
 
     # Avoid future constant folding
     #my $rand = rand;
@@ -256,6 +255,29 @@ L<S03/"Junctive operators"/"They thread through operations">
     #my @subs = (sub {3+$zero}, sub {2+$zero});
 }
 
+# Check functional and operator versions produce the same structure
+{
+    is(j((1|2)^(3&4)), j(one(any(1,2),all(3,4))),
+        '((1|2)^(3&4)) equiv to one(any(1,2),all(3,4))');
+
+    is(j((1|2)!(3&4)), j(none(any(1,2),all(3,4))),
+        '((1|2)!(3&4)) equiv to none(any(1,2),all(3,4))');
+
+    is(j((1|2)&(3&4)), j(all(any(1,2),all(3,4))), 
+        '((1|2)!(3&4)) equiv to all(any(1,2),all(3,4))');
+
+    is(j((1|2)|(3&4)), j(any(any(1,2),all(3,4))),
+        '((1|2)|(3&4)) equiv to any(any(1,2),all(3,4))');
+}
+
 is(none(1).pick, undef, 'none(1).pick should be undef');
 is(none(1,1).pick, undef, 'none(1,1).pick should be undef');
+
+is(one(1).pick, 1, 'one(1).pick should be 1');
+is(one(1,1).pick, undef, 'one(1,1).pick should be undef');
+
+is(all(1).pick, 1, 'all(1).pick should be 1');
+is(all(1,1).pick, 1, 'all(1,1).pick should be 1');
+is(all(1,2).pick, undef, 'all(1,2).pick should be undef');
+
 

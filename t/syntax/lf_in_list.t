@@ -1,11 +1,11 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 plan 4;
 
-my %foo;
+our %foo;
 my %e = ("foo", "bar", "blah", "blah");
 
 eval_ok('
@@ -14,9 +14,9 @@ eval_ok('
 		"blah", "blah",
 	);
 	1;
-', "expression parsed (well, lexed)", :todo(1));
+', "expression parsed (well, lexed)");
 
-is(+%foo, +%e, "oh boy, it evaluates correctly, too", :todo(1));
-is(%foo<foo>, %e<foo>, "...", :todo(1));
-is(%foo<blah>, %e<blah>, "...", :todo(1));
+is(+%foo, +%e, "oh boy, it evaluates correctly, too");
+is(%foo<foo>, %e<foo>, "...");
+is(%foo<blah>, %e<blah>, "...");
 

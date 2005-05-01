@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 =pod
 
@@ -10,7 +10,7 @@ indicated by the C<-> switch.
 
 =cut
 
-my @examples = map { $_.values() } (
+my @examples = map -> Junction $_ { $_.values } (
    any('print qq.Hello Pugs.',
        'print @ARGS',
    )

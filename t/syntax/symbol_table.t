@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 plan 28;
 
@@ -11,9 +11,9 @@ Namespaces, symbol tables and symbolic references.
 
 =cut
 
-
+# fail("%:: parse", :todo);
+eval_ok('%::', '%:: parses', :todo);
 my $symhash   = eval '%::';
-fail("%:: parse", :todo(1));
 
 my  $lex      = 'bar';
 our $lex_s    = 'lex';
@@ -29,56 +29,55 @@ our $code_s   = 'code';
 
 # symref syntax
 
-is(eval '$::("MY::$lex_s")',         $lex,    "loopup of lexical in current scope", :todo(1));
-is(eval '$::($global_s)',            $global, "lookup of global in default package", :todo(1));
-is(eval '$::("*Main::$global_s")',   $global, "lookup of global in *Main package", :todo(1));
-is(eval '~ @::($ary_s)',             ~ @ary,  "array lookup", :todo(1));
-is(eval '~ %::($hash_s)',            ~ %hash, "hash lookup", :todo(1));
-is(eval '&::($code_s).()',           code(),  "named sub lookup", :todo(1));
+eval_is('$::("MY::$lex_s")',         $lex,    "loopup of lexical in current scope", :todo);
+eval_is('$::($global_s)',            $global, "lookup of global in default package", :todo);
+eval_is('$::("*Main::$global_s")',   $global, "lookup of global in *Main package", :todo);
+eval_is('~ @::($ary_s)',             ~ @ary,  "array lookup", :todo);
+eval_is('~ %::($hash_s)',            ~ %hash, "hash lookup", :todo);
+eval_is('&::($code_s).()',           code(),  "named sub lookup", :todo);
 
-ok(eval '!defined($::("nosuch"))',            "unknown scalar lookup", :todo(1));
-ok(eval '!defined($::("nosuch"))',            "unknown scalar lookup doesn't autovivify", :todo(1));
+eval_ok( '!defined($::("nosuch"))',            "unknown scalar lookup", :todo);
+eval_ok( '!defined($::("nosuch"))',            "unknown scalar lookup doesn't autovivify", :todo);
 
-ok(eval '!defined($::("MY::nosuch"))',        "unknown lexical lookup", :todo(1));
-ok(eval '!defined($::("MY::nosuch"))',        "unknown lexical lookup doesn't autovivify", :todo(1));
+eval_ok( '!defined($::("MY::nosuch"))',        "unknown lexical lookup", :todo);
+eval_ok( '!defined($::("MY::nosuch"))',        "unknown lexical lookup doesn't autovivify", :todo);
 
 # (lvalue lexicals -- see below.)
 
 
 # symtable hash syntax
 
-is(eval '%MY::{\'$\' ~ $lex_s}',       "bar",   "loopup of lexical in current scope - symtable", :todo(1));
-is(eval '%::{\'$\' ~ $global_s}',      $global, "lookup of global in default package - symtable", :todo(1));
-is(eval '%*Main::{\'$\' ~ $global_s}', $global, "lookup of global in *Main package - symtable", :todo(1));
-is(eval '~ %::{\'@\' ~ $ary_s}',       ~ @ary,  "array lookup - symtable", :todo(1));
-is(eval '~ %::{\'%\' ~ $hash_s}',      ~ %hash, "array lookup - symtable", :todo(1));
-is(eval '%::{\'&\' ~ $code_s}.()',     code(),  "named sub lookup - symtable", :todo(1));
+eval_is('%MY::{\'$\' ~ $lex_s}',       "bar",   "loopup of lexical in current scope - symtable", :todo);
+eval_is('%::{\'$\' ~ $global_s}',      $global, "lookup of global in default package - symtable", :todo);
+eval_is('%*Main::{\'$\' ~ $global_s}', $global, "lookup of global in *Main package - symtable", :todo);
+eval_is('~ %::{\'@\' ~ $ary_s}',       ~ @ary,  "array lookup - symtable", :todo);
+eval_is('~ %::{\'%\' ~ $hash_s}',      ~ %hash, "array lookup - symtable", :todo);
+eval_is('%::{\'&\' ~ $code_s}.()',     code(),  "named sub lookup - symtable", :todo);
 
-ok(eval '!defined(%::<nosuch>)',                "unknown scalar lookup", :todo(1));
-ok(eval '!defined(%::<nosuch>)',                "unknown scalar lookup doesn't autovivify", :todo(1));
+eval_ok( '!defined(%::<nosuch>)',                "unknown scalar lookup", :todo);
+eval_ok( '!defined(%::<nosuch>)',                "unknown scalar lookup doesn't autovivify", :todo);
 
-ok(eval '!defined(%MY::<nosuch>)',              "unknown lexical lookup", :todo(1));
-ok(eval '!defined(%MY::<nosuch>)',              "unknown lexical lookup doesn't autovivify", :todo(1));
+eval_ok( '!defined(%MY::<nosuch>)',              "unknown lexical lookup", :todo);
+eval_ok( '!defined(%MY::<nosuch>)',              "unknown lexical lookup doesn't autovivify", :todo);
 
 {
-	fail("package keyword", :todo(1));
-	eval 'package Other1;';
+	# fail("package keyword", :todo);
+	eval_ok 'package Other1;', "package keyword parses", :todo;
 
-	ok(eval '%:: eq $symhash',       "package declaration changes current package", :todo(1));
+	eval_ok( '%:: eq $symhash',       "package declaration changes current package", :todo);
 
 	our $new_global =         "It is I.";
 
 	my $lex = "carrot";       # hiding "bar".
-	is(eval '$::("MY::$lex_s")',     "carrot",  "loopup of hiding lexical", :todo(1));
+	eval_is('$::("MY::$lex_s")',     "carrot",  "loopup of hiding lexical", :todo);
 
-	ok(eval '!defined(%::(\'$\' ~ $global_s))', "lookup of global in wrong package", :todo(1)); # XXX: error? warning? silent?
+	eval_ok( '!defined(%::(\'$\' ~ $global_s))', "lookup of global in wrong package", :todo); # XXX: error? warning? silent?
 	my $a = eval '$::($global_s)';
 	my $b = eval '$::("*Main::$global_s")';
-    
-	ok (defined $a && defined $b && $a eq $b,   "package search", :todo(1));
-	
+
+	ok (defined $a && defined $b && $a eq $b,   "package search", :todo);
+
 }
 
-ok(defined eval '%::' && eval '%::' eq $symhash, "previous package declaration was scoped", :todo(1));
-is(eval '%::<Other1::$new_global>',  "It is I.", "Global in other package still visible", :todo(1));
-
+ok(defined eval '%::' && eval '%::' eq $symhash, "previous package declaration was scoped", :todo);
+eval_is('%::<Other1::$new_global>',  "It is I.", "Global in other package still visible", :todo);

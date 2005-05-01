@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 {-
@@ -13,6 +13,7 @@
 -}
 
 module Pugs.Eval where
+import Pugs.Config
 import Pugs.Internals
 import Prelude hiding ( exp )
 import qualified Data.Map as Map
@@ -25,28 +26,30 @@ import Pugs.Context
 import Pugs.Monads
 import Pugs.Pretty
 import Pugs.Types
-import qualified Pugs.Types.Hash as Hash
-import qualified Pugs.Types.Array as Array
 
-emptyEnv genPad = do
-    pad  <- liftIO $ sequence genPad
-    ref  <- liftIO $ newIORef Map.empty
-    uniq <- liftIO $ newUnique
-    syms <- liftIO $ initSyms
-    glob <- liftIO $ newIORef (pad ++ syms)
-    return $ Env
-        { envContext = CxtVoid
-        , envLexical = []
-        , envLValue  = False
-        , envGlobal  = glob
-        , envClasses = initTree
-        , envEval    = evaluate
-        , envCaller  = Nothing
-        , envDepth   = 0
-        , envID      = uniq
-        , envBody    = Val undef
-        , envDebug   = Just ref -- Set to "Nothing" to disable debugging
-        }
+emptyEnv :: (MonadIO m, MonadSTM m) => String -> [STM (Pad -> Pad)] -> m Env
+emptyEnv name genPad = do
+    uniq <- liftIO newUnique
+    liftSTM $ do
+        pad  <- sequence genPad
+        ref  <- newTVar Map.empty
+        syms <- initSyms
+        glob <- newTVar (combine (pad ++ syms) $ mkPad [])
+        return $ Env
+            { envContext = CxtVoid
+            , envLexical = mkPad []
+            , envLValue  = False
+            , envGlobal  = glob
+            , envClasses = initTree
+            , envEval    = evaluate
+            , envCaller  = Nothing
+            , envDepth   = 0
+            , envID      = uniq
+            , envBody    = Val undef
+            , envDebug   = Just ref -- Set to "Nothing" to disable debugging
+            , envStash   = ""
+            , envPos     = MkPos name 1 1 1 1
+            }
 
 -- Evaluation ---------------------------------------------------------------
 
@@ -55,13 +58,15 @@ debug key fun str a = do
     rv <- asks envDebug
     case rv of
         Nothing -> return ()
-        Just ref -> liftIO $ do
-            fm <- readIORef ref
-            let val = fun $ Map.findWithDefault "" key fm
+        Just ref -> do
+            val <- liftSTM $ do
+                fm <- readTVar ref
+                let val = fun $ Map.findWithDefault "" key fm
+                writeTVar ref (Map.insert key val fm)
+                return val
             when (length val > 100) $ do
-                hPutStrLn stderr "*** Warning: deep recursion"
-            writeIORef ref (Map.insert key val fm)
-            putStrLn ("***" ++ val ++ str ++ pretty a)
+                trace "*** Warning: deep recursion" return ()
+            trace ("***" ++ val ++ str ++ pretty a) return ()
 
 evaluateMain :: Exp -> Eval Val
 evaluateMain exp = do
@@ -74,75 +79,46 @@ evaluateMain exp = do
                       ]
     return val
 
-evaluate :: Exp -> Eval Val
+-- |Evaluate an expression. This function mostly just delegates to 'reduce'.
+evaluate :: Exp -- ^ The expression to evaluate
+         -> Eval Val
 evaluate (Val val) = evalVal val
 evaluate exp = do
     want <- asks envWant
     debug "indent" (' ':) ("Evl [" ++ want ++ "]:\n") exp
-    val <- local (\e -> e{ envBody = exp }) $ do
-        reduceExp exp
+    val <- local (\e -> e{ envBody = exp }) $ reduce exp
     debug "indent" (tail) " Ret: " val
     trapVal val (return val)
 
-evalSym :: Symbol -> Eval (String, Val)
-evalSym sym = do
-    val <- readRef =<< symRef sym
-    return (symName sym, val)
-    
+findSyms :: Var -> Eval [(String, Val)]
+findSyms name = do
+    lex  <- asks envLexical
+    glob <- askGlobal
+    let names = [name, toGlobal name]
+    syms <- forM [lex, glob] $ \pad -> do
+        forM names $ \name' -> do
+            case lookupPad name' pad of
+                Just tvar -> do
+                    refs  <- liftSTM $ mapM readTVar tvar
+                    forM refs $ \ref -> do
+                        val <- readRef ref
+                        return (name', val)
+                Nothing -> return []
+    return $ concat (concat syms)
+
 enterEvalContext :: Cxt -> Exp -> Eval Val
 enterEvalContext cxt = enterContext cxt . evalExp
 
 -- Reduction ---------------------------------------------------------------
 
-reduceExp :: Exp -> Eval Val
-reduceExp exp = do
-    env <- ask
-    reduce env exp
-
 retVal :: Val -> Eval Val
 retVal val = evaluate (Val val)  -- casting
 
-addGlobalSym sym = do
+addGlobalSym newSym = do
     glob <- asks envGlobal
-    liftIO $ do
-        syms <- readIORef glob
-        writeIORef glob (sym:syms)
-
--- XXX This is a mess. my() and our() etc should not be statement level!
-reduceStatements :: [(Exp, SourcePos)] -> Exp -> Eval Val
-reduceStatements [] = reduceExp
-reduceStatements ((exp, pos):rest)
-    | Syn ";" exps <- exp = do
-        reduceStatements $ (exps `zip` repeat pos) ++ rest
-    | Sym scope name <- exp = const $ do
-        ref <- newObject (typeOfSigil $ head name)
-        let doRest = reduceStatements rest (Var name)
-        sym <- genSym name ref
-        case scope of
-            SMy -> enterLex [ sym ] doRest
-            _   -> do { addGlobalSym sym; doRest }
-    | Syn "sub" [Val (VCode sub)] <- exp
-    , subType sub >= SubBlock = do
-        -- bare Block in statement level; run it!
-        let app = Syn "()" [exp, Syn "invs" [], Syn "args" []]
-        reduceStatements $ (app, pos):rest
-    | Syn "dump" [] <- exp
-    , null rest = \e -> do
-        Env{ envGlobal = globals, envLexical = lexicals } <- ask
-        liftIO $ modifyIORef globals (lexicals ++)
-        reduceStatements rest e
-    | null rest = const $ do
-        _   <- asks envContext
-        pad <- posSyms pos
-        val <- enterLex pad $ reduceExp exp
-        retVal val
-    | otherwise = const $ do
-        val <- enterContext cxtVoid $ do
-            pad <- posSyms pos
-            enterLex pad $ do
-                reduceExp exp
-        trapVal val $ do
-            reduceStatements rest $ Val val
+    liftSTM $ do
+        syms <- readTVar glob
+        writeTVar glob (newSym syms)
 
 trapVal :: Val -> Eval a -> Eval a
 trapVal val action = case val of
@@ -150,78 +126,94 @@ trapVal val action = case val of
     VControl c      -> retControl c
     _               -> action
 
-posSyms pos = sequence [ genSym n v | (n, v) <- syms ]
-    where
-    file = sourceName pos
-    line = show $ sourceLine pos
-    syms =
-        [ ("$?FILE", scalarRef $ castV file)
-        , ("$?LINE", scalarRef $ castV line)
-        , ("$?POSITION", scalarRef $ castV $ pretty pos)
-        ]
-
 evalVar :: Ident -> Eval Val
 evalVar name = do
-    env <- ask
-    v <- findVar env name
+    v <- findVar name
     case v of
         Just var -> readRef var
-        Nothing  -> retError ("Undeclared variable " ++ name) (Val undef)
+        Nothing  -> retError "Undeclared variable" name
 
 enterLValue = local (\e -> e{ envLValue = True })
 enterRValue = local (\e -> e{ envLValue = False })
 
-findVar :: Env -> Ident -> Eval (Maybe VRef)
-findVar env name = do
-    rv <- findVarRef env name
+findVar :: Ident -> Eval (Maybe VRef)
+findVar name = do
+    rv <- findVarRef name
     case rv of
         Nothing  -> return Nothing
-        Just ref -> return . Just =<< liftIO (readIORef ref)
+        Just ref -> fmap Just $ liftSTM (readTVar ref)
 
-findVarRef :: Env -> Ident -> Eval (Maybe (IORef VRef))
-findVarRef env name
+findVarRef :: Ident -> Eval (Maybe (TVar VRef))
+findVarRef name
     | Just (package, name') <- breakOnGlue "::" name
-    , Just (sig, "") <- breakOnGlue "CALLER" package =
-        case (envCaller env) of
-            Just caller -> findVarRef caller (sig ++ name')
-            Nothing -> retError "cannot access CALLER:: in top level" (Var name)
-    | otherwise = 
+    , Just (sig, "") <- breakOnGlue "CALLER" package = do
+        maybeCaller <- asks envCaller
+        case maybeCaller of
+            Just caller -> local (const caller) $ do
+                findVarRef (sig ++ name')
+            Nothing -> retError "cannot access CALLER:: in top level" name
+    | ('$':'?':_) <- name = do
+        rv  <- getMagical name
+        case rv of
+            Nothing  -> doFindVarRef name
+            Just val -> do
+                tvar <- liftSTM $ newTVar (MkRef . constScalar $ val)
+                return $ Just tvar
+    | otherwise = doFindVarRef name
+    where
+    doFindVarRef name = do
         callCC $ \foundIt -> do
-            let lexSym = findSym name $ envLexical env
+            lexSym <- fmap (findSym name . envLexical) ask
             when (isJust lexSym) $ foundIt lexSym
-            glob <- liftIO . readIORef $ envGlobal env
+            glob   <- liftSTM . readTVar . envGlobal =<< ask
             let globSym = findSym name glob
             when (isJust globSym) $ foundIt globSym
             let globSym = findSym (toGlobal name) glob
             when (isJust globSym) $ foundIt globSym
             return Nothing
 
-reduce :: Env -> Exp -> Eval Val
+posSym f = fmap (Just . castV . f) $ asks envPos
+constSym = return . Just . castV
+
+-- |Evaluate the 'magical' variable associated with a given name. Returns 
+-- Nothing if the name does not match a known magical.
+getMagical :: String -- ^ Name of the magical var to evaluate
+           -> Eval (Maybe Val)
+getMagical "$?FILE"     = posSym posName
+getMagical "$?LINE"     = posSym posBeginLine
+getMagical "$?COLUMN"   = posSym posBeginColumn
+getMagical "$?POSITION" = posSym pretty
+getMagical "$?MODULE"   = constSym "main"
+getMagical "$?OS"       = constSym $ getConfig "osname"
+getMagical _            = return Nothing
+
+-- |Reduce an expression into its value.
+reduce :: Exp -- ^ The expression to reduce
+       -> Eval Val
 
 -- Reduction for mutables
-reduce env (Val v@(VRef var)) = do
-    if envLValue env
-        then retVal v
-        else do
-            rv <- readRef var
-            retVal rv
+reduce (Val v@(VRef var)) = do
+    lv <- asks envLValue
+    if lv then retVal v else do
+    rv <- readRef var
+    retVal rv
 
 -- Reduction for constants
-reduce _ (Val v) = do
-    retVal v
+reduce (Val v) = retVal v
 
 -- Reduction for variables
-reduce env exp@(Var name) = do
-    v <- findVar env name
-    if isNothing v then retError ("Undeclared variable " ++ name) exp else do
+reduce (Var name) = do
+    v <- findVar name
+    if isNothing v then retError "Undeclared variable" name else do
     let ref = fromJust v
     if refType ref == (mkType "Thunk") then forceRef ref else do
     val <- callCC $ \esc -> do
-        let cxt = envContext env
-            typ = typeOfCxt cxt
+        cxt <- asks envContext
+        lv  <- asks envLValue
+        let typ = typeOfCxt cxt
             isCollectionRef = (refType ref /= mkType "Scalar")
         -- If RValue, read from the reference
-        unless (envLValue env) $ do
+        unless lv $ do
             when (isCollectionRef && isItemCxt cxt) $ do
                 -- auto-enreference
                 esc $ VRef ref
@@ -240,48 +232,106 @@ reduce env exp@(Var name) = do
         return $ castV ref
     retVal val
 
-reduce _ (Statements stmts) = do
-    let (global, local) = partition isGlobalExp stmts
-    reduceStatements (global ++ local) $ Val undef
-    where
-    isGlobalExp (Syn name _, _) = name `elem` (words "::=")
-    isGlobalExp _ = False
+reduce (Stmts this rest) | Noop <- unwrap rest = reduce this
+reduce (Stmts this rest) | Noop <- unwrap this = reduce rest
+
+reduce (Stmts this rest) = do
+    val <- enterContext cxtVoid $ reduce this
+    trapVal val $ case unwrap rest of
+        (Syn "env" []) -> do
+            env <- ask
+            writeVar "$*_" val
+            return . VControl $ ControlEnv env
+        _ -> reduce rest
+
+reduce (Syn "env" []) = do
+    env <- ask
+    -- writeVar "$*_" val
+    return . VControl $ ControlEnv env
+
+reduce (Pos pos exp) = do
+    local (\e -> e{ envPos = pos }) $ do
+        evalExp exp
+
+reduce (Pad SMy lex exp) = do
+    -- heuristics: if we are repeating ourselves, generate a new TVar.
+    lex' <- fmap mkPad $ liftSTM $ forM (padToList lex) $ \(name, tvars) -> do
+        tvars' <- forM tvars $ \orig@(fresh, _) -> do
+            isFresh <- readTVar fresh
+            if isFresh then do { writeTVar fresh False; return orig } else do
+            -- regen TVar -- we have re-entered this scope
+            ref     <- newObject (typeOfSigil $ head name)
+            tvar'   <- newTVar ref
+            return (fresh, tvar')
+        return (name, tvars')
+    local (\e -> e{ envLexical = lex' `unionPads` envLexical e }) $ do
+        evalExp exp
+
+reduce (Pad _ lex exp) = do
+    local (\e -> e{ envLexical = lex `unionPads` envLexical e }) $ do
+        evalExp exp
+
+reduce (Sym scope name exp) = do
+    ref <- newObject (typeOfSigil $ head name)
+    sym <- case name of
+        ('&':_) -> genMultiSym name ref
+        _       -> genSym name ref
+    case scope of
+        SMy -> enterLex [ sym ] $ evalExp exp
+        _   -> do { addGlobalSym sym; evalExp exp }
 
 -- Context forcing
-reduce _ (Cxt cxt exp) = do
+reduce (Cxt cxt exp) = do
     val <- enterEvalContext cxt exp
     enterEvalContext cxt (Val val) -- force casting
 
+-- Reduction for no-operations
+reduce Noop = retEmpty
+
 -- Reduction for syntactic constructs
-reduce env exp@(Syn name exps) = case name of
+reduce exp@(Syn name exps) = case name of
     "block" -> do
         let [body] = exps
-        enterBlock $ reduce env body
+        enterBlock $ reduce body
     "sub" -> do
         let [exp] = exps
         (VCode sub) <- enterEvalContext (cxtItem "Code") exp
-        retVal $ VCode sub{ subPad = envLexical env }
+        lex <- asks envLexical
+        retVal $ VCode sub{ subPad = lex }
     "if" -> doCond id 
     "unless" -> doCond not
     "for" -> do
         let [list, body] = exps
-        vlist <- enterEvalContext cxtSlurpyAny list
-        vsub  <- enterEvalContext (cxtItem "Code") body
-        vals  <- fromVal vlist
+        av    <- enterLValue $ enterEvalContext cxtSlurpyAny list
+        vsub  <- enterRValue $ enterEvalContext (cxtItem "Code") body
+        -- XXX this is wrong -- should use Array.next
+        sz    <- join $ doArray av array_fetchSize
+        fetch <- doArray av array_fetchElem
+        elms  <- mapM fetch [0..sz-1]
         VCode sub <- fromVal vsub
-        let arity = length (subParams sub)
-            runBody [] = retVal undef
-            runBody vs = do
+        -- XXX: need clarification -- this makes
+        --      for @x { ... } into for @x -> $_ {...}
+        let arity = max 1 $ length (subParams sub)
+            runBody [] _ = retVal undef
+            runBody vs sub' = do
                 let (these, rest) = arity `splitAt` vs
-                doApply env sub [] $ map Val these
-                runBody rest
-        enterLoop $ runBody vals
+                genSymCC "&next" $ \symNext -> do
+                genSymPrim "&redo" (const $ runBody vs sub') $ \symRedo -> do
+                    apply sub'{ subPad = symRedo . symNext $ subPad sub' } [] $
+                        map (Val . VRef . MkRef) these
+                runBody rest sub'
+        genSymCC "&last" $ \symLast -> do
+            let munge sub | subParams sub == [defaultArrayParam] =
+                    munge sub{ subParams = [defaultScalarParam] }
+                munge sub = sub{ subPad = symLast $ subPad sub }
+            runBody elms $ munge sub
     "loop" -> do
         let [pre, cond, post, body] = case exps of { [_] -> exps'; _ -> exps }
-            exps' = [Syn "noop" [], Val (VBool True), Syn "noop" []] ++ exps
+            exps' = [emptyExp, Val (VBool True), emptyExp] ++ exps
         evalExp pre
         enterLoop . fix $ \runBody -> do
-            valBody <- evalExp body
+            genSymPrim "&redo" (const $ runBody) $ \symRedo -> do
+            valBody <- enterLex [symRedo] $ evalExp body
             valPost <- evalExp post
             vBool   <- enterEvalContext (cxtItem "Bool") cond
             vb      <- fromVal vBool
@@ -298,20 +348,18 @@ reduce env exp@(Syn name exps) = case name of
         let [match, body] = exps
         break  <- evalVar "&?BLOCK_EXIT"
         vbreak <- fromVal break
-        match  <- reduce env match
+        match  <- reduce match
         topic  <- evalVar "$_"
         result <- op2Match topic match
         rb     <- fromVal result
         if rb
-            then enterWhen (subFun vbreak) $ do
-                doApply env vbreak [body] []
+            then enterWhen (subBody vbreak) $ apply vbreak [body] []
             else retVal undef
     "default" -> do
         let [body] = exps
         break  <- evalVar "&?BLOCK_EXIT"
         vbreak <- fromVal break
-        enterWhen (subFun vbreak) $ do
-            doApply env vbreak [body] []
+        enterWhen (subBody vbreak) $ apply vbreak [body] []
     "while" -> doWhileUntil id
     "until" -> doWhileUntil not
     "=" -> do
@@ -324,15 +372,16 @@ reduce env exp@(Syn name exps) = case name of
                 | otherwise = cxtItem $ takeWhile (/= ':') . show $ refType ref
         val <- enterRValue $ enterEvalContext cxt rhs
         writeRef ref val
-        retVal refVal
-    "::=" -> reduce env (Syn ":=" exps)
-    ":=" | [Syn "," vars, Syn "," vexps] <- exps -> do
+        lv  <- asks envLValue
+        retVal $ if lv then refVal else val
+    "::=" -> reduce (Syn ":=" exps)
+    ":=" | [Syn "," vars, Syn "," vexps] <- unwrap exps -> do
         when (length vars > length vexps) $ do
-            (`retError` exp) $ "Wrong number of binding parameters: "
+            fail $ "Wrong number of binding parameters: "
                 ++ (show $ length vexps) ++ " actual, "
                 ++ (show $ length vars) ++ " expected"
         -- env' <- cloneEnv env -- FULL THUNKING
-        names <- forM vars $ \var -> case var of
+        names <- forM vars $ \var -> case unwrap var of
             Var name -> return name
             _        -> retError "Cannot bind this as lhs" var
         bindings <- forM (names `zip` vexps) $ \(name, vexp) -> do
@@ -343,27 +392,27 @@ reduce env exp@(Syn name exps) = case name of
             -}
             val  <- enterLValue $ enterEvalContext (cxtOfSigil $ head name) vexp
             ref  <- fromVal val
-            rv   <- findVarRef env name
+            rv   <- findVarRef name
             case rv of
                 Just ioRef -> return (ioRef, ref)
                 Nothing -> do
-                    retError ("Undeclared variable " ++ name) (Val undef)
+                    retError "Undeclared variable" name
         forM_ bindings $ \(ioRef, ref) -> do
-            liftIO $ writeIORef ioRef ref
+            liftSTM $ writeTVar ioRef ref
         return $ case map (VRef . snd) bindings of
             [v] -> v
             vs  -> VList vs
     ":=" -> do
         let [var, vexp] = exps
-            expand e@(Syn "," _) = e
+            expand e | e'@(Syn "," _) <- unwrap e = e'
             expand e = Syn "," [e]
-        reduce env (Syn ":=" [expand var, expand vexp])
+        reduce (Syn ":=" [expand var, expand vexp])
     "=>" -> do
         let [keyExp, valExp] = exps
         key     <- enterEvalContext cxtItemAny keyExp
         val     <- evalExp valExp
         retVal $ castV (key, val)
-    "*" | [Syn syn [exp]] <- exps -- * cancels out [] and {}
+    "*" | [Syn syn [exp]] <- unwrap exps --  * cancels out [] and {}
         , syn == "\\{}" || syn == "\\[]"
         -> enterEvalContext cxtSlurpyAny exp
     "*" -> do -- first stab at an implementation
@@ -394,25 +443,27 @@ reduce env exp@(Syn name exps) = case name of
         writeRef av v
         retVal $ VRef av
     -- XXX evil hack for infinite slices
-    "[]" | [lhs, App "&postfix:..." invs args] <- exps
+    "[]" | [lhs, App "&postfix:..." invs args] <- unwrap exps
          , [idx] <- invs ++ args
-         , not (envLValue env)
-         -> reduce env (Syn "[...]" [lhs, idx])
-    "[]" | [lhs, App "&infix:.." invs args] <- exps
+--       , not (envLValue env)
+         -> reduce (Syn "[...]" [lhs, idx])
+    "[]" | [lhs, App "&infix:.." invs args] <- unwrap exps
          , [idx, Val (VNum n)] <- invs ++ args
          , n == 1/0
-         , not (envLValue env)
-         -> reduce env (Syn "[...]" [lhs, idx])
+--       , not (envLValue env)
+         -> reduce (Syn "[...]" [lhs, idx])
     "[]" -> do
         let [listExp, indexExp] = exps
-        idxCxt  <- cxtOfExp indexExp
+        idxCxt  <- cxtOfExp indexExp 
+        {- if envLValue env
+            then cxtOfExp indexExp else return (envContext env)
+        -}
         idxVal  <- enterRValue $ enterEvalContext idxCxt indexExp
         varVal  <- enterLValue $ enterEvalContext (cxtItem "Array") listExp
-        doFetch (mkFetch $ doArray varVal Array.fetchElem)
-                (mkFetch $ doArray varVal Array.fetchVal)
-                (fromVal idxVal)
-                (envLValue env)
-                (not (isSlurpyCxt idxCxt))
+        lv      <- asks envLValue
+        doFetch (mkFetch $ doArray varVal array_fetchElem)
+                (mkFetch $ doArray varVal array_fetchVal)
+                (fromVal idxVal) lv (not (isSlurpyCxt idxCxt))
     "[...]" -> do
         let [listExp, indexExp] = exps
         idxVal  <- enterRValue $ enterEvalContext (cxtItem "Int") indexExp
@@ -423,14 +474,16 @@ reduce env exp@(Syn name exps) = case name of
         retVal $ VList (drop idx $ concat elms)
     "{}" -> do
         let [listExp, indexExp] = exps
-        idxCxt  <- cxtOfExp indexExp
+        idxCxt  <- cxtOfExp indexExp 
+        {- if envLValue env
+            then cxtOfExp indexExp else return (envContext env)
+        -}
         idxVal  <- enterRValue $ enterEvalContext idxCxt indexExp
         varVal  <- enterLValue $ enterEvalContext (cxtItem "Hash") listExp
-        doFetch (mkFetch $ doHash varVal Hash.fetchElem)
-                (mkFetch $ doHash varVal Hash.fetchVal)
-                (fromVal idxVal)
-                (envLValue env)
-                (not (isSlurpyCxt idxCxt))
+        lv      <- asks envLValue
+        doFetch (mkFetch $ doHash varVal hash_fetchElem)
+                (mkFetch $ doHash varVal hash_fetchVal)
+                (fromVal idxVal) lv (not (isSlurpyCxt idxCxt))
     "()" -> do
         let [subExp, Syn "invs" invs, Syn "args" args] = exps
         vsub <- enterEvalContext (cxtItem "Code") subExp
@@ -454,7 +507,7 @@ reduce env exp@(Syn name exps) = case name of
         flag_g  <- fromAdverb hv ["g", "global"]
         flag_i  <- fromAdverb hv ["i", "ignorecase"]
         when (not p5) $ do
-            retError "Perl 6 rules is not implemented yet, use :P5" (Val val)
+            fail "Perl 6 rules is not implemented yet, use :P5"
         retVal $ VRule $ MkRule
             { rxRegex  = mkRegexWithPCRE (encodeUTF8 str) $
                 [ pcreUtf8
@@ -474,7 +527,7 @@ reduce env exp@(Syn name exps) = case name of
             Nothing -> fromAdverb hv ks
     "subst" -> do
         let [exp, subst, adverbs] = exps
-        (VRule rx)  <- reduce env (Syn "rx" [exp, adverbs])
+        (VRule rx)  <- reduce (Syn "rx" [exp, adverbs])
         retVal $ VSubst (rx, subst)
     "is" -> do
         retEmpty
@@ -488,14 +541,15 @@ reduce env exp@(Syn name exps) = case name of
         langVal <- evalExp langExp
         lang    <- fromVal langVal
         when (lang /= "Haskell") $
-            retError "Inline: Unknown language" (Val langVal)
+            retError "Inline: Unknown language" langVal
         modVal  <- readVar "$?MODULE"
         mod     <- fromVal modVal
+#ifndef HADDOCK
         let file = (`concatMap` mod) $ \v -> case v of
             { '-' -> "__"; _ | isAlphaNum v -> [v] ; _ -> "_" }
+#endif
         op1 "require_haskell" (VStr $ file ++ ".o")
         retEmpty
-    "noop" -> retEmpty
     syn | last syn == '=' -> do
         let [lhs, exp] = exps
             op = "&infix:" ++ init syn
@@ -507,61 +561,45 @@ reduce env exp@(Syn name exps) = case name of
         vbool     <- enterEvalContext (cxtItem "Bool") cond
         vb        <- fromVal vbool
         if (f vb)
-            then reduce env bodyIf
-            else reduce env bodyElse
+            then reduce bodyIf
+            else reduce bodyElse
     -- XXX This treatment of while/until loops probably needs work
     doWhileUntil f = do
         let [cond, body] = exps
-        enterLoop . fix $ \runBody -> do
+        enterLoop . fix $ \runLoop -> do
             vbool <- enterEvalContext (cxtItem "Bool") cond
             vb    <- fromVal vbool
             case f vb of
-                True -> do
-                    rv <- reduce env body
+                True -> fix $ \runBody -> do
+                    genSymPrim "&redo" (const $ runBody) $ \symRedo -> do
+                    rv <- enterLex [symRedo] $ reduce body
                     case rv of
                         VError _ _  -> retVal rv
-                        _           -> runBody
+                        _           -> runLoop
                 _ -> retVal vbool
 
-{-
---- XXX ALL WRONG
-reduce env (App name invs args)
-    | isPrefix
-    , not . null $ [ undefined | (Syn "," _) <- invs ]
-    = reduce env $ App name (concatMap flatten invs) args
-    | isPrefix
-    , not . null $ [ undefined | (Syn "," _) <- args ]
-    = reduce env $ App name invs (concatMap flatten args)
-    where
-    flatten (Syn "," exps) = exps
-    flatten exp = [exp]
-    fixity = takeWhile (/= ':') name
-    isPrefix
-        | fixity == name        = True
-        | fixity == "&infix"    = False
-        | fixity == "&postfix"  = False
-        | otherwise             = True
--}
-
 -- XXX absolutely evil bloody hack for context hinters
-reduce _ (App "&hash" invs args) =
+reduce (App "&hash" invs args) =
     enterEvalContext cxtItemAny $ Syn "\\{}" [Syn "," $ invs ++ args]
 
-reduce _ (App "&list" invs args) =
-    enterEvalContext cxtSlurpyAny $ Syn "," (invs ++ args)
+reduce (App "&list" invs args) =
+    enterEvalContext cxtSlurpyAny $ case invs ++ args of
+        []    -> Val (VList [])
+        [exp] -> exp
+        exps  -> Syn "," exps
 
-reduce _ (App "&scalar" invs args)
+reduce (App "&scalar" invs args)
     | [exp] <- invs ++ args = enterEvalContext cxtItemAny exp
     | otherwise = enterEvalContext cxtItemAny $ Syn "," (invs ++ args)
 
 -- XXX absolutely evil bloody hack for "zip"
-reduce _ (App "&zip" invs args) = do
+reduce (App "&zip" invs args) = do
     vals <- mapM (enterRValue . enterEvalContext (cxtItem "Array")) (invs ++ args)
     val  <- op0 "Y" vals
     retVal val
 
 -- XXX absolutely evil bloody hack for "goto"
-reduce _ (App "&goto" (subExp:invs) args) = do
+reduce (App "&goto" (subExp:invs) args) = do
     vsub <- enterEvalContext (cxtItem "Code") subExp
     sub <- fromVal vsub
     local callerEnv $ do
@@ -575,46 +613,30 @@ reduce _ (App "&goto" (subExp:invs) args) = do
            }
 
 -- XXX absolutely evil bloody hack for "assuming"
-reduce _ (App "&assuming" (subExp:invs) args) = do
+reduce (App "&assuming" (subExp:invs) args) = do
     vsub <- enterEvalContext (cxtItem "Code") subExp
     sub <- fromVal vsub
     case bindSomeParams sub invs args of
-        Left errMsg      -> retError errMsg (Val undef)
+        Left errMsg      -> fail errMsg
         Right curriedSub -> retVal $ castV $ curriedSub
 
-reduce _ (App "&infix:=>" [keyExp, valExp] []) = do
+reduce (App "&infix:=>" [keyExp, valExp] []) = do
     key <- enterEvalContext cxtItemAny keyExp
     val <- enterEvalContext cxtItemAny valExp
     retVal $ castV (key, val)
 
-reduce Env{ envClasses = cls, envContext = cxt, envLexical = lex, envGlobal = glob } exp@(App name invs args) = do
-    syms    <- liftIO $ readIORef glob
-    subSyms <- mapM evalSym
-        [ sym | sym <- lex ++ syms
-        , let n = symName sym
-        , (n ==) `any` [name, toGlobal name]
-        ]
-    lens <- mapM argSlurpLen (invs ++ args)
-    sub <- findSub (sum lens) subSyms
+reduce (App name invs args) = do
+    sub <- findSub name invs args
     case sub of
-        Just sub    -> applySub subSyms sub invs args
-        Nothing     -> retError ("No compatible subroutine found: " ++ name) exp
+        Just sub    -> applySub sub invs args
+        Nothing     -> retError "No compatible subroutine found" name
     where
-    argSlurpLen (Val listMVal) = do
-        listVal  <- fromVal listMVal
-        return $ length (vCast listVal :: [Val])
-    argSlurpLen (Var name) = do
-        listMVal <- evalVar name
-        listVal  <- fromVal listMVal
-        return $ length (vCast listVal :: [Val])
-    argSlurpLen (Syn "," list) =  return $ length list
-    argSlurpLen _ = return 1 -- XXX
-    applySub subSyms sub invs args
+    applySub sub invs args
         -- list-associativity
         | MkCode{ subAssoc = "list" }      <- sub
         , (App name' invs' []):rest  <- invs
         , name == name'
-        = applySub subSyms sub (invs' ++ rest)  []
+        = applySub sub (invs' ++ rest)  []
         -- fix subParams to agree with number of actual arguments
         | MkCode{ subAssoc = "list", subParams = (p:_) }   <- sub
         , null args
@@ -632,29 +654,71 @@ reduce Env{ envClasses = cls, envContext = cxt, envLexical = lex, envGlobal = gl
     mungeChainSub sub invs = do
         let MkCode{ subAssoc = "chain", subParams = (p:_) } = sub
             (App name' invs' args'):rest = invs
-        syms    <- liftIO $ readIORef glob
-        subSyms' <- mapM evalSym
-
-            [ sym | sym <- lex ++ syms
-            , let n = symName sym
-            , (n ==) `any` [name', toGlobal name']
-            ]
-        lens'    <- mapM argSlurpLen (invs' ++ args')
-        theSub <- findSub (sum lens') subSyms'
+        theSub   <- findSub name' invs' args'
         case theSub of
-            Just sub'    -> applyChainSub subSyms' sub invs sub' invs' args' rest
+            Just sub'    -> applyChainSub sub invs sub' invs' args' rest
             Nothing      -> apply sub{ subParams = (length invs) `replicate` p } invs [] -- XXX Wrong
-            -- retError ("No compatible subroutine found: " ++ name') exp
-    applyChainSub subSyms sub invs sub' invs' args' rest
-        | MkCode{ subAssoc = "chain", subFun = fun, subParams = prm }   <- sub
-        , MkCode{ subAssoc = "chain", subFun = fun', subParams = prm' } <- sub'
+    applyChainSub sub invs sub' invs' args' rest
+        | MkCode{ subAssoc = "chain", subBody = fun, subParams = prm }   <- sub
+        , MkCode{ subAssoc = "chain", subBody = fun', subParams = prm' } <- sub'
         , null args'
-        = applySub subSyms sub{ subParams = prm ++ tail prm', subFun = Prim $ chainFun prm' fun' prm fun } (invs' ++ rest) []
+        = applySub sub{ subParams = prm ++ tail prm', subBody = Prim $ chainFun prm' fun' prm fun } (invs' ++ rest) []
         | MkCode{ subAssoc = "chain", subParams = (p:_) }   <- sub
         = apply sub{ subParams = (length invs) `replicate` p } invs [] -- XXX Wrong
         | otherwise
         = internalError "applyChainsub did not match a chain subroutine"
-    findSub slurpLen subSyms = do
+
+reduce (Parens exp) = reduce exp
+reduce exp = retError "Invalid expression" exp
+
+-- |Return the context that an expression bestows upon a hash or array
+-- subscript. See 'reduce' for \{\} and \[\]. (Is this correct?)
+cxtOfExp :: Exp -- ^ Expression to find the context of
+         -> Eval Cxt
+cxtOfExp (Pos _ exp)            = cxtOfExp exp
+cxtOfExp (Parens exp)           = cxtOfExp exp
+cxtOfExp (Cxt cxt _)            = return cxt
+cxtOfExp (Syn "," _)            = return cxtSlurpyAny
+cxtOfExp (Syn "[]" [_, exp])    = cxtOfExp exp
+cxtOfExp (Syn "{}" [_, exp])    = cxtOfExp exp
+cxtOfExp (Val (VList _))        = return cxtSlurpyAny
+cxtOfExp (Val (VRef ref))       = do
+    cls <- asks envClasses
+    let typ = refType ref
+    return $ if isaType cls "List" typ
+        then cxtSlurpyAny
+        else CxtItem typ
+cxtOfExp (Val _)                = return cxtItemAny
+cxtOfExp (Var (c:_))            = return $ cxtOfSigil c
+cxtOfExp (App "&list" _ _)      = return cxtSlurpyAny
+cxtOfExp (App "&scalar" _ _)    = return cxtSlurpyAny
+cxtOfExp (App name invs args)   = do
+    -- inspect the return type of the function here
+    env <- ask
+    sub <- findSub name invs args
+    return $ case sub of
+        Just sub
+            | isaType (envClasses env) "Scalar" (subReturns sub)
+            -> CxtItem (subReturns sub)
+        _ -> cxtSlurpyAny
+cxtOfExp _                      = return cxtSlurpyAny
+
+
+findSub name invs args = do
+    subSyms <- findSyms name
+    lens    <- mapM argSlurpLen (unwrap $ invs ++ args)
+    doFindSub (sum lens) subSyms
+    where
+    argSlurpLen (Val listMVal) = do
+        listVal  <- fromVal listMVal
+        return $ length (vCast listVal :: [Val])
+    argSlurpLen (Var name) = do
+        listMVal <- evalVar name
+        listVal  <- fromVal listMVal
+        return $ length (vCast listVal :: [Val])
+    argSlurpLen (Syn "," list) =  return $ length list
+    argSlurpLen _ = return 1 -- XXX
+    doFindSub slurpLen subSyms = do
         subs' <- subs slurpLen subSyms
         -- let foo (x, sub) = show x ++ show (map paramContext $ subParams sub)
         -- trace (unlines $ map foo $ sort subs') return ()
@@ -666,21 +730,25 @@ reduce Env{ envClasses = cls, envContext = cxt, envLexical = lex, envGlobal = gl
         let isGlobal = '*' `elem` n
         let fun = arityMatch sub (length (invs ++ args)) slurpLen
         if isNothing fun then return Nothing else do
-        if deltaFromCxt ret == 0 then return Nothing else do
+        -- if deltaFromCxt ret == 0 then return Nothing else do
         let invocants = filter isInvocant prms
         let prms' = if null invocants then prms else invocants
-        let distance = (deltaFromCxt ret : map (deltaFromScalar . typeOfCxt . paramContext) prms')
+        deltaCxt    <- deltaFromCxt ret
+        deltaArgs   <- mapM (deltaFromScalar . typeOfCxt . paramContext) prms'
+        let distance = (deltaCxt : deltaArgs)
         let bound = either (const False) (const True) $ bindParams sub invs args
         return $ Just
             ( (isGlobal, subT, isMulti sub, bound, distance)
             , fromJust fun
             )
-    deltaFromCxt x          = deltaType cls (typeOfCxt cxt) x
-    deltaFromScalar x       = deltaType cls x (mkType "Scalar")
+    deltaFromCxt x  = do
+        cls <- asks envClasses
+        cxt <- asks envContext
+        return $ deltaType cls (typeOfCxt cxt) x
+    deltaFromScalar x = do
+        cls <- asks envClasses
+        return $ deltaType cls x (mkType "Scalar")
 
-reduce env (Parens exp) = reduce env exp
-
-reduce _ exp = retError "Invalid expression" exp
 
 -- OK... Now let's implement the hideously clever autothreading algorithm.
 -- First pass - thread thru all() and none()
@@ -715,21 +783,21 @@ apply sub invs args = do
 -- XXX - faking application of lexical contexts
 -- XXX - what about defaulting that depends on a junction?
 doApply :: Env -> VCode -> [Exp] -> [Exp] -> Eval Val
-doApply Env{ envClasses = cls } sub@MkCode{ subFun = fun, subType = typ } invs args =
+doApply Env{ envClasses = cls } sub@MkCode{ subBody = fun, subType = typ } invs args =
     case bindParams sub invs args of
-        Left errMsg -> retError errMsg (Val undef)
+        Left errMsg -> fail errMsg
         Right sub   -> do
             forM_ (subSlurpLimit sub) $ \limit@(n, _) -> do
                 extra <- checkSlurpyLimit limit
                 when (not $ null extra) $ do
-                    (`retError` (Val undef)) $
+                    fail $
                         "Too many slurpy arguments for " ++ subName sub ++ ": "
                         ++ show ((genericLength (take 1000 extra)) + n) ++ " actual, "
                         ++ show n ++ " expected"
             enterScope $ do
-                (pad, bound) <- doBind [] (subBindings sub)
+                (syms, bound) <- doBind [] (subBindings sub)
                 -- trace (show bound) $ return ()
-                val <- local fixEnv $ enterLex pad $ do
+                val <- local fixEnv $ enterLex syms $ do
                     (`juncApply` bound) $ \realBound -> do
                         enterSub sub $ do
                             applyExp realBound fun
@@ -742,21 +810,21 @@ doApply Env{ envClasses = cls } sub@MkCode{ subFun = fun, subType = typ } invs a
     fixEnv env
         | typ >= SubBlock = env
         | otherwise       = env{ envCaller = Just env }
-    doBind :: Pad -> [(Param, Exp)] -> Eval (Pad, [ApplyArg])
-    doBind pad [] = return (pad, [])
-    doBind pad ((prm, exp):rest) = do
+    doBind :: [Pad -> Pad] -> [(Param, Exp)] -> Eval ([Pad -> Pad], [ApplyArg])
+    doBind syms [] = return (syms, [])
+    doBind syms ((prm, exp):rest) = do
         -- trace ("<== " ++ (show (prm, exp))) $ return ()
         let name = paramName prm
             cxt = cxtOfSigil $ head name
         (val, coll) <- enterContext cxt $ case exp of
-            Parens exp  -> local fixEnv $ enterLex pad $ expToVal prm exp
+            Parens exp  -> local fixEnv $ enterLex syms $ expToVal prm exp
             _           -> expToVal prm exp
         -- trace ("==> " ++ (show val)) $ return ()
         boundRef <- fromVal val
-        sym      <- genSym name boundRef
-        (pad', restArgs) <- doBind (sym:pad) rest
-        return (pad', ApplyArg name val coll:restArgs)
-    expToVal MkParam{ isThunk = thunk, isLValue = lv, paramContext = cxt, paramName = name, isWritable = rw } exp = do
+        newSym   <- genSym name boundRef
+        (syms', restArgs) <- doBind (newSym:syms) rest
+        return (syms', ApplyArg name val coll:restArgs)
+    expToVal MkParam{ isLazy = thunk, isLValue = lv, paramContext = cxt, paramName = name, isWritable = rw } exp = do
         env <- ask -- freeze environment at this point for thunks
         let eval = local (const env{ envLValue = lv }) $ do
             enterEvalContext (cxtOfSigil $ head name) exp
@@ -831,7 +899,7 @@ doFetch fetchElem fetchVal fetchIdx isLV isSV = case (isLV, isSV) of
     (False, False) -> do
         -- RValue, List context
         idxList <- fetchIdx
-        return . VList =<< mapM fetchVal idxList
+        fmap VList $ mapM fetchVal idxList
 
 mkFetch :: (Value n) => Eval (n -> Eval t) -> Val -> Eval t
 mkFetch f v = do

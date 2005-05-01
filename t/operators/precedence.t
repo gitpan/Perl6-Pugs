@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 =pod
 
@@ -14,7 +14,7 @@ L<S03/"Precedence">
 
 =cut
 
-plan 40;
+plan 41;
 
 
 # 1. terms
@@ -121,9 +121,9 @@ is((1 && 0 ?? 2 :: 3), 3, "&& binds tighter than ??");
 
 {
 	my @c = 1, 2, 3;
-	is(@c, (1), "= binds tighter than , (*sigh*)", :todo(1));
+	is(@c, (1), "= binds tighter than , (*sigh*)", :todo);
 	my @a = (1, 3) ¥ (2, 4);
-	is(@a, [1, 3], "= binds tighter than yen", :todo(1));
+	is(@a, [1, 3], "= binds tighter than yen", :todo);
 };
 
 {
@@ -134,21 +134,18 @@ is((1 && 0 ?? 2 :: 3), 3, "&& binds tighter than ??");
 # 17. list item separator
 
 {
-	skip 2, "skipping left pointing pipe tests which die";
-	if(0) {
-		my @d;
-		eval '@d <== (1, 3) ¥ (2, 4)';
-		is(@d, [1 .. 4], "to complicate things further, left pointing pipe *does* DWIM", :todo(1));
-		my $c = any 1, 2, 3;
-		ok($c == 2, "any is less tight than comma");
-	}
+	my @d;
+	eval_ok '@d <== (1, 3) ¥ (2, 4), "left pointing pipe parses"', :todo;
+	is(@d, [1 .. 4], "to complicate things further, left pointing pipe *does* DWIM", :todo);
+	my $c = any 1, 2, 3;
+	ok($c == 2, "any is less tight than comma");
 }
 
 # 18. rightward list op
 
 {
 	my @e; eval '@e = (map { $_+1 } <== (1, 2, 3) ==> map { $_*2 })'; # =D
-	is(@e, [4, 6, 8], "<== is tighter than ==>", :todo(1));
+	is(@e, [4, 6, 8], "<== is tighter than ==>", :todo);
 }
 
 # 19. pipe forward

@@ -1,0 +1,526 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!--Rendered using the Haskell Html Library v0.2-->
+<HTML
+><HEAD
+  ><TITLE
+    >Pugs.Rule.Token</TITLE
+    ><LINK HREF = "haddock.css" REL = "stylesheet" TYPE = "text/css"
+    ></HEAD
+  ><BODY
+  ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+    ><TR
+      ><TD CLASS = "topbar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><IMG SRC = "haskell_icon.gif" WIDTH = "16" HEIGHT = "16" ALT = " "
+		></TD
+	      ><TD CLASS = "title"
+	      ></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "index.html"
+		>Contents</A
+		></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "doc-index.html"
+		>Index</A
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "modulebar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><FONT SIZE = "6"
+		>Pugs.Rule.Token</FONT
+		></TD
+	      ><TD ALIGN = "right"
+	      ><TABLE CLASS = "narrow" CELLSPACING = "0" CELLPADDING = "0"
+		><TR
+		  ><TD CLASS = "infohead"
+		    >Portability</TD
+		    ><TD CLASS = "infoval"
+		    >  non-portable (uses existentially quantified data constructors)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "infohead"
+		    >Stability</TD
+		    ><TD CLASS = "infoval"
+		    >  provisional</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "infohead"
+		    >Maintainer</TD
+		    ><TD CLASS = "infoval"
+		    >  daan@cs.uu.nl</TD
+		    ></TR
+		  ></TABLE
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "section1"
+	>Description</TD
+	></TR
+      ><TR
+      ><TD CLASS = "doc"
+	>A helper module to parse lexical elements (tokens).
+</TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "section1"
+	>Synopsis</TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "body"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD CLASS = "decl"
+	      ><SPAN CLASS = "keyword"
+		>data</SPAN
+		> <A HREF = "#t%3ALanguageDef"
+		>LanguageDef</A
+		> st = <A HREF = "#v%3ALanguageDef"
+		>LanguageDef</A
+		> {<TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+		><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AcommentStart"
+		      >commentStart</A
+		      > :: String</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AcommentEnd"
+		      >commentEnd</A
+		      > :: String</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AcommentLine"
+		      >commentLine</A
+		      > :: String</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AnestedComments"
+		      >nestedComments</A
+		      > :: Bool</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AidentStart"
+		      >identStart</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Char)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AidentLetter"
+		      >identLetter</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Char)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AopStart"
+		      >opStart</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Char)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AopLetter"
+		      >opLetter</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Char)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AreservedNames"
+		      >reservedNames</A
+		      > :: [String]</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AreservedOpNames"
+		      >reservedOpNames</A
+		      > :: [String]</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AcaseSensitive"
+		      >caseSensitive</A
+		      > :: Bool</TD
+		    ></TR
+		  ></TABLE
+		>}</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><SPAN CLASS = "keyword"
+		>data</SPAN
+		> <A HREF = "#t%3ATokenParser"
+		>TokenParser</A
+		> st = <A HREF = "#v%3ATokenParser"
+		>TokenParser</A
+		> {<TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+		><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Aidentifier"
+		      >identifier</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Areserved"
+		      >reserved</A
+		      > :: (String -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st ())</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Aoperator"
+		      >operator</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AreservedOp"
+		      >reservedOp</A
+		      > :: (String -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st ())</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AcharLiteral"
+		      >charLiteral</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Char)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AstringLiteral"
+		      >stringLiteral</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Anatural"
+		      >natural</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Integer)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Ainteger"
+		      >integer</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Integer)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Afloat"
+		      >float</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Double)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AnaturalOrFloat"
+		      >naturalOrFloat</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st (Either Integer Double))</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Adecimal"
+		      >decimal</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Integer)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Ahexadecimal"
+		      >hexadecimal</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Integer)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Aoctal"
+		      >octal</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st Integer)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Asymbol"
+		      >symbol</A
+		      > :: (String -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Alexeme"
+		      >lexeme</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AwhiteSpace"
+		      >whiteSpace</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st ())</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Aparens"
+		      >parens</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Abraces"
+		      >braces</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Aangles"
+		      >angles</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Abrackets"
+		      >brackets</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Asquares"
+		      >squares</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AbalancedDelim"
+		      >balancedDelim</A
+		      > :: (Char -&gt; Char)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Abalanced"
+		      >balanced</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Asemi"
+		      >semi</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Acomma"
+		      >comma</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Acolon"
+		      >colon</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3Adot"
+		      >dot</A
+		      > :: (<A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st String)</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AsemiSep"
+		      >semiSep</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st [a])</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AsemiSep1"
+		      >semiSep1</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st [a])</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AcommaSep"
+		      >commaSep</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st [a])</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AcommaSep1"
+		      >commaSep1</A
+		      > :: (<SPAN CLASS = "keyword"
+		      >forall</SPAN
+		      > a . <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st a -&gt; <A HREF = "Pugs.Rule.Char.html#t%3ACharParser"
+		      >CharParser</A
+		      > st [a])</TD
+		    ></TR
+		  ></TABLE
+		>}</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AmakeTokenParser"
+		>makeTokenParser</A
+		> :: <A HREF = "Pugs.Rule.Token.html#t%3ALanguageDef"
+		>LanguageDef</A
+		> st -&gt; <A HREF = "Pugs.Rule.Token.html#t%3ATokenParser"
+		>TokenParser</A
+		> st</TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "botbar"
+	>Produced by <A HREF = "http://www.haskell.org/haddock/"
+	  >Haddock</A
+	  > version ADDOCK_VERSION</TD
+	></TR
+      ></TABLE
+    ></BODY
+  ></HTML
+>

@@ -8,7 +8,7 @@ my $transition_file = @*ARGS[0] err
 my $initial_tape = @*ARGS[1] // "_";
 
 my $i    = 0;
-my %tape = map sub ($a) { $i++ => $a }, split "", $initial_tape;
+my %tape = map { $i++, $^a }, split "", $initial_tape;
 
 my %instructions;
 
@@ -18,8 +18,8 @@ my $tape_loc = 0;
 my $trans = open "< $transition_file" err
   die "Can't open \"$transition_file\" for reading!\n";
 
-for =$trans -> $_ {
-  my $line = $_; # aboiv "can't modify a constant"
+for =$trans {
+  my $line = $_; # avoid "can't modify a constant"
   $line ~~ s:perl5/#.*//;
 
   if($line ~~ rx:perl5/\S/) {
@@ -38,6 +38,7 @@ for =$trans -> $_ {
   }
 }
 
+my $x = "$state %tape{$tape_loc}";
 my $instruction;
 while($instruction = %instructions{"$state %tape{$tape_loc}"}) {
   my ($new_state, $new_char, $direction) = split " ", $instruction;
@@ -56,8 +57,6 @@ while($instruction = %instructions{"$state %tape{$tape_loc}"}) {
   }
 }
 
-# XXX: Because of a bug (tested against in
-# t/pugsbugs/subscripts_and_context.t), the following line doesn't work.
 my $final_tape = join "", %tape{sort {$^a <=> $^b} keys %tape};
 $final_tape ~~ s:Perl5/^_+//;
 $final_tape ~~ s:Perl5/_+$//;

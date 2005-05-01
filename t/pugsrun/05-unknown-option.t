@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 =pod
 
@@ -15,8 +15,8 @@ if called with the (unknown) option C<-foo>
 
 =cut
 
-my @examples = map { $_.values }
-               map { $_.values } (
+my @examples = map -> Junction $_ { $_.values }
+               map -> Junction $_ { $_.values } (
     any('-foo ', '-e "print" -foo ', '-c -foo ', '-eprint -foo ')
   ~ any("", '-e "print" ', '-c '),
 );
@@ -41,5 +41,5 @@ for @examples -> $ex {
   my $got      = slurp "temp-ex-output";
   unlink "temp-ex-output";
 
-  is $got, $expected, "$ex works", :todo(1);
+  is $got, $expected, "$ex works", :todo;
 }

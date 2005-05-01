@@ -40,6 +40,7 @@
 \newcommand{\synvar}    [1]{\color{purple!50!black}#1\color{black}}
 \newcommand{\synclass}  [1]{\color{green!50!black}#1\color{black}}
 \newcommand{\syncomment}[1]{\color{blue!20!black}#1\color{black}}
+\newcommand{\syncool}   [1]{\color{beamer@blendedblue}#1\color{black}}
 \newcommand{\synoder}      {\ \ \color{black}$\vee$\ \ }
 \newcommand{\hr}        {\rule[4pt]{\textwidth}{0.1pt}\\}
 
@@ -48,14 +49,14 @@
 \institute{LUGA}
 \date{4. Mai 2005}
 % Outline:
+%   - Parrot
+%     - Entstehung
+%     - Design
 %   - Perl 6
 %     - Geschichte
 %     - Designideen
 %     - Code-Beispiele (mit Vergleichen zu vielen anderen Sprachen)
 %     - Mitgestaltungsmöglichkeiten, etc.
-%   - Parrot
-%     - Entstehung
-%     - Design
 %   - Pugs
 %     - Entstehung
 %     - Überblick
@@ -79,15 +80,85 @@
   \tableofcontents
 }
 
-\section{Perl 6}
-\subsection{Entstehung}
-\frame{
-  \frametitle{Entstehungsgeschichte}
+\section{Parrot}
+\subsection{"Uberblick}
+\frame[t]{
+  \frametitle{Parrot?}
+
   \begin{itemize}
-    \item Aprilscherz: Kombination von Perl 5 und Python → Parrot
-    \item ...
+    \item \only<2->{Verdammt schnelle r}\only<1>{R}egisterbasierte virtuelle Maschine
+    \item Plattformunabhängiger Bytecode
+    \item "`One bytecode to rule them all"'
+  \end{itemize}
+
+  \pause\pause
+  \[
+    \begin{array}{ll}
+      \text{BASIC}  & \text{Forth} \\
+      \text{Lisp}   & \text{Parakeet} \\
+      \text{Perl 5} & \text{Perl 6} \\
+      \text{PHP}    & \text{Python} \\
+      \text{Ruby}   & \text{Scheme} \\
+      \text{TCL}    & \text{\ldots} \\
+    \end{array}
+    \leftrightarrow \text{\syncool{Parrot}} \leftrightarrow
+    \begin{array}{ll}
+      \text{BASIC}  & \text{Forth} \\
+      \text{Lisp}   & \text{Parakeet} \\
+      \text{Perl 5} & \text{Perl 6} \\
+      \text{PHP}    & \text{Python} \\
+      \text{Ruby}   & \text{Scheme} \\
+      \text{TCL}    & \text{\ldots} \\
+    \end{array}
+  \]
+}
+
+\subsection{Architektur}
+\frame[t]{
+  \frametitle{Architektur}
+
+  \begin{itemize}
+    \item Je 64 Register der Typen \texttt{I}, \texttt{N}, \texttt{S} und \texttt{P}
+	  \vspace*{-1em}
+	  \begin{tabbing}
+	    \texttt{I}: \= Int \\
+	    \texttt{N}: \> Num \\
+	    \texttt{S}: \> String \\
+	    \texttt{P}: \> PMC -- Parrot Magic Cookie
+	  \end{tabbing}
+    \item Bereitstellung von Garbage Collection, Subroutinen, Coroutines,
+	  Continuations, Klassen, Methoden
+    \item Just In Time-Compiler für meist benutzte Plattformen ⇒ Speed!
+    \item HLL → PIR → Bytecode → \\
+	  natives Programm, C oder direkte Ausführung
   \end{itemize}
 }
+
+\subsection{Beteiligungsm"oglichkeiten}
+\frame[t]{
+  \frametitle{Beteiligungsmöglichkeiten}
+
+  \begin{itemize}
+    \item Mailingliste: \\
+          \texttt{perl6-internals@perl.org}, \\
+          \texttt{gmane.comp.lang.perl.perl6.internals}
+    \item IRC: \texttt{\#parrot} auf \texttt{irc.perl.org}
+    \item Auch Newbies gern gesehen
+    \item Viele Beteiligungsmöglichkeiten, nicht nur für Programmierer
+    \item Weitere Informationen: \url{http://www.parrotcode.org/}
+  \end{itemize}
+}
+
+
+\section{Perl 6}
+%\subsection{Entstehung}
+%\frame{
+%  \frametitle{Entstehungsgeschichte}
+%  \begin{itemize}
+%    \item Aprilscherz: Kombination von Perl 5 und Python → Parrot
+%    \item ...
+%  \end{itemize}
+%}
 
 \subsection{Design}
 \frame{
@@ -96,7 +167,7 @@
   \begin{itemize}
     \item<1-> Glattes Wasserbett
     \item<2-> Eindrücken an einer Stelle (Vereinfachung) ⇒ \\
-	      Hochkommen an einer anderen Stellen (Komplizierung)
+	      Hochkommen an anderen Stellen (Komplizierung)
   \end{itemize}
 
   \vfill\pause\pause 
@@ -124,7 +195,7 @@
   \frametitle{Freiheit und Anpassung}
 
   \begin{itemize}
-    \item Kein Zwänge, nur angemessene Defaults
+    \item Kein Zwänge, nur angemessene Standards
     \item Bräuche, keine Gesetze
     \item "`Nur tote Sprachen ändern sich nicht."'
   \end{itemize}
@@ -132,9 +203,15 @@
   \vfill\pause
   \begin{block}{Möglichkeiten der Anpassung}
     \begin{itemize}
-      \item Neudefinition der Grammatik
-      \item C-like und Lisp-like Makros
       \item Überschreiben/Erweitern von Builtins und Operatoren
+      \item C-like und Lisp-like Makros
+      \pause
+      \item Neudefinition der Grammatik: \\
+	    \texttt{%
+	      \synfunc{use}\ \synclass{Grammar::Python};\\
+	      \synvar{x}\ = [ \synvar{foo}(), \synvar{bar}() ]\\
+	      \synvar{x}.\synvar{push}(3)
+	    }
     \end{itemize}
   \end{block}
 }
@@ -188,7 +265,7 @@
     Perl 6:  \> \texttt{\synfunc{say}\ \ \ "\synstr{Hello, World!}";} \\
     Perl 5:  \> \texttt{\synfunc{print}\ "\synstr{Hello, World!\textbackslash{}n}";} \\
     \hr
-    C:       \> \texttt{\synfunc{printf}("\synstr{\%s}", "\synstr{Hello, World!\textbackslash{}n}");} \\
+    C:       \> \texttt{\synfunc{printf}("\synstr{\%s\textbackslash{}n}", "\synstr{Hello, World!}");} \\
     Haskell: \> \texttt{\synfunc{putStrLn}\ "\synstr{Hello, World!}"} \\
     Lua:     \> \texttt{\synfunc{print}\ "\synstr{Hello, World!}";} \\
     PHP:     \> \texttt{\synfunc{print}("\synstr{Hello, World!\textbackslash{}n}");} \\
@@ -217,47 +294,48 @@
   \end{itemize}
 }
 
-\frame{
-  \frametitle{Tastatureingabe}
-  \begin{langs}
-    Perl 6:  \> \texttt{\synfunc{my}\ \synvar{\${}text}\ = =\synvar{\${}*IN};} \\
-    Perl 5:  \> \texttt{\synfunc{my}\ \synvar{\${}text}\ = <\synvar{STDIN}>;} \\
-    \hr
-    C:       \> \texttt{\synfunc{scanf}("\synstr{\%s}", \&{}\synvar{text});} \\
-    Haskell: \> \texttt{\synvar{x}\ <- \synfunc{getLine}} \\
-    Lua:     \> \texttt{\synvar{text}\ = \synfunc{io.read}()} \\
-    PHP:     \> \texttt{\synvar{\${}text}\ = \synfunc{readline}();} \\
-    Python:  \> \texttt{\synvar{text}\ = \synfunc{sys.stdin.readline}()} \\
-    Ruby:    \> \texttt{\synvar{text}\ = \synfunc{gets}} \\
-    Shell:   \> \texttt{\synfunc{read}\ \synvar{text}} \\
-    Tcl:     \> \texttt{\synfunc{set}\ \synvar{text}\ [\synfunc{gets}\ \synvar{stdin}]}
-  \end{langs}
-}
+%\frame{
+%  \frametitle{Tastatureingabe}
+%  \begin{langs}
+%    Perl 6:  \> \texttt{\synfunc{my}\ \synvar{\${}text}\ = =\synvar{\${}*IN};} \\
+%    Perl 5:  \> \texttt{\synfunc{my}\ \synvar{\${}text}\ = <\synvar{STDIN}>;} \\
+%    \hr
+%    C:       \> \texttt{\synfunc{scanf}("\synstr{\%s}", \&{}\synvar{text});} \\
+%    Haskell: \> \texttt{\synvar{x}\ <- \synfunc{getLine}} \\
+%    Lua:     \> \texttt{\synvar{text}\ = \synfunc{io.read}()} \\
+%    PHP:     \> \texttt{\synvar{\${}text}\ = \synfunc{readline}();} \\
+%    Python:  \> \texttt{\synvar{text}\ = \synfunc{sys.stdin.readline}()} \\
+%    Ruby:    \> \texttt{\synvar{text}\ = \synfunc{gets}} \\
+%    Shell:   \> \texttt{\synfunc{read}\ \synvar{text}} \\
+%    Tcl:     \> \texttt{\synfunc{set}\ \synvar{text}\ [\synfunc{gets}\ \synvar{stdin}]}
+%  \end{langs}
+%}
 
 \frame[t]{
   \frametitle{Operatoren}
 
   \begin{itemize}
-    \item<1-> Standard-Operatoren in Perl 6:
+    \item<1-> Standard-Operatoren:
 	  \begin{itemize}
 	    \item \texttt{+ * - / \~{}}
 	    \item \texttt{[] \{\}}
 	    \item \texttt{.}
 	    \item \texttt{...} (Yadda-Yadda)
 	  \end{itemize}
-    \item<2-> Kontextspezifizierer: \\
+    \item<2-> Chained Operators: \texttt{23 < \synvar{\$a}\ < 42}
+    \item<3-> Kontextspezifizierer: \\
 	  \begin{itemize}
 	    \item \texttt{+\synvar{@array}} (Anzahl Elemente in
 	  	  \texttt{\synvar{@array}})
 	    \item \texttt{\~{}\synvar{@array}} (\texttt{\synvar{@array}} als
 	      	  Zeichenkette)
-	    \item \texttt{?{}\synvar{@array}} ("`Ist \texttt{\synvar{@array}}
-		  nicht leer?"')
+	    \item \texttt{?{}\synvar{@array}} ("`Enthält \texttt{\synvar{@array}}
+		  Elemente?"')
 	  \end{itemize}
-    \item<3-> Hyper-Operatoren: \\
+    \item<4-> Hyper-Operatoren: \\
 	  \texttt{%
-	    (1, 2, 3) »*« 2\ \ \ \ \ \ \ \ \ \# (2, 4, 6)\\
-	    (1, 2, 3) »+« (4, 5, 6) \# (5, 7, 9)\\
+	    \symbol{91}1, 2, 3] »*« 2\ \ \ \ \ \ \ \ \ \# \symbol{91}2, 4, 6]\\
+	    \symbol{91}1, 2, 3] »+« \symbol{91}4, 5, 6] \# \symbol{91}5, 7, 9]\\
 	  }
   \end{itemize}
 }
@@ -265,7 +343,7 @@
 \frame{
   \frametitle{Junctions}
 
-  \begin{block}{"`Wenn dies, dies oder dies wahr ist, dann..."'}
+  \begin{block}{"`Wenn \texttt{\$a} einen dieser Werte hat, dann..."'}
     \begin{langs}
       Perl 5: \> \texttt{\synfunc{if}(\synvar{\$a}\ == 3 || \synvar{\$a}\ == 5 || \synvar{\$a}\ == 7) \{...\}} \\
       Perl 6: \> \texttt{\synfunc{if}\ \synvar{\$a}\ == 3|5|7 \{...\}}
@@ -281,12 +359,23 @@
   \end{block}
 
   \pause
-  \begin{block}{"`Wenn mindestens einer 18 ist, dann..."'}
-    \begin{langs}
-      Perl 5: \> \texttt{\synfunc{if}(\synfunc{grep} \{ \synvar{\$\_}->\synvar{age}\ >= 18 \} \synvar{@leute}) \{...\}} \\
-      Perl 6: \> \texttt{\synfunc{if}\ \synfunc{any}(\synvar{@leute}».\synvar{age}) >= 18 \{...\}}
-    \end{langs}
-  \end{block}
+  \only<1-3>{
+    \begin{block}{"`Wenn mindestens einer mindestens 18 ist, dann..."'}
+      \begin{langs}
+	Perl 5: \> \texttt{\synfunc{if}(\synfunc{grep}\ \{ \synvar{\$\_}->\synvar{age}\ >= 18 \} \synvar{@leute}) \{...\}} \\
+	Perl 6: \> \texttt{\synfunc{if}\ \synfunc{any}(\synvar{@leute}».\synvar{age}) >= 18 \{...\}}
+      \end{langs}
+    \end{block}
+  }
+
+  \only<4>{
+    \begin{block}{"`Wenn genau einer einer mindestens 18 ist, dann..."'}
+      \begin{langs}
+	Perl 5: \> \texttt{\synfunc{if}(\synfunc{grep}(\{ \synvar{\$\_}->\synvar{age}\ >= 18 \} \synvar{@leute}) == 1) \{...\}} \\
+	Perl 6: \> \texttt{\synfunc{if}\ \synfunc{one}(\synvar{@leute}».\synvar{age}) >= 18 \{...\}}
+      \end{langs}
+    \end{block}
+  }
 }
 
 \frame{
@@ -416,7 +505,7 @@
 \frame{
   \frametitle{Klassendefinition und -instantiierung in Perl 6}
   \begin{block}{Perl 6}\texttt{%
-    \synfunc{class}\ \synclass{Foo}\ \only<4>{\synfunc{is}\ \synclass{Baz}\ }\{\\
+    \synfunc{class}\ \synclass{Foo}\ \only<6>{\synfunc{is}\ \synclass{Baz}\ }\{\\
       \only<1> {\ \ \synfunc{has}\ \synvar{\${}.bar};\\}
       \only<2->{\ \ \synfunc{has}\ \synvar{\${}.bar}\ \synfunc{is}\ \synvar{rw};\\}
       \ \ \synfunc{method}\ \synvar{hallo}(\synclass{Str}\ \synvar{\$name}) \{\\
@@ -425,7 +514,7 @@
     \}\\
     \ \\
     \syncomment{\# Dann:}\\
-    \synfunc{my}\ \synvar{\$obj}\ = \synclass{Foo}.\synvar{new};\\
+    \synfunc{my}\ \only<4->{\synclass{Foo}\ }\synvar{\$obj}\ \only<5->{.}= \only<1-4>{\synclass{Foo}.}\synvar{new};\\
     \only<1> {\synfunc{say}\ \synvar{\$obj}.\synvar{bar};\\}
     \only<2->{\synvar{\$obj}.\synvar{bar}\ = 42;\\}
     \only<1-2>{\synfunc{say}\ \synvar{\$obj}.\synvar{hallo}("\synstr{Ingo}");\\}
@@ -437,22 +526,147 @@
   \frametitle{Rollen}
 
   \texttt{%
-    \synfunc{role}\ \synclass{Num::Cool}\ \{\\
-    \ \ \synfunc{method}\ \synvar{sei\_cool}(\synvar{\$self}:) \{\\
-    \ \ \ \ \synvar{\$self}\ = 42;\\
-    \ \ \}\\
+    \synfunc{role}\ \synclass{Logger::Mail}\ \{\\
+    \ \ \synfunc{method}\ \synvar{log}(\synclass{Str}\ \synvar{\$message}) \{...\}\\
     \}\\
     \ \\
-    \syncomment{\# Dann:}\\
-    \synfunc{my}\ \synvar{\$num}\ = 23;\\
-    \only<1>{\synvar{\$num}\ \synfunc{does}\ \synclass{Num::Cool};\\}
-    \only<2>{\synclass{Num}\ \synfunc{does}\ \synclass{Num::Cool};\\}
-    \synvar{\$num}.\synvar{sei\_cool}();\\
-    \synfunc{say}\ \synvar{\$num};\ \ \ \ \ \ \syncomment{\# 42}\\
+    \synfunc{role}\ \synclass{Logger::Logfile}\ \{\\
+    \ \ \synfunc{method}\ \synvar{log}(\synclass{Str}\ \synvar{\$message}) \{...\}\\
+    \}\\
+    \ \\
+    \synfunc{class}\ \synclass{NormaleKlasse}\ \only<2->{\synfunc{does}\ \synclass{Logger::Mail}\ }\{...\}\\
+    \ \\
+    \synfunc{my}\ \synclass{NormaleKlasse}\ \synvar{\$normales\_{}obj}\ .= \synvar{new}(...);\\
+    \only<1>{\synvar{\$normales\_{}obj}\ \synfunc{does}\ \synclass{Logger::Mail};}\ \\
+    \synvar{\$normales\_{}obj}.\synvar{log}(...);\\
   }
+
+%  \texttt{%
+%    \synfunc{role}\ \synclass{Num::Cool}\ \{\\
+%    \ \ \synfunc{method}\ \synvar{sei\_cool}(\synvar{\$self}:) \{\\
+%    \ \ \ \ \synvar{\$self}\ = 42;\\
+%    \ \ \}\\
+%    \}\\
+%    \ \\
+%    \syncomment{\# Dann:}\\
+%    \synfunc{my}\ \synvar{\$num}\ = 23;\\
+%    \only<1>{\synvar{\$num}\ \synfunc{does}\ \synclass{Num::Cool};\\}
+%    \only<2>{\synclass{Num}\ \synfunc{does}\ \synclass{Num::Cool};\\}
+%    \synvar{\$num}.\synvar{sei\_cool}();\\
+%    \synfunc{say}\ \synvar{\$num};\ \ \ \ \ \ \syncomment{\# 42}\\
+%  }
 }
 
 \subsection{Mitgestaltungsm"oglichkeiten}
+\frame[t]{
+  \frametitle{Mitgestaltungsmöglichkeiten}
+
+  \begin{itemize}
+    \item Mailingliste: \\
+          \texttt{perl6-language@perl.org}, \\
+          \texttt{gmane.comp.lang.perl.perl6.language}
+    \item IRC: \texttt{\#perl6} auf Freenode
+    \item Auch Newbies gern gesehen
+    \item Viele Beteiligungsmöglichkeiten, nicht nur für Programmierer
+    \item Weitere Informationen: \url{http://dev.perl.org/perl6/}
+  \end{itemize}
+}
+
+
+\section{Pugs}
+\frame[t]{
+  \frametitle{"`Perl 6 ist ja schön und gut, aber das dauert doch noch Jahre,
+  bis es fertig ist!"'}
+
+  \begin{itemize}
+    \item Nur tote Produkte sind "`fertig"'.
+    \item Parrot steht bereits.
+    \item Seit dem 1. Februar gibt es nun auch einen Perl 6-Compiler.
+  \end{itemize}
+}
+
+\subsection{"Ubersicht}
+\frame[t]{
+  \frametitle{Pugs}
+  
+  \begin{itemize}
+    \item Ursprünglich Haskell-Projekt von Autrijus Tang "`als Übung"'
+    \item Projektbeginn: 1. Februar 2005
+    \item Nun fast 100 Entwickler
+    \item Version 6.2.2: Beinahe Alles (!) außer Objektorientierung
+  \end{itemize}
+}
+
+\subsection{Entwicklung}
+\frame[t]{
+  \frametitle{Entwicklung}
+
+  \begin{itemize}
+    \item "`Test-driven development"' --
+    \item Camelfolks: Schreiben von Tests in Perl 6 für noch nicht
+	  implementierte Features \\
+	  \texttt{%
+	    \ \ \synfunc{is}\ 23 + 42, 64, "\synstr{Einfache Rechnungen funzen.}";\\
+	    \ \ \synfunc{is}\ \~{}\symbol{91}1, 2, 3], "\synstr{1 2 3}",\\
+	    \ \ \ \ "\synstr{Arrays wandeln sich richtig in Strings um.}";\\
+	    \ \ \synfunc{is}\ +\symbol{91}1, 2, 3], 3,\\
+	    \ \ \ \ "\synstr{Arrays wandeln sich richtig in Ints um.}";\\
+	  }
+    \pause
+    \item Lambdafolks: Implementierung dieser Features
+    \item Ergebnis der Zusammenarbeit: \\
+	  Über 4.000 funktionierende Tests
+  \end{itemize}
+}
+
+\subsection{Weitere Pl"ane}
+\frame[t]{
+  \frametitle{Weitere Pläne}
+
+  \begin{tabbing}
+    Pugs 6.283185aaa \= ... \kill
+    \color{beamer@blendedblue}Pugs 6.0 \> Erstes Release \\
+    \color{beamer@blendedblue}Pugs 6.2 \> Grundlegende IO- und Kontrollflusselemente, \\\> veränderbare Variablen \\
+    \color{beamer@blendedblue}Pugs 6.28 \> Klassen \\
+    \color{beamer@blendedblue}Pugs 6.283 \> Rules und Grammars \\
+    \color{beamer@blendedblue}Pugs 6.2831 \> Rollen \\
+    \color{beamer@blendedblue}Pugs 6.28318 \> Makros \\
+    \color{beamer@blendedblue}Pugs 6.283185 \> Portierung von Pugs von Haskell nach Perl 6 \\
+    \color{beamer@blendedblue}Pugs $2\pi$ \> Vollendung
+  \end{tabbing}
+}
+
+\subsection{Beteiligungsm"oglichkeiten}
+\frame[t]{
+  \frametitle{Beteiligungsmöglichkeiten}
+
+  \begin{itemize}
+    \item Mailingliste: \\
+          \texttt{perl6-compiler@perl.org}, \\
+          \texttt{gmane.comp.lang.perl.perl6.compiler}
+    \item IRC: \texttt{\#perl6} auf Freenode
+    \item Auch Newbies gern gesehen
+    \item Schreiben von Tests (Perl 6), Implementierung (Haskell), Schreiben
+	  von Dokumentation, Portierung von
+	  Perl~5\texttt{|}Python\texttt{|}Ruby\texttt{|}\ldots-Modulen nach
+	  Perl 6, \ldots
+    \item Weitere Informationen: \url{http://www.pugscode.org/}
+  \end{itemize}
+}
+
+
+\section{Ausblick}
+\frame[t]{
+  \frametitle{Ausblick}
+
+  \begin{itemize}
+    \item \syncool{Perl 6}\ ist verdammt cool. :)
+    \item \syncool{Parrot}\ steht bereits und bringt einiges an
+          Geschwindigkeit für viele Sprachen.
+    \item Dank \syncool{Pugs}\ kann man schon \syncool{genau jetzt}\ in Perl 6
+	  programmieren.
+  \end{itemize}
+}
 
 % In der bisher noch ungeschriebenen \section über Pugs unbedingt die Sachen
 % von http://sial.org/pbot/9451 einbringen! Thanks nothingmuch!

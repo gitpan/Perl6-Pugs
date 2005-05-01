@@ -2,7 +2,7 @@
 
 use v6;
 
-require Test;
+use Test;
 
 plan 28;
 
@@ -62,7 +62,7 @@ sub assign_based_on_named_positional ($x, +$y = $x) { $y }
 is(assign_based_on_named_positional(5), 5, "When we don't explicitly specify, we get the original value");
 is(assign_based_on_named_positional(5, "y"=> 2), 2, "When we explicitly specify, we get our value");
 is(assign_based_on_named_positional(5, y => 2), 2, "When we explicitly specify, we get our value");
-eval_is('my $var = "y"; assign_based_on_named_positional(5, $var => 2)', 2, "When we explicitly specify, we get our value", :todo(1));
+eval_is('my $var = "y"; assign_based_on_named_positional(5, $var => 2)', 2, "When we explicitly specify, we get our value", :todo);
 
 # L<S06/"Named parameters" /a \+\+ prefix.*?required/>
 sub mandatory (++$param) {
@@ -70,9 +70,9 @@ sub mandatory (++$param) {
 }
 
 
-is (mandatory('param' => 5) , 5, "named mandatory parameter is returned");
+is(mandatory('param' => 5) , 5, "named mandatory parameter is returned");
 
-is (eval 'mandatory()', undef, "not specifying a mandatory parameter fails");
+is(eval 'mandatory()', undef, "not specifying a mandatory parameter fails");
 
 
 # From L<S06/"Named parameters" /sub formalize/>

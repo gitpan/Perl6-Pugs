@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 =pod
 
@@ -23,7 +23,7 @@ plan 12;
 	my @y; eval '@y = (@a ¥ @b)';
 	my @x; eval '@x = (@a Y @b)';
 
-	is(~@z, ~@e, "simple zip", :todo(1));
+	is(~@z, ~@e, "simple zip", :todo);
 	is(~@y, ~@e, "also with yen char");
 	is(~@x, ~@e, "also with Y char");
 };
@@ -39,14 +39,14 @@ plan 12;
 	my @y; eval '@y = (@a ¥ @b ¥ @c)';
 	my @x; eval '@x = (@a Y @b Y @c)';
 
-	is(~@z, ~@e, "zip of 3 arrays", :todo(1));
+	is(~@z, ~@e, "zip of 3 arrays", :todo);
 	is(~@y, ~@e, "also with yen char");
 	is(~@x, ~@e, "also with Y char");
 };
 
 {
 	my @a = (0, 4);
-	my @b = (2, 6);	
+	my @b = (2, 6);
 	my @c = (1, 3, 5, 7);
 
 	my @e = (0 .. 7);
@@ -55,25 +55,25 @@ plan 12;
 	my @y; eval '@y = ((@a ¥ @b) ¥ @c)';
 	my @x; eval '@x = ((@a Y @b) Y @c)';
 
-	is(~@z, ~@e, "zip of zipped arrays with other array", :todo(1));
-	is(~@y, ~@e, "also as ¥", :todo(1));
-	is(~@x, ~@e, "also as Y", :todo(1));
+	is(~@z, ~@e, "zip of zipped arrays with other array", :todo);
+	is(~@y, ~@e, "also as ¥");
+	is(~@x, ~@e, "also as Y");
 };
 
 {
 	my @a = (0, 2);
 	my @b = (1, 3, 5);
 	my @e = (0, 1, 2, 3, undef, 5);
-	
+
 	my @z = (@a ¥ @b);
-	is(@z, @e, "bug in zipping - should use length of longest"); 
+	is(@z, @e, "bug in zipping - should use length of longest");
 }
 
 {
 	my @a;
 	my @b;
-	
+
         (@a ¥ @b) = (1, 2, 3, 4);
-	is(@a, [1, 3], "first half of two zipped arrays as lvalues", :todo(1));
-	is(@b, [2, 4], "second half of the lvalue zip", :todo(1));
+	is(@a, [1, 3], "first half of two zipped arrays as lvalues", :todo);
+	is(@b, [2, 4], "second half of the lvalue zip", :todo);
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/pugs
 
-require Test;
+use Test;
 use v6;
 
 =head1 DESCRIPTION
@@ -23,7 +23,7 @@ is equivalent to:
 
 =cut
 
-plan 30;
+plan 32;
 
 my (@a,@b,@res);
 
@@ -57,7 +57,7 @@ sub splice_ok (Array @got, Array @ref, Array @exp, Array @exp_ref, Str $comment)
 @b = splice(@a,+@a,0,11,12);
 
 is( @b, [], "push-via-splice result works" );
-is (@a, ([1..12]), "push-via-splice modification works");
+is( @a, ([1..12]), "push-via-splice modification works");
 
 @a  = ('red', 'green', 'blue');
 is( splice(@a, 1, 2), "blue", "splice() in scalar context returns last element of list");
@@ -113,6 +113,8 @@ splice_ok splice(@a,-3,-2,2), @a, [7], [1,2,7,3], "Replacing negative count of e
 # setting
 sub indirect_slurpy_context( @got ) { @got };
 
+
+# splice4 gets "CxtItem _" or "CxtArray _" instead of "CxtSlurpy _"
 my @tmp = (1..10);
 @a = splice @tmp, 5, 3;
 @a = indirect_slurpy_context( @a );
@@ -122,3 +124,12 @@ is( @b, @a, "Calling splice with immediate and indirect context returns consiste
 is( @a, [6,7,8], "Explicit call/assignment gives the expected results");
 is( @b, [6,7,8], "Implicit context gives the expected results" );
 
+my @tmp = (1..10);
+@a = scalar splice @tmp, 5, 3;
+is( @a, [8], "Explicit scalar context returns the last element");
+
+## test some error conditions
+
+# un comment this to test, but now it causes a fatal error
+@a = splice([], 1);
+is +@a, 0, '... empty lists are not fatal anymore';

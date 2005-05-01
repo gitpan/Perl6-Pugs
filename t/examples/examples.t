@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 =pod
 
@@ -13,7 +13,7 @@ with a expected output.
 =cut
 
 my @examples = <
-  fp/fp hanoi quicksort
+  functional/fp hanoi quicksort
   junctions/1 junctions/3 junctions/all-all junctions/all-any junctions/any-any
   junctions/any-any2 junctions/grades
 >;

@@ -18,8 +18,8 @@ import Pugs.Types
 headVal []    = retEmpty
 headVal (v:_) = return v
 
-enterLex :: Pad -> Eval a -> Eval a
-enterLex pad = local (\e -> e{ envLexical = (pad ++ envLexical e) })
+enterLex :: [Pad -> Pad] -> Eval a -> Eval a
+enterLex newSyms = local (\e -> e{ envLexical = combine newSyms (envLexical e) })
 
 enterContext :: Cxt -> Eval a -> Eval a
 enterContext cxt = local (\e -> e{ envContext = cxt })
@@ -37,22 +37,28 @@ enterWhen break action = callCC $ \esc -> do
     continueSub esc env = mkPrim
         { subName = "continue"
         , subParams = makeParams env
-        , subFun = Prim ((esc =<<) . headVal)
+        , subBody = Prim ((esc =<<) . headVal)
         }
     breakSub env = mkPrim
         { subName = "break"
         , subParams = makeParams env
-        , subFun = break
+        , subBody = break
         }
 
-enterLoop action = callCC $ \esc -> do
-    sym <- genSym "&last" $ lastSub esc
-    enterLex [sym] action
-    where
-    lastSub esc = codeRef $ mkPrim
-        { subName = "last"
-        , subFun = Prim (const $ esc VUndef)
+enterLoop action = genSymCC "&last" $ \symLast -> do
+    genSymPrim "&next" (const action) $ \symNext -> do
+        enterLex [symLast, symNext] action
+
+genSymPrim symName@('&':name) prim action = do
+    newSym <- genSym symName . codeRef $ mkPrim
+        { subName = name
+        , subBody = Prim prim
         }
+    action newSym
+genSymPrim _ _ _ = error "need a &name"
+
+genSymCC symName action = callCC $ \esc -> do
+    genSymPrim symName (const $ esc undef) action
 
 enterBlock action = callCC $ \esc -> do
     env <- ask
@@ -62,7 +68,7 @@ enterBlock action = callCC $ \esc -> do
     escSub esc env = mkPrim
         { subName = "BLOCK_EXIT"
         , subParams = makeParams env
-        , subFun = Prim ((esc =<<) . headVal)
+        , subBody = Prim ((esc =<<) . headVal)
         }
   
 enterSub sub action
@@ -87,7 +93,8 @@ enterSub sub action
     fixEnv cc env@Env{ envLexical = pad }
         | typ >= SubBlock = do
             blockRec <- genSym "&?BLOCK" (codeRef (orig sub))
-            return $ \e -> e{ envLexical = (blockRec:subPad sub) ++ pad }
+            return $ \e -> e
+                { envLexical = combine [blockRec] (subPad sub `unionPads` pad) }
         | otherwise = do
             subRec <- sequence
                 [ genSym "&?SUB" (codeRef (orig sub))
@@ -95,23 +102,25 @@ enterSub sub action
             retRec    <- genSubs env "&return" retSub
             callerRec <- genSubs env "&?CALLER_CONTINUATION" (ccSub cc)
             return $ \e -> e
-                { envLexical = concat [subRec, retRec, callerRec, subPad sub] }
+                { envLexical = combine (concat [subRec, retRec, callerRec]) (subPad sub) }
     retSub env = mkPrim
         { subName = "return"
         , subParams = makeParams env
-        , subFun = Prim doReturn
+        , subBody = Prim doReturn
         }
     ccSub cc env = mkPrim
         { subName = "CALLER_CONTINUATION"
         , subParams = makeParams env
-        , subFun = Prim $ doCC cc
+        , subBody = Prim $ doCC cc
         }
 
+genSubs :: t -> Ident -> (t -> VCode) -> Eval [Pad -> Pad]
 genSubs env name gen = sequence
-    [ genSym name (codeRef $ gen env)
-    , genSym name (codeRef $ (gen env) { subParams = [] })
+    [ genMultiSym name (codeRef $ gen env)
+    , genMultiSym name (codeRef $ (gen env) { subParams = [] })
     ]
 
+makeParams :: Env -> [Param]
 makeParams Env{ envContext = cxt, envLValue = lv }
     = [ MkParam
         { isInvocant = False
@@ -119,22 +128,13 @@ makeParams Env{ envContext = cxt, envLValue = lv }
         , isNamed    = False
         , isLValue   = lv
         , isWritable = lv
-        , isThunk    = False
+        , isLazy     = False
         , paramName = case cxt of
             CxtSlurpy _ -> "@?0"
             _           -> "$?0"
         , paramContext = cxt
         , paramDefault = Val VUndef
         } ]
-
--- enter a lexical context
-
-dumpLex :: String -> Eval ()
-dumpLex label = do
-    pad <- asks envLexical
-    depth <- asks envDepth
-    liftIO $ putStrLn ("("++(show depth)++")"++label ++ ": " ++ (show pad))
-    return ()
 
 caller :: Int -> Eval Env
 caller n = do
@@ -143,32 +143,15 @@ caller n = do
         fail "Cannot ask for deeper depth"
     asks $ foldl (.) id $ replicate n (fromJust . envCaller)
 
-evalVal x = do
-    -- context casting, go!
-    -- XXX this needs a rewrite!
-    -- Env{ envLValue = isLValue, envClasses = cls, envContext = cxt } <- ask
+evalVal :: Val -> Eval Val
+evalVal val = do
     Env{ envLValue = lv, envClasses = cls } <- ask
-    typ <- evalValType x
-    val <- if not lv && isaType cls "Junction" typ
-        then readRef =<< fromVal x
-        else return x
-    return val
-    {-
-    if isSlurpyCxt cxt
-        then return . VList . concat =<< fromVals val
-        else return val
-    --- XXX isCompatible is all wrong!
-    let isCompatible | isSlurpyCxt cxt = isaType cls "List" typ
-                     | otherwise       = isaType cls "Scalar" typ
-        isRef = case val of { VRef _ -> True; _ -> False }
-    -- trace (show ((cxt, typ), isCompatible, isLValue, isListCxt, val)) return ()
-    
-    case (isCompatible, isLValue, isSlurpyCxt cxt) of
-        (True, True, _)         -> return val
-        (True, False, False)    -> fromVal val
-        (True, False, True)     -> return . VList =<< fromVal val
-        (False, True, False)    -> return val -- auto scalar varify?
-        (False, True, True)     -> return val -- auto list varify?
-        (False, False, False)   -> if isRef then return val else fromVal' val
-        (False, False, True)    -> return . VList =<< fromVal' val
-    -}
+    typ <- evalValType val
+    if lv then return val else do
+    case val of
+        VRef ref | refType ref == mkType "Scalar::Const" -> do
+            evalVal =<< readRef ref
+        VRef ref | isaType cls "Junction" typ -> do
+            evalVal =<< readRef ref
+        _ -> do
+            return val

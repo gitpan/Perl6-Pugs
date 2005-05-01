@@ -1,0 +1,569 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!--Rendered using the Haskell Html Library v0.2-->
+<HTML
+><HEAD
+  ><TITLE
+    >Pugs.Parser</TITLE
+    ><LINK HREF = "haddock.css" REL = "stylesheet" TYPE = "text/css"
+    ></HEAD
+  ><BODY
+  ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+    ><TR
+      ><TD CLASS = "topbar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><IMG SRC = "haskell_icon.gif" WIDTH = "16" HEIGHT = "16" ALT = " "
+		></TD
+	      ><TD CLASS = "title"
+	      ></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "index.html"
+		>Contents</A
+		></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "doc-index.html"
+		>Index</A
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "modulebar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><FONT SIZE = "6"
+		>Pugs.Parser</FONT
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "section1"
+	>Synopsis</TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "body"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleProgram"
+		>ruleProgram</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AEnv"
+		>Env</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleBlock"
+		>ruleBlock</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleVerbatimBlock"
+		>ruleVerbatimBlock</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleStatementList"
+		>ruleStatementList</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleQualifiedIdentifier"
+		>ruleQualifiedIdentifier</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> [String]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleBlockDeclaration"
+		>ruleBlockDeclaration</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleDeclaration"
+		>ruleDeclaration</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleSubHead"
+		>ruleSubHead</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> (Bool, String)</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleSubDeclaration"
+		>ruleSubDeclaration</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleSubParameters"
+		>ruleSubParameters</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3AParensOption"
+		>ParensOption</A
+		> -&gt; <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> (Maybe [<A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		>])</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleVarDeclaration"
+		>ruleVarDeclaration</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AruleUseDeclaration"
+		>ruleUseDeclaration</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AextractHash"
+		>extractHash</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		> -&gt; Maybe <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AprocessFormals"
+		>processFormals</A
+		> :: Monad m =&gt; [[<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>]] -&gt; m ([<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>], [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>])</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AnameToParam"
+		>nameToParam</A
+		> :: String -&gt; <A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AqInterpolator"
+		>qInterpolator</A
+		> :: <A HREF = "Pugs.Parser.html#t%3AQFlags"
+		>QFlags</A
+		> -&gt; <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AqLiteral1"
+		>qLiteral1</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> x -&gt; <A HREF = "Pugs.Parser.html#t%3AQFlags"
+		>QFlags</A
+		> -&gt; <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AangleBracketLiteral"
+		>angleBracketLiteral</A
+		> :: <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+		><TR
+		  ><TD CLASS = "decl"
+		    ><SPAN CLASS = "keyword"
+		      >data</SPAN
+		      > <A HREF = "#t%3AQS_Flag"
+		      >QS_Flag</A
+		      > </TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "body"
+		    ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+		      ><TR
+			><TD CLASS = "decl"
+			  >= <A HREF = "#v%3AQS_No"
+			    >QS_No</A
+			    ></TD
+			  ></TR
+			><TR
+			><TD CLASS = "decl"
+			  >| <A HREF = "#v%3AQS_Yes"
+			    >QS_Yes</A
+			    ></TD
+			  ></TR
+			><TR
+			><TD CLASS = "decl"
+			  >| <A HREF = "#v%3AQS_Protect"
+			    >QS_Protect</A
+			    ></TD
+			  ></TR
+			></TABLE
+		      ></TD
+		    ></TR
+		  ></TABLE
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+		><TR
+		  ><TD CLASS = "decl"
+		    ><SPAN CLASS = "keyword"
+		      >data</SPAN
+		      > <A HREF = "#t%3AQB_Flag"
+		      >QB_Flag</A
+		      > </TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "body"
+		    ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+		      ><TR
+			><TD CLASS = "decl"
+			  >= <A HREF = "#v%3AQB_No"
+			    >QB_No</A
+			    ></TD
+			  ></TR
+			><TR
+			><TD CLASS = "decl"
+			  >| <A HREF = "#v%3AQB_Single"
+			    >QB_Single</A
+			    ></TD
+			  ></TR
+			><TR
+			><TD CLASS = "decl"
+			  >| <A HREF = "#v%3AQB_All"
+			    >QB_All</A
+			    ></TD
+			  ></TR
+			></TABLE
+		      ></TD
+		    ></TR
+		  ></TABLE
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><SPAN CLASS = "keyword"
+		>data</SPAN
+		> <A HREF = "#t%3AQFlags"
+		>QFlags</A
+		>  = <A HREF = "#v%3AMkQFlags"
+		>MkQFlags</A
+		> {<TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+		><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfSplitWords"
+		      >qfSplitWords</A
+		      > :: !<A HREF = "Pugs.Parser.html#t%3AQS_Flag"
+		      >QS_Flag</A
+		      ></TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfInterpolateScalar"
+		      >qfInterpolateScalar</A
+		      > :: !Bool</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfInterpolateArray"
+		      >qfInterpolateArray</A
+		      > :: !Bool</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfInterpolateHash"
+		      >qfInterpolateHash</A
+		      > :: !Bool</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfInterpolateFunction"
+		      >qfInterpolateFunction</A
+		      > :: !Bool</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfInterpolateClosure"
+		      >qfInterpolateClosure</A
+		      > :: !Bool</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfInterpolateBackslash"
+		      >qfInterpolateBackslash</A
+		      > :: !<A HREF = "Pugs.Parser.html#t%3AQB_Flag"
+		      >QB_Flag</A
+		      ></TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfProtectedChar"
+		      >qfProtectedChar</A
+		      > :: !Char</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfP5RegularExpression"
+		      >qfP5RegularExpression</A
+		      > :: !Bool</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "recfield"
+		    ><A HREF = "#v%3AqfFailed"
+		      >qfFailed</A
+		      > :: !Bool</TD
+		    ></TR
+		  ></TABLE
+		>}</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AgetQFlags"
+		>getQFlags</A
+		> :: [String] -&gt; Char -&gt; <A HREF = "Pugs.Parser.html#t%3AQFlags"
+		>QFlags</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3ArxLiteral1"
+		>rxLiteral1</A
+		> :: Char -&gt; <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3ArunRule"
+		>runRule</A
+		> :: <A HREF = "Pugs.AST.html#t%3AEnv"
+		>Env</A
+		> -&gt; (<A HREF = "Pugs.AST.html#t%3AEnv"
+		>Env</A
+		> -&gt; a) -&gt; <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AEnv"
+		>Env</A
+		> -&gt; FilePath -&gt; String -&gt; a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AretSyn"
+		>retSyn</A
+		> :: String -&gt; [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; <A HREF = "Pugs.Lexer.html#t%3ARuleParser"
+		>RuleParser</A
+		> <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "botbar"
+	>Produced by <A HREF = "http://www.haskell.org/haddock/"
+	  >Haddock</A
+	  > version ADDOCK_VERSION</TD
+	></TR
+      ></TABLE
+    ></BODY
+  ></HTML
+>

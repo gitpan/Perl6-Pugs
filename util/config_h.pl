@@ -59,7 +59,8 @@ else {
 .
 }
 
-if ($^O =~ /MSWin32|mingw|msys/i) {
+# FIXME: we assume if you have cywin, you're still using ghc-msys
+if ($^O =~ /MSWin32|mingw|msys|cygwin/i) {
     print OUT "#undef PUGS_HAVE_POSIX\n";
 }
 else {
@@ -71,18 +72,6 @@ import System.Console.Readline
 main = readline "" >> return ()
 .
 
-if ($has_readline) {
-    print OUT "#define PUGS_HAVE_READLINE 1\n";
-}
-else {
-    print OUT "#undef PUGS_HAVE_READLINE\n";
-    warn << '.';
-
-*** Readline support disabled.  If you want readline support,
-    please install the GNU readline library.
-
-.
-}
 
 my $has_th = try_compile(<< '.');
 {-# OPTIONS_GHC -fth #-}

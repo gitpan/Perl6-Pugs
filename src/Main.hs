@@ -33,6 +33,7 @@ main = do
     hSetBuffering stdout NoBuffering
     runWithArgs run
 
+warn :: Show a => a -> IO ()
 warn x = do
             hPrint stderr $ show x
 
@@ -88,16 +89,23 @@ parse :: String -> IO ()
 parse = doParse "-"
 
 dump :: String -> IO ()
-dump = (doParseWith $ \exp _ -> print exp) "-"
+dump = (doParseWith $ \env _ -> print $ envBody env) "-"
 
-comp :: String -> IO ()
-comp = (doParseWith $ \exp _ -> putStrLn =<< compile "Haskell" exp) "-"
+dumpGlob :: String -> IO ()
+dumpGlob = (doParseWith $ \env _ -> do
+    glob <- liftSTM $ readTVar $ envGlobal env
+    print $ userDefined glob) "-"
+
+userDefined :: Pad -> Pad
+userDefined (MkPad pad) = MkPad $ Map.filterWithKey doFilter pad
+    where
+    doFilter (_:'*':_) _ = False
+    doFilter _ _         = True
 
 repLoop :: IO ()
 repLoop = do
     initializeShell
-    env <- tabulaRasa >>= newIORef
-    modifyIORef env $ \e -> e{ envDebug = Nothing }
+    env <- liftSTM . newTVar . (\e -> e{ envDebug = Nothing }) =<< tabulaRasa
     fix $ \loop -> do
         command <- getCommand
         case command of
@@ -106,7 +114,7 @@ repLoop = do
             CmdRun opts prog  -> doRunSingle env opts prog >> loop
             CmdParse prog     -> doParse "<interactive>" prog >> loop
             CmdHelp           -> printInteractiveHelp >> loop
-            CmdReset          -> tabulaRasa >>= writeIORef env >> loop
+            CmdReset          -> tabulaRasa >>= (liftSTM . writeTVar env) >> loop
 
 tabulaRasa :: IO Env
 tabulaRasa = prepareEnv "<interactive>" []
@@ -116,58 +124,68 @@ doCheck = doParseWith $ \_ name -> do
     putStrLn $ name ++ " syntax OK"
 
 doExternal :: String -> FilePath -> String -> IO ()
-doExternal mod = doParseWith $ \exp _ -> do
-    str <- externalize mod exp
+doExternal mod = doParseWith $ \env _ -> do
+    str <- externalize mod $ envBody env
     putStrLn str
 
 doCompile :: [Char] -> FilePath -> String -> IO ()
-doCompile backend = doParseWith $ \exp _ -> do
-    str <- compile backend exp
+doCompile backend = doParseWith $ \env _ -> do
+    globRef <- liftSTM $ do
+        glob <- readTVar $ envGlobal env
+        newTVar $ userDefined glob
+    str     <- compile backend env{ envGlobal = globRef }
     writeFile "dump.ast" str
 
-doParseWith :: (Pugs.AST.Exp -> FilePath -> IO a) -> FilePath -> String -> IO a
+doParseWith :: (Env -> FilePath -> IO a) -> FilePath -> String -> IO a
 doParseWith f name prog = do
-    env <- emptyEnv []
-    runRule env (f' . envBody) ruleProgram name $ decodeUTF8 prog
+    env <- emptyEnv name []
+    runRule env f' ruleProgram name $ decodeUTF8 prog
     where
-    f' (Val err@(VError _ _)) = do
+    f' Env{ envBody = Val err@(VError _ _) } = do
         hPutStrLn stderr $ pretty err
         exitFailure
-    f' exp = f exp name
+    f' env = f env name
 
 
 doParse :: FilePath -> String -> IO ()
 doParse name prog = do
-    env <- emptyEnv []
+    env <- emptyEnv name []
     case runRule env envBody ruleProgram name (decodeUTF8 prog) of
         (Val err@(VError _ _)) -> putStrLn $ pretty err
         exp -> putStrLn $ pretty exp
 
-doLoad :: IORef Env -> String -> IO ()
+doLoad :: TVar Env -> String -> IO ()
 doLoad env fn = do
     runImperatively env (evaluate exp)
     return ()
     where
     exp = App "&require" [] [Val $ VStr fn]
 
-doRunSingle :: IORef Env -> RunOptions -> String -> IO ()
+doRunSingle :: TVar Env -> RunOptions -> String -> IO ()
 doRunSingle menv opts prog = (`catch` handler) $ do
-    exp <- parse >>= makeProper
-    env <- theEnv
-    result <- runImperatively env (evaluate exp)
+    exp     <- makeProper =<< parse
+    env     <- theEnv
+    rv      <- runImperatively env (evaluate exp)
+    result  <- case rv of
+        VControl (ControlEnv env') -> do
+            ref <- liftSTM $ findSymRef "$*_" =<< readTVar (envGlobal env')
+            val <- runEvalIO env' $ readRef ref
+            liftSTM $ writeTVar menv env'
+            return val
+        _ -> return rv
     printer env result
     where
     parse = do
-        parseEnv <- emptyEnv []
-        runRule parseEnv (return . envBody) ruleProgram "<interactive>" (decodeUTF8 prog)
+        env <- liftSTM $ readTVar menv
+        runRule env (return . envBody) ruleProgram "<interactive>" (decodeUTF8 prog)
     theEnv = do
         ref <- if runOptSeparately opts
-                then tabulaRasa >>= newIORef
+                then (liftSTM . newTVar) =<< tabulaRasa
                 else return menv
         debug <- if runOptDebug opts
-                then liftM Just (newIORef Map.empty)
+                then fmap Just (liftSTM $ newTVar Map.empty)
                 else return Nothing
-        modifyIORef ref $ \e -> e{ envDebug = debug }
+        liftSTM $ modifyTVar ref $ \e -> e{ envDebug = debug }
         return ref
     printer env = if runOptShowPretty opts
         then \val -> do
@@ -176,31 +194,35 @@ doRunSingle menv opts prog = (`catch` handler) $ do
         else print
     makeProper exp = case exp of
         Val err@(VError _ _) -> fail $ pretty err
-        Statements stmts@((_,pos):_) | not (runOptSeparately opts) -> do
-            let withDump = stmts ++ [(Syn "dump" [], pos)]
-            return $ Statements withDump
-        _ | not (runOptSeparately opts) -> fail "Expected statements"
-        _ -> return exp
+        _ | runOptSeparately opts -> return exp
+        _ -> return $ makeDumpEnv exp
+    -- XXX Generalize this into structural folding
+    makeDumpEnv (Stmts x exp)   = Stmts x   $ makeDumpEnv exp
+    makeDumpEnv (Cxt x exp)     = Cxt x     $ makeDumpEnv exp
+    makeDumpEnv (Pad x y exp)   = Pad x y   $ makeDumpEnv exp
+    makeDumpEnv (Sym x y exp)   = Sym x y   $ makeDumpEnv exp
+    makeDumpEnv (Pos x exp)     = Pos x     $ makeDumpEnv exp
+    makeDumpEnv (Parens exp)    = Parens    $ makeDumpEnv exp
+    makeDumpEnv exp = Stmts exp (Syn "env" [])
     handler err = if not (isUserError err) then ioError err else do
         putStrLn "Internal error while running expression:"
         putStrLn $ ioeGetErrorString err
 
-runImperatively :: IORef Env -> Eval Val -> IO Val
+runImperatively :: TVar Env -> Eval Val -> IO Val
 runImperatively menv eval = do
-    env <- readIORef menv
-    runEval env $ do
+    env <- liftSTM $ readTVar menv
+    runEvalIO env $ do
         val <- eval
         newEnv <- ask
-        liftIO $ writeIORef menv newEnv
+        liftSTM $ writeTVar menv newEnv
         return val
 
 doRun :: String -> [String] -> String -> IO ()
 doRun = do
     runProgramWith (\e -> e{ envDebug = Nothing }) end
     where
-    end (VError str exp)  = do
-        hPutStrLn stderr str
-        hPutStrLn stderr (show exp)
+    end err@(VError _ _)  = do
+        hPutStrLn stderr (pretty err)
         exitFailure
     end (VControl (ControlExit exit)) = exitWith exit
     end _ = return ()
@@ -216,7 +238,7 @@ runProgramWith fenv f name args prog = do
     val <- runEnv $ runRule (fenv env) id ruleProgram name $ decodeUTF8 prog
     f val
 
--- createConfigLine :: String -> String -- why doesn't this work?
+createConfigLine :: String -> String
 createConfigLine item = "\t" ++ item ++ ": " ++ (Map.findWithDefault "UNKNOWN" item config)
 
 printConfigInfo :: [String] -> IO ()

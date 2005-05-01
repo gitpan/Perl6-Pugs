@@ -8,22 +8,21 @@ sub finger (*@arr) returns Str {
 	  pick any @arr || @default
 }
 
-{
- my $iter = 0;
- my $str  = '';
- multi sub report () returns Str {my $a = $str; $str = ''; $iter=0; $a;} 
- multi sub report (*$x, *@x) returns Void {
- 	$iter++;
-	if(@x){
+sub report (@x) returns Str{
+ 	my $str = '';
+	my $iter = 0 ;
+	for @x -> $x{
+	  if ++$iter == +@x {
+	  	$str = append_last($x,$str,$iter);
+		return $str;
+      }else{
 		$str ~= addtolist($x);
-	}else{
-		$str = append_last($x,$str,$iter);
+	  }
 	}
-	report @x;
- }
-}
+}	
 
-#Autrijus's "cls"
+
+#Autrijus' "cls"
 sub clear returns Void {
 	system(($?OS eq any<MSWin32 mingw cygwin>) ?? 'cls' :: 'clear');
 }
@@ -53,9 +52,10 @@ sub append_last ($x,$string,$pass){
     my $rwstring = $string; 
 	if $pass > 2 {
 		chop $rwstring;
-		"$rwstring and " ~ 
+		"$rwstring and " ~  
 		pick any (
 			"$x",
+			"is $x",
 			"$x, period",
 			"$x, as well",
 			"$x, besides",
@@ -64,7 +64,11 @@ sub append_last ($x,$string,$pass){
 			); 
 	}elsif $pass > 1 {
 		chop $rwstring;
-		"$rwstring and $x"; 
+		"$rwstring and " ~
+		pick any (
+			"$x",
+			"is $x",
+		); 
 	}else{
 	  "$rwstring $x";
 	}

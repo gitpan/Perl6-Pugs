@@ -65,8 +65,8 @@ sub unlike (Str $got, Rule $expected, Str +$desc, Bool +$todo) returns Bool is e
 
 sub eval_ok (Str $code, Str +$desc, Bool +$todo) returns Bool is export {
     my $result := eval $code;
-    if ($!) {
-	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "eval was fatal");
+    if (defined $!) {
+	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "eval was fatal: $!");
     }
     else {
         #diag "'$desc' was non-fatal and maybe shouldn't use eval_ok()";
@@ -78,8 +78,8 @@ sub eval_ok (Str $code, Str +$desc, Bool +$todo) returns Bool is export {
 
 sub eval_is (Str $code, Str $expected, Str +$desc, Bool +$todo) returns Bool is export {
     my $result := eval $code;
-    if ($!) {
-	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "eval was fatal", $expected);
+    if (defined $!) {
+	    proclaim(undef, $desc, $todo ?? 'TODO' :: undef, "eval was fatal: $!", $expected);
     }
     else {
         #diag "'$desc' was non-fatal and maybe shouldn't use eval_is()";
@@ -182,13 +182,18 @@ sub diag (Str $diag) is export {
 
 ## 'private' subs
 
-sub proclaim (Bool $cond, Str ?$desc, Str ?$c, Str ?$got, Str ?$expected) returns Bool {
-    my $context = $c; # no C<is rw> yet
+sub proclaim (Bool $cond, Str ?$desc is copy, Str ?$context is copy, Str ?$got, Str ?$expected) returns Bool {
     $NUM_OF_TESTS_RUN++;
 
     # Check if we have to forcetodo this test 
     # because we're preparing for a release.
     $context = "TODO for release" if $NUM_OF_TESTS_RUN == $FORCE_TODO_TEST_JUNCTION;
+
+    # Make all TODO tests fail visibly unless we're releasing.
+    #if( !$cond and $context eq 'TODO for release' and !%ENV<PUGS_RELEASE> ) {
+	#$context = '';
+	#$desc = "TODO for release: $desc";
+    #}
 
     my $ok := $cond ?? "ok " :: "not ok ";
     my $out = defined($desc) ?? " - $desc" :: "";
@@ -213,8 +218,8 @@ sub report_failure (Str ?$todo, Str ?$got, Str ?$expected) returns Bool {
     }
 
     if ($?CALLER::CALLER::SUBNAME eq ('&is' | '&isnt' | '&cmp_ok' | '&eval_is' | '&isa_ok' | '&todo_is' | '&todo_isnt' | '&todo_cmp_ok' | '&todo_eval_is' | '&todo_isa_ok')) {
-        diag("  Expected: " ~ ($expected.defined ?? $expected :: "undef"));
-        diag("       Got: " ~ ($got.defined ?? $got :: "undef"));
+        diag("  Expected: '" ~ ($expected.defined ?? $expected :: "undef") ~ "'");
+        diag("       Got: '" ~ ($got.defined ?? $got :: "undef") ~ "'");
     }
     else {
         diag("       Got: " ~ ($got.defined ?? $got :: "undef"));

@@ -31,24 +31,34 @@ instance Pretty Exp where
     format (Val (VError msg (NonTerm pos))) = text "Syntax error at" <+> (format pos) <+> format msg
     format (NonTerm pos) = format pos
     format (Val v) = format v
-    format (Syn x vs) = text "Syn" <+> format x $+$ (braces $ vcat (punctuate (text ";") (map format vs)))
-    format (Statements lines) = (vcat $ punctuate (text ";") $ (map format) lines)
+    format (Syn x vs) = text "Syn" <+> format x <+> (braces $ vcat (punctuate (text ";") (map format vs)))
+    format (Stmts exp1 exp2) = (vcat $ punctuate (text ";") $ (map format) [exp1, exp2])
     format (App sub invs args) = text "App" <+> format sub <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
-    format (Sym scope name) = text "Sym" <+> text (show scope) <+> format name
+    format (Sym scope name exp) = text "Sym" <+> text (show scope) <+> format name $+$ format exp
+    format (Pad scope pad exp) = text "Pad" <+> text (show scope) <+> format pad $+$ format exp
+    format (Pos _ exp) = format exp
     format x = text $ show x
 
-instance Pretty [Symbol] where
-    format syms = cat $ map format syms
+instance Pretty (TVar Bool, TVar VRef) where
+    format (_, tvar) = format tvar
 
-instance Pretty Symbol where
-    format (MkSym name var) = format name <+> text ":=" <+> (nest defaultIndent $ format var)
+instance Pretty Pad where
+    format pad = vcat $ map formatAssoc $ padToList pad
+        where
+        formatAssoc (name, var) = format name <+> text ":=" <+> (nest defaultIndent $ vcat $ map format var)
 
-instance Pretty SourcePos where
+instance Pretty Pos where
     format pos =
-        let file = sourceName pos
-            line = show $ sourceLine pos
-            col  = show $ sourceColumn pos
-        in text $ file ++ " at line " ++ line ++ ", column " ++ col
+        let file = posName pos
+            bln  = show $ posBeginLine pos
+            bcl  = show $ posBeginColumn pos
+            eln  = show $ posEndLine pos
+            ecl  = show $ posEndColumn pos
+            fmt ln cl = text "line" <+> text ln <> comma <+> text "column" <+> text cl
+        in text file <+> case (bln == eln, bcl == ecl) of
+            (True, True)  -> fmt bln bcl
+            (True, False) -> fmt bln (bcl ++ "-" ++ ecl)
+            (False, _)    -> fmt bln bcl <+> (text "-" <+> fmt eln ecl)
 
 instance Pretty Env where
     format x = doubleBraces $ nest defaultIndent (format $ envBody x) 
@@ -59,7 +69,7 @@ instance Pretty (Val, Val) where
 instance Pretty (Exp, SourcePos) where
     format (x, _) = format x 
 
-instance Pretty (IORef VRef) where
+instance Pretty (TVar VRef) where
     format x = braces $ text $ "ref:" ++ show x
 
 instance Pretty VRef where
@@ -82,6 +92,8 @@ instance Pretty Val where
     format v@(VRat _) = text $ vCast v
     format (VComplex x) = text $ show x
     format (VControl x) = text $ show x
+    format (VProcess x) = text $ show x
+    format (VOpaque (MkOpaque x)) = braces $ text $ "obj:" ++ show x
 {-
     format (VRef (VList x))
         | not . null . (drop 100) $ x
@@ -95,7 +107,8 @@ instance Pretty Val where
         | otherwise = parens $ (joinList $ text ", ") (map format x)
     format (VCode _) = text "sub {...}"
     format (VBlock _) = text "{...}"
-    format (VError x y@(NonTerm _)) = hang (text "*** Error:" <+> text x) defaultIndent (text "at" <+> format y)
+    format (VError x y@(NonTerm _)) =
+        text "*** Error:" <+> (text x <+> (text "at" <+> format y))
     format (VError x _) = text "*** Error:" <+> text x
 --  format (VArray x) = format (VList $ Array.elems x)
 --  format (VHash h) = braces $ (joinList $ text ", ") $
@@ -104,12 +117,13 @@ instance Pretty Val where
     format t@(VThread _) = text $ vCast t
     format (VSocket x) = text $ show x
     -- format (MVal v) = text $ unsafePerformIO $ do
-    --     val <- readIORef v
+    --     val <- readTVar v
     --     return $ pretty val
     format (VRule _) = text $ "{rule}"
     format (VSubst _) = text $ "{subst}"
     format VUndef = text $ "undef"
 
+quoted :: Char -> String
 quoted '\'' = "\\'"
 quoted '\\' = "\\\\"
 quoted x = [x]
@@ -120,8 +134,10 @@ ratToNum x = (fromIntegral $ numerator x) / (fromIntegral $ denominator x)
 doubleBraces :: Doc -> Doc
 doubleBraces x = vcat [ (lbrace <> lbrace), nest defaultIndent x, rbrace <> rbrace]
 
+joinList :: Doc -> [Doc] -> Doc
 joinList x y = cat $ punctuate x y
 
+commasep :: [Doc] -> Doc
 commasep x = cat $ (punctuate (char ',')) x
 
 pretty :: Pretty a => a -> String

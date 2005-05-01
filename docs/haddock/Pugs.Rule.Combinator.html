@@ -1,0 +1,450 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!--Rendered using the Haskell Html Library v0.2-->
+<HTML
+><HEAD
+  ><TITLE
+    >Pugs.Rule.Combinator</TITLE
+    ><LINK HREF = "haddock.css" REL = "stylesheet" TYPE = "text/css"
+    ></HEAD
+  ><BODY
+  ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+    ><TR
+      ><TD CLASS = "topbar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><IMG SRC = "haskell_icon.gif" WIDTH = "16" HEIGHT = "16" ALT = " "
+		></TD
+	      ><TD CLASS = "title"
+	      ></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "index.html"
+		>Contents</A
+		></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "doc-index.html"
+		>Index</A
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "modulebar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><FONT SIZE = "6"
+		>Pugs.Rule.Combinator</FONT
+		></TD
+	      ><TD ALIGN = "right"
+	      ><TABLE CLASS = "narrow" CELLSPACING = "0" CELLPADDING = "0"
+		><TR
+		  ><TD CLASS = "infohead"
+		    >Portability</TD
+		    ><TD CLASS = "infoval"
+		    >  portable</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "infohead"
+		    >Stability</TD
+		    ><TD CLASS = "infoval"
+		    >  provisional</TD
+		    ></TR
+		  ><TR
+		  ><TD CLASS = "infohead"
+		    >Maintainer</TD
+		    ><TD CLASS = "infoval"
+		    >  daan@cs.uu.nl</TD
+		    ></TR
+		  ></TABLE
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "section1"
+	>Description</TD
+	></TR
+      ><TR
+      ><TD CLASS = "doc"
+	>Commonly used generic combinators
+</TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "section1"
+	>Synopsis</TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "body"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Achoice"
+		>choice</A
+		> :: [<A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a] -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Acount"
+		>count</A
+		> :: Int -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Abetween"
+		>between</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st open -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st close -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Aoption"
+		>option</A
+		> :: a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Aoptional"
+		>optional</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st ()</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AskipMany1"
+		>skipMany1</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st ()</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Amany1"
+		>many1</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AsepBy"
+		>sepBy</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st sep -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AsepBy1"
+		>sepBy1</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st sep -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AendBy"
+		>endBy</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st sep -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AendBy1"
+		>endBy1</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st sep -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AsepEndBy"
+		>sepEndBy</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st sep -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AsepEndBy1"
+		>sepEndBy1</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st sep -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Achainl"
+		>chainl</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st (a -&gt; a -&gt; a) -&gt; a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Achainl1"
+		>chainl1</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st (a -&gt; a -&gt; a) -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Achainr"
+		>chainr</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st (a -&gt; a -&gt; a) -&gt; a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Achainr1"
+		>chainr1</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st (a -&gt; a -&gt; a) -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3Aeof"
+		>eof</A
+		> :: Show tok =&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st ()</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AnotFollowedBy"
+		>notFollowedBy</A
+		> :: Show tok =&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st tok -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st ()</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AmanyTill"
+		>manyTill</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st end -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st [a]</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AlookAhead"
+		>lookAhead</A
+		> :: <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a -&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AanyToken"
+		>anyToken</A
+		> :: Show tok =&gt; <A HREF = "Pugs.Rule.Prim.html#t%3AGenParser"
+		>GenParser</A
+		> tok st tok</TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "botbar"
+	>Produced by <A HREF = "http://www.haskell.org/haddock/"
+	  >Haddock</A
+	  > version ADDOCK_VERSION</TD
+	></TR
+      ></TABLE
+    ></BODY
+  ></HTML
+>

@@ -10,19 +10,19 @@
 -}
 
 module Pugs.Cont (
-    callCC, shift, reset, shiftT, resetT,
+    callCCT, shift, reset, shiftT, resetT,
     module Control.Monad.Cont,
 ) where
 
-import qualified Control.Monad.Cont as C (callCC, lift)
-import Control.Monad.Cont (mapContT, withContT, mapCont, withCont, Cont(..), ContT(..), MonadCont)
+import qualified Control.Monad.Cont as C (lift)
+import Control.Monad.Cont (mapContT, withContT, mapCont, withCont, Cont(..), ContT(..), MonadCont(..))
 
 -- Cont' m a is the type of a continuation expecting an a within the 
 -- continuation monad Cont m
 type Cont' m a = forall r. a -> m r
 
-callCC :: forall a m. MonadCont m => (Cont' m a -> m a) -> m a
-callCC f = C.callCC f' where
+callCCT :: forall a m. MonadCont m => (Cont' m a -> m a) -> m a
+callCCT f = callCC f' where
   f' :: (a -> m (EmptyMonad m)) -> m a
   f' g = f g' where
     g' :: a -> m b

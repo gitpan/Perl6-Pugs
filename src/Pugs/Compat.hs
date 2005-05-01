@@ -45,6 +45,7 @@ import System.Posix.Files
 import System.Posix.User
 import qualified System.Posix.Signals
 
+statFileSize :: FilePath -> IO Integer
 statFileSize f = do
     s <- getFileStatus f
     return (toInteger (fileSize s))
@@ -58,6 +59,8 @@ signalProcess = System.Posix.Signals.signalProcess
 
 import Debug.Trace
 import System.Environment
+import IO
+import System.IO
 
 failWith s = fail $ "'" ++ s ++ "' not implemented on this platform."
 warnWith s = trace ("'" ++ s ++ "' not implemented on this platform.") $ return ()
@@ -86,8 +89,10 @@ removeLink _ = warnWith "unlink"
 setFileMode :: FilePath -> FileMode -> IO ()
 setFileMode _ _ = warnWith "chmod"
 
+-- This is Win32 specific, dunno about other non POSIX platforms
 statFileSize :: FilePath -> IO Integer
-statFileSize _ = failWith "-s"
+statFileSize n = bracket (openFile n ReadMode) hClose hFileSize
+-- statFileSize _ = failWith "-s"
 
 getProcessID :: IO ProcessID
 getProcessID = return 1
@@ -122,3 +127,4 @@ getArg0 = do
         getProgArgv p_argc p_argv
         argv <- peek p_argv
         peekCString =<< peekElemOff argv 0
+

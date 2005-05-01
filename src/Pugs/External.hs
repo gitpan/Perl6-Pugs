@@ -12,20 +12,21 @@
 module Pugs.External where
 import Pugs.Internals
 import Pugs.AST
-import Pugs.Types
 import Pugs.External.Haskell (externalizeHaskell, loadHaskell)
 
 externalize :: String -> Exp -> IO String
-externalize mod (Statements stmts) = externExternalize backend mod code
+externalize mod stmts = externExternalize backend mod code
     where
     (backend, code)
         | null things   = error "no inline found"
         | [_] <- things = head things
         | otherwise     = error "multiple inline found"
     things = [ (backend, code)
-             | (Syn "inline" [Val (VStr backend), Val (VStr code)], _) <- stmts
+             | (Syn "inline" [Val (VStr backend), Val (VStr code)]) <- flatten stmts
              ]
-externalize _ _ = error "not statements"
+    flatten (Stmts cur rest) = (cur:flatten rest)
+    flatten exp = [exp]
+
 
 externExternalize "Haskell" = externalizeHaskell
 externExternalize backend   = error $ "Unrecognized inline backend: " ++ backend
@@ -34,22 +35,15 @@ externLoad "Haskell" = loadHaskell
 externLoad backend   = error $ "Unrecognized inline backend: " ++ backend
 
 externRequire lang name = do
-    glob    <- asks envGlobal
-    liftIO $ do
-        bindings    <- externLoad lang name
-        newSyms     <- mapM gensym bindings
-        modifyIORef glob (newSyms ++)
+    glob        <- asks envGlobal
+    bindings    <- liftIO $ externLoad lang name
+    liftSTM $ do
+        newSyms     <- mapM gen bindings
+        modifyTVar glob (\pad -> combine newSyms pad)
     where
-    gensym (name, fun) = genSym ('&':name) . codeRef $ MkCode
-        { isMulti       = True
-        , subName       = ('&':name)
-        , subPad        = []
-        , subType       = SubPrim
-        , subAssoc      = "pre"
+    gen (name, fun) = genSym ('&':name) . codeRef $ mkPrim
+        { subName       = ('&':name)
         , subParams     = [buildParam "List" "" "*@?1" (Val VUndef)]
-        , subBindings   = []
-        , subReturns    = anyType
-        , subSlurpLimit = []
-        , subFun        = (Prim fun)
+        , subBody       = (Prim fun)
         }
 

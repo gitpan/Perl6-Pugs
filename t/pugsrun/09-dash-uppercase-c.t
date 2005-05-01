@@ -1,42 +1,49 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 =pod
 
 Test handling of C<-Cbackend>.
 
 =cut
+sub flatten (Any|Junction $x) {
+    ($x.isa('Junction')) ?? map &flatten, $x.values :: $x
+}
 
-my @t_good = (
+my @t_good = map &flatten, (
   '-C'
     ~ any('Pugs')
     ~ ' '
     ~ any('-e1', map( {"examples/$_.p6"}<
-  fp/fp
+  functional/fp
   hanoi
   junctions/1
   junctions/all-all
   junctions/3 junctions/all-any junctions/any-any
   junctions/any-any2 junctions/grades
   quicksort
->)), '-CParrot ' ~ any('-e1')
+>)), '-CParrot ' ~ any('-e1', map( {"examples/$_.p6"}<
+  junctions/1
+  junctions/any-any
+  junctions/any-any2
+  junctions/3
+  junctions/all-all
+>))
 );
 
-my @t_todo = map{$_.values} (map{$_.values} (
+my @t_todo = map &flatten, (
   '-C'
     ~ any('Parrot')
     ~ ' examples/'
     ~ any(<
-  fp
+  functional/fp
   hanoi
-  junctions/1
-  junctions/3
-  junctions/all-all
-  junctions/all-any junctions/any-any
-  junctions/any-any2 junctions/grades
-  >) ~ '.p6'));
+  junctions/grades
+  junctions/all-any 
+  >) ~ '.p6'
+);
 
 # I don't know (yet) how to force a junction into expansion
 my (@tests_ok,@tests_todo);
@@ -93,17 +100,16 @@ for @tests_todo -> $test {
   $fh.close();
 
   my $output = run_pugs($test);
-  if (is( $output, "", "No error output", :todo(1))) {
+  if (is( $output, "", "No error output", :todo)) {
 
     my $f = slurp $dump_file;
     ok( defined $f, "dump.ast was created" );
-    ok( $f ~~ rx:perl5/.../, "... and it contains some output" , :todo(1));
+    ok( $f ~~ rx:perl5/.../, "... and it contains some output" , :todo);
   } else {
-    fail("No clean compile", :todo(1));
-    fail("No clean compile", :todo(1));
+    fail("No clean compile", :todo);
+    fail("No clean compile", :todo);
   };
 
   unlink($dump_file)
     or diag "$dump_file was not removed for next run";
 };
-

@@ -1,0 +1,341 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!--Rendered using the Haskell Html Library v0.2-->
+<HTML
+><HEAD
+  ><TITLE
+    >Pugs.Bind</TITLE
+    ><LINK HREF = "haddock.css" REL = "stylesheet" TYPE = "text/css"
+    ></HEAD
+  ><BODY
+  ><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+    ><TR
+      ><TD CLASS = "topbar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><IMG SRC = "haskell_icon.gif" WIDTH = "16" HEIGHT = "16" ALT = " "
+		></TD
+	      ><TD CLASS = "title"
+	      ></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "index.html"
+		>Contents</A
+		></TD
+	      ><TD CLASS = "topbut"
+	      ><A HREF = "doc-index.html"
+		>Index</A
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "modulebar"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD
+	      ><FONT SIZE = "6"
+		>Pugs.Bind</FONT
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "section1"
+	>Synopsis</TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "body"
+	><TABLE CLASS = "vanilla" CELLSPACING = "0" CELLPADDING = "0"
+	  ><TR
+	    ><TD CLASS = "decl"
+	      ><SPAN CLASS = "keyword"
+		>type</SPAN
+		> <A HREF = "#t%3AMaybeError"
+		>MaybeError</A
+		> a = Either String a</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AbindNames"
+		>bindNames</A
+		> :: [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; [<A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		>] -&gt; (<A HREF = "Pugs.AST.html#t%3ABindings"
+		>Bindings</A
+		>, [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>], [<A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		>])</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AemptyHashExp"
+		>emptyHashExp</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AemptyArrayExp"
+		>emptyArrayExp</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AbindHash"
+		>bindHash</A
+		> :: [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; [<A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		>] -&gt; <A HREF = "Pugs.Bind.html#t%3AMaybeError"
+		>MaybeError</A
+		> <A HREF = "Pugs.AST.html#t%3ABindings"
+		>Bindings</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AbindArray"
+		>bindArray</A
+		> :: [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; [<A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		>] -&gt; <A HREF = "Pugs.AST.html#t%3ASlurpLimit"
+		>SlurpLimit</A
+		> -&gt; <A HREF = "Pugs.Bind.html#t%3AMaybeError"
+		>MaybeError</A
+		> (<A HREF = "Pugs.AST.html#t%3ABindings"
+		>Bindings</A
+		>, <A HREF = "Pugs.AST.html#t%3ASlurpLimit"
+		>SlurpLimit</A
+		>)</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AdoSlice"
+		>doSlice</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		> -&gt; <A HREF = "Pugs.Types.html#t%3AVInt"
+		>VInt</A
+		> -&gt; <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AdoIndex"
+		>doIndex</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		> -&gt; <A HREF = "Pugs.Types.html#t%3AVInt"
+		>VInt</A
+		> -&gt; <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AdoBindArray"
+		>doBindArray</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		> -&gt; (<A HREF = "Pugs.AST.html#t%3ABindings"
+		>Bindings</A
+		>, <A HREF = "Pugs.Types.html#t%3AVInt"
+		>VInt</A
+		>) -&gt; (<A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		>, Char) -&gt; <A HREF = "Pugs.Bind.html#t%3AMaybeError"
+		>MaybeError</A
+		> (<A HREF = "Pugs.AST.html#t%3ABindings"
+		>Bindings</A
+		>, <A HREF = "Pugs.Types.html#t%3AVInt"
+		>VInt</A
+		>)</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AbindEmpty"
+		>bindEmpty</A
+		> :: <A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		> -&gt; <A HREF = "Pugs.Bind.html#t%3AMaybeError"
+		>MaybeError</A
+		> (<A HREF = "Pugs.AST.html#t%3AParam"
+		>Param</A
+		>, <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>)</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AisPair"
+		>isPair</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		> -&gt; Bool</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AunPair"
+		>unPair</A
+		> :: <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		> -&gt; (String, <A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>)</TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AbindParams"
+		>bindParams</A
+		> :: <A HREF = "Pugs.AST.html#t%3AVCode"
+		>VCode</A
+		> -&gt; [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; <A HREF = "Pugs.Bind.html#t%3AMaybeError"
+		>MaybeError</A
+		> <A HREF = "Pugs.AST.html#t%3AVCode"
+		>VCode</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AfinalizeBindings"
+		>finalizeBindings</A
+		> :: <A HREF = "Pugs.AST.html#t%3AVCode"
+		>VCode</A
+		> -&gt; <A HREF = "Pugs.Bind.html#t%3AMaybeError"
+		>MaybeError</A
+		> <A HREF = "Pugs.AST.html#t%3AVCode"
+		>VCode</A
+		></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "s8"
+	      ></TD
+	      ></TR
+	    ><TR
+	    ><TD CLASS = "decl"
+	      ><A HREF = "#v%3AbindSomeParams"
+		>bindSomeParams</A
+		> :: <A HREF = "Pugs.AST.html#t%3AVCode"
+		>VCode</A
+		> -&gt; [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; [<A HREF = "Pugs.AST.html#t%3AExp"
+		>Exp</A
+		>] -&gt; <A HREF = "Pugs.Bind.html#t%3AMaybeError"
+		>MaybeError</A
+		> <A HREF = "Pugs.AST.html#t%3AVCode"
+		>VCode</A
+		></TD
+	      ></TR
+	    ></TABLE
+	  ></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "s15"
+	></TD
+	></TR
+      ><TR
+      ><TD CLASS = "botbar"
+	>Produced by <A HREF = "http://www.haskell.org/haddock/"
+	  >Haddock</A
+	  > version ADDOCK_VERSION</TD
+	></TR
+      ></TABLE
+    ></BODY
+  ></HTML
+>

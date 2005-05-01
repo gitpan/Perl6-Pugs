@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 plan 3;
 
@@ -16,4 +16,4 @@ eval '
 	$line = <$fh>;
 ';
 
-is($line, "#!/usr/bin/pugs", "first line was chomped", :todo(1));
+is($line, "#!/usr/bin/pugs", "first line was chomped", :todo);

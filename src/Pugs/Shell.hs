@@ -13,9 +13,6 @@
 module Pugs.Shell where
 import Pugs.Internals
 
-#undef PUGS_HAVE_READLINE
-#include "pugs_config.h"
-
 #ifdef PUGS_HAVE_READLINE
 import qualified System.Console.Readline as Readline
 #endif
@@ -82,5 +79,5 @@ addHistory :: String -> IO ()
 addHistory str = Readline.addHistory str
 #else
 addHistory _ = return ()
-#endif 
+#endif
 

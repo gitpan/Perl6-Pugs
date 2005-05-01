@@ -9,9 +9,12 @@ use inc::Module::Install;
 my $pugs = "pugs$Config{_exe}";
 my $version_h = "src/Pugs/pugs_version.h";
 my $config_h = "src/Pugs/pugs_config.h";
-my @srcdirs = (grep(-d, glob "src/*"), grep(-d, glob "src/*/*"), grep(-d, glob "src/*/*/*"));
+my @srcdirs  = grep {-d} glob("src"), glob("src/*"), glob("src/*/*"), glob("src/*/*/*");
+my @hsfiles  = map {glob "$_/*.hs"} @srcdirs;
+push @hsfiles, "src/Pugs/Config.hs";
+my @hppfiles = map {my $x=$_; $x=~s/\.hs$/.hpp/; $x} @hsfiles;
 
-deny_cygwin     ();
+warn_cygwin     ();
 
 name            ('Perl6-Pugs');
 version_from    ('lib/Perl6/Pugs.pm');
@@ -41,7 +44,7 @@ clean_files     (map fixpaths($_),
     "pugs*", "src/Pugs/pugs_config.h", $version_h, $config_h,
     'src/Pugs/Config.hs', 'blib6',
     'test.log',
-    map {("$_/*.hi", "$_/*.o*")} @srcdirs
+    map {("$_/*.hpp", "$_/*.hi", "$_/*.o*")} @srcdirs
 );
 
 set_postamble   ();
@@ -68,12 +71,24 @@ sub set_postamble {
 	  $ghc_flags .= ' -DPUGS_HAVE_HSPLUGINS=1';
 	}
 
-# XXX - this probing is incorrect.
-#	if (has_ghc_package('readline')) {
-#	  $ghc_flags .= ' -package readline';
-#	}
+    if (has_ghc_package('readline') 
+        and  try_compile("import System.Console.Readline;\n"
+						."main :: IO ()\n"
+                        .'main = readline "" >> return ()')) 
+    {
+      $ghc_flags .= ' -DPUGS_HAVE_READLINE=1 -package readline';
+    } else {
+      warn << '.';
+
+*** Readline support disabled.  If you want readline support,
+    please install the GNU readline library.
+
+.
+    }
+        
 
     my $ghc_output = "-o pugs$Config{_exe} src/Main.hs";
+    my $hasktags = $ENV{HASKTAGS} || 'hasktags';
 
     my $pcre = "src/pcre/pcre.o";
     my $pcre_c = "src/pcre/pcre.c";
@@ -85,12 +100,16 @@ sub set_postamble {
 
     my $config = get_pugs_config();
     my $is_win32 = ($^O =~ /MSWin|mingw|cygwin/i);
-    my $threaded = (!$is_win32 and try_compile("main = return ()", "-threaded"))
+    my $threaded = (!$is_win32 and try_compile("main :: IO ()\nmain = return ()", "-threaded"))
         ? '-threaded' : '';
+
+    # XXX - hsplugins doesn't build with profiles
+    my $profiled_flags = $ghc_flags;
+    $profiled_flags =~ s{-DPUGS_HAVE_HSPLUGINS=1}{};
 
     postamble(fixpaths(<< "."));
 $config_h : lib/Perl6/Pugs.pm util/config_h.pl
-	\$(PERL) util/config_h.pl "$ghc $ghc_flags" 
+	\$(PERL) util/config_h.pl "$ghc $ghc_flags"
 
 $version_h : .svn/entries util/version_h.pl
 	\$(PERL) util/version_h.pl $version_h
@@ -107,26 +126,50 @@ $unicode : $unicode_c
 src/Pugs/Config.hs : util/PugsConfig.pm
 	\$(PERL) -Iutil -MPugsConfig -e "PugsConfig->write_config_module" > src/Pugs/Config.hs
 
+${() = '%.hpp : %.hs @prereqs $version_h
+	$ghc $threaded $ghc_flags -DHADDOCK -E \$< -o \$@
+	\$(PERL) util/munge_haddock.pl \$@'; \''}
+
+.SUFFIXES: .hs .hpp
+
+.hs.hpp :
+	$ghc $threaded $ghc_flags -DHADDOCK -E \$< -o \$@
+	\$(PERL) util/munge_haddock.pl \$@
+
+haddock : $version_h $config_h @hppfiles docs/haddock
+	haddock -h -o docs/haddock/ @hppfiles
+	\@\$(PERL) -le "print q-*** API Documentation generated in @{[File::Spec->catdir('docs', 'haddock').File::Spec->catdir('')]}.-"
+
+docs/haddock :
+	\@\$(PERL) -e "mkdir q-docs/haddock-"
+
 profiled :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
-	$ghc $threaded -auto-all -prof --make $ghc_flags $ghc_output
+	$ghc $threaded -O -auto-all -prof --make $profiled_flags $ghc_output
+
+pugs.prof :: profiled
+	find t -type f | grep -v D | grep -v R | grep -v pugsrun | ./pugs +RTS -p -RTS -e 'my sub exit {}; for =\$\$*IN -> \$\$t is copy { chomp \$\$t; require \$\$t }'
+
+optimised :: optimized
 
 optimized :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
-	$ghc $threaded -O1 --make $ghc_flags $ghc_output
+	$ghc $threaded -O --make $ghc_flags $ghc_output
+
+unoptimised :: optimized
 
 unoptimized :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
 	$ghc $threaded -O0 --make $ghc_flags $ghc_output
 
 $pugs : src/Pugs/Config.hs @srcfiles $version_h @prereqs
-	$ghc $threaded --make $ghc_flags $ghc_output
+	$ghc $threaded -O --make $ghc_flags $ghc_output
 
-smoke : util/run-smoke.pl
+smoke : $pugs util/run-smoke.pl
 	\$(PERL) util/run-smoke.pl . smoke.html
 
 ghci ::
 	$ghc --interactive $ghc_flags $ghc_output
 
 tags : @srcfiles
-	hasktags -c @srcfiles
+	$hasktags -c @srcfiles
 	sort tags > tags.tmp
 	mv tags.tmp tags
 

@@ -98,20 +98,21 @@ else {
     );
 
     my $err = $!;
+    (($rv == 0) and -e $out) or die $err;
+
     unlink "$base/MainCC.hs";
     unlink "$base/MainCC.hi";
     unlink "$base/MainCC.o";
-    (($rv == 0) and -e $out) or die $err;
 }
 
 die unless -e $out;
 
 if ($run) {
     if ($backend eq 'Parrot' and !-x '/usr/bin/env') {
-        system("parrot" => $out) == 0 or die $!;
+        system("parrot" => $out);
     }
     else {
-        system($out) == 0 or die $!;
+        system {$out} $out;
     }
 }
 else {
