@@ -1,13 +1,13 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
-{-
+{-|
     Lexical analyzer.
 
-    No words were laid on stream or stone
-    When Durin woke and walked alone.
-    He named the nameless hills and dells;
-    He drank from yet untasted wells...
+>   No words were laid on stream or stone
+>   When Durin woke and walked alone.
+>   He named the nameless hills and dells;
+>   He drank from yet untasted wells...
 -}
 
 module Pugs.Lexer where
@@ -61,28 +61,50 @@ getVar = do
     -- env <- getState
     error ""    
 
+perl6Lexer :: P.TokenParser st
 perl6Lexer = P.makeTokenParser perl6Def
-parens     = P.parens perl6Lexer
+
+parens     :: CharParser st a -> CharParser st a
+parens     = P.parens     perl6Lexer
+whiteSpace :: CharParser st ()
 whiteSpace = P.whiteSpace perl6Lexer
-lexeme     = P.lexeme perl6Lexer
+lexeme     :: CharParser st a -> CharParser st a
+lexeme     = P.lexeme     perl6Lexer
+identifier :: CharParser st String
 identifier = P.identifier perl6Lexer
-braces     = P.braces perl6Lexer
-brackets   = P.brackets perl6Lexer
-angles     = P.angles perl6Lexer
-balanced   = P.balanced perl6Lexer
+braces     :: CharParser st a -> CharParser st a
+braces     = P.braces     perl6Lexer
+brackets   :: CharParser st a -> CharParser st a
+brackets   = P.brackets   perl6Lexer
+angles     :: CharParser st a -> CharParser st a
+angles     = P.angles     perl6Lexer
+balanced   :: CharParser st String
+balanced   = P.balanced   perl6Lexer
+balancedDelim :: Char -> Char
 balancedDelim = P.balancedDelim perl6Lexer
-decimal    = P.decimal perl6Lexer
-verbatimIdentifier = (<?> "identifier") $ do
+decimal    :: CharParser st Integer
+decimal    = P.decimal    perl6Lexer
+
+ruleQualifiedIdentifier :: GenParser Char st String
+ruleQualifiedIdentifier = verbatimRule "qualified identifier" $ do
+    chunks  <- ruleVerbatimIdentifier `sepBy1` (try $ string "::")
+    return $ concat (intersperse "::" chunks)
+
+ruleVerbatimIdentifier :: GenParser Char st String
+ruleVerbatimIdentifier = (<?> "identifier") $ do
     c  <- identStart perl6Def
     cs <- many (identLetter perl6Def)
     return (c:cs)
 
+ruleWhiteSpaceLine :: GenParser Char st ()
 ruleWhiteSpaceLine = do
     many $ satisfy (\x -> isSpace x && x /= '\n')
     ruleEndOfLine
-   
+
+ruleEndOfLine :: GenParser Char st ()
 ruleEndOfLine = choice [ do { char '\n'; return () }, eof ]
 
+symbol :: String -> GenParser Char st String
 symbol s
     | isWordAny (last s) = try $ do
         rv <- string s
@@ -107,11 +129,10 @@ symbol s
     aheadSym '~' y   = not (y `elem` "&|^<>~")
     aheadSym x   y   = y `elem` ";!" || x /= y
 
-interpolatingStringLiteral :: RuleParser x      -- Closing delimiter 
-                              -> RuleParser Exp -- Interpolator
-                              -> RuleParser Exp -- Entire string
-                                                -- (without delims)
-
+interpolatingStringLiteral :: RuleParser x      -- ^ Closing delimiter 
+                              -> RuleParser Exp -- ^ Interpolator
+                              -> RuleParser Exp -- ^ Entire string
+                                                -- ^ (without delims)
 interpolatingStringLiteral endrule interpolator = do
     list <- stringList
     return . Cxt (CxtItem $ mkType "Str") $ homogenConcat list
@@ -122,7 +143,7 @@ interpolatingStringLiteral endrule interpolator = do
     homogenConcat (Val (VStr x):Val (VStr y):xs)
         = homogenConcat (Val (VStr (x ++ y)) : xs)
     homogenConcat (x:xs)
-        = App "&infix:~" [x, homogenConcat xs] []
+        = App (Var "&infix:~") [x, homogenConcat xs] []
     
     stringList = do
         lookAhead endrule
@@ -136,17 +157,18 @@ interpolatingStringLiteral endrule interpolator = do
         rest <- stringList
         return (Val (VStr [char]):rest)
 
--- backslahed nonalphanumerics (except for ^) translate into themselves
+-- | backslahed nonalphanumerics (except for \^) translate into themselves
+escapeCode      :: GenParser Char st Char
 escapeCode      = charEsc <|> charNum <|> charAscii <|> charControl <|> anyChar
                 <?> "escape code"
 
--- charControl :: CharParser st Char
+charControl :: GenParser Char st Char
 charControl     = do{ char '^'
                     ; code <- upper
                     ; return (toEnum (fromEnum code - fromEnum 'A'))
                     }
 
--- charNum :: CharParser st Char                    
+charNum :: GenParser Char st Char                    
 charNum         = do{ code <- decimal 
                               <|> do{ char 'o'; number 8 octDigit }
                               <|> do{ char 'x'; number 16 hexDigit }
@@ -154,46 +176,59 @@ charNum         = do{ code <- decimal
                     ; return (toEnum (fromInteger code))
                     }
 
+number :: Integer -> GenParser tok st Char -> GenParser tok st Integer
 number base baseDigit
     = do{ digits <- many1 baseDigit
         ; let n = foldl (\x d -> base*x + toInteger (digitToInt d)) 0 digits
         ; seq n (return n)
         }          
 
+charEsc         :: GenParser Char st Char
 charEsc         = choice (map parseEsc escMap)
                 where
                   parseEsc (c,code)     = do{ char c; return code }
                   
+charAscii       :: GenParser Char st Char
 charAscii       = choice (map parseAscii asciiMap)
                 where
                   parseAscii (asc,code) = try (do{ string asc; return code })
 
 
 -- escape code tables
+escMap          :: [(Char, Char)]
 escMap          = zip ("abfnrtv\\\"\'") ("\a\b\f\n\r\t\v\\\"\'")
+asciiMap        :: [(String, Char)]
 asciiMap        = zip (ascii3codes ++ ascii2codes) (ascii3 ++ ascii2) 
 
+ascii2codes     :: [String]
 ascii2codes     = ["BS","HT","LF","VT","FF","CR","SO","SI","EM",
                    "FS","GS","RS","US","SP"]
+ascii3codes     :: [String]
 ascii3codes     = ["NUL","SOH","STX","ETX","EOT","ENQ","ACK","BEL",
                    "DLE","DC1","DC2","DC3","DC4","NAK","SYN","ETB",
                    "CAN","SUB","ESC","DEL"]
 
+ascii2          :: [Char]
 ascii2          = ['\BS','\HT','\LF','\VT','\FF','\CR','\SO','\SI',
                    '\EM','\FS','\GS','\RS','\US','\SP']
+ascii3          :: [Char]
 ascii3          = ['\NUL','\SOH','\STX','\ETX','\EOT','\ENQ','\ACK',
                    '\BEL','\DLE','\DC1','\DC2','\DC3','\DC4','\NAK',
                    '\SYN','\ETB','\CAN','\SUB','\ESC','\DEL']
 
+rule :: String -> CharParser st a -> GenParser Char st a
 rule name action = (<?> name) $ lexeme $ action
 
+verbatimRule :: String -> GenParser tok st a -> GenParser tok st a
 verbatimRule name action = (<?> name) $ action
 
+literalRule :: String -> GenParser Char st a -> GenParser Char st a
 literalRule name action = (<?> name) $ postSpace $ action
 
+tryRule :: String -> GenParser Char st a -> GenParser Char st a
 tryRule name action = (<?> name) $ lexeme $ try action
 
-tryVerbatimRule :: Ident -> GenParser tok st a -> GenParser tok st a
+tryVerbatimRule :: String -> GenParser tok st a -> GenParser tok st a
 tryVerbatimRule name action = (<?> name) $ try action
 
 ruleScope :: RuleParser Scope
@@ -216,31 +251,30 @@ postSpace rule = try $ do
     whiteSpace
     return rv
 
-ruleTrait = do
-    symbol "is"
-    trait <- identifier
+ruleTrait :: GenParser Char st String
+ruleTrait = rule "trait" $ do
+    symbol "is" <|> symbol "does"
+    trait <- ruleQualifiedIdentifier
     return trait
 
-ruleTraitName trait = do
+ruleTraitName :: String -> GenParser Char st String
+ruleTraitName trait = rule "named trait" $ do
     symbol "is"
     symbol trait
     identifier
 
-ruleBareTrait trait = do
+ruleBareTrait :: String -> GenParser Char st String
+ruleBareTrait trait = rule "bare trait" $ do
     choice [ ruleTraitName trait
            , do { symbol trait ; identifier }
            ]
 
+ruleContext :: GenParser Char st String
 ruleContext = literalRule "context" $ do
     lead    <- upper
-    rest    <- many1 (wordAny <|> oneOf "&|")
+    rest    <- many1 (wordAny <|> oneOf ":&|")
     return (lead:rest)
 
-ruleVarName = literalRule "variable name" $ do
-    sigil   <- oneOf "$@%&"
-    caret   <- option "" $ choice $ map string $ words " ^ * ? "
-    name    <- many1 wordAny
-    return $ (sigil:caret) ++ name
-
+tryChoice :: [GenParser tok st a] -> GenParser tok st a
 tryChoice = choice . map try
 

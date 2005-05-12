@@ -1,3 +1,81 @@
+== Changes for 6.2.3 - May 12, 2005
+
+=== Pugs Internals
+
+* Pugs can now embed Parrot or use an external `parrot` executable
+** Under embedded mode, Pugs is a registered Parrot compiler
+** `eval_parrot` and `require_parrot` builtins for running PIR code
+** `pugs -BParrot` can compile Perl 6 program to PIR and run it in-memory
+* Perl 6 Rules support via Parrot/PGE:
+** Named rules and subrule support
+** The former `$0` (entire match) is now `$<>`
+** `$0` is now the same as `~$/[0]`, i.e. the same as Perl 5's `$1`
+** `.from`, `.to`, `.matches`
+** `//`, `rx//`, `m//`, `rule{}`
+** `s///` and `//` in statement level operates on `$_`
+* Basic Object support:
+** Accessors generated for public attributes
+** Identity operator: `=:=`
+** Method chaining: `$foo.bar().baz()`
+** Method invocants `foo ($self: $x)` and topicalized invocants in `$_` 
+** Public and private attributes, as well as `has $.attr is rw`
+** `$obj ~~ Class` support
+** `$obj.clone()` support
+** `class Foo {}` works (no inheritance yet)
+* Experimental `eval_yaml()` support to parse YAML streams
+* Experimental support for prefix reduce metaoperator `[+]`
+* Hyper operators now works on arrays too
+* Improved `.perl()` format for array, hash and pair objects
+* Much faster random access to arrays; it's now O(1) instead of O(n)
+* Much improved MMD support
+* New `is lazy` trait for parameters
+* Refactoring of large Haskell modules to improve compilation speed
+* Support for building a profiled Pugs
+* Undef in grouped lhs: `my ($x, undef, $y) = 1..3;` is now legal
+* `$thread.kill`, `$thread.detach`, `$thread.join`
+* `%hash.pick`, `@array.pick` and `(list).pick`
+* `reduce` primitive
+* `state $var` implemented
+* `system(Str: List)` and `exec(Str: List)` on Unix platforms
+
+=== Bundled Modules
+
+* All modules have their own `ChangeLog` now
+* `Algorithm::TokenBucket`, with closure objects
+* `Config::Tiny`, with closure objects
+* `Kwid::Event::Parser`, with procedures
+* `Net::IRC`, with closure objects
+* `Perl::MetaModel`, prototype of Perl 6 OO meta-model in Perl 6
+* `Pod::Stream::Parser` renamed to `Pod::Event::Parser` and added more functionality
+* `Set`, with Perl 6 objects
+* `Test::Builder`, with Perl 6 objects (parses, but does not working yet)
+* `Tree::Simple`, with closure objects
+
+=== Tests, Examples and Documentations
+
+* Many new test and several tests refactored, we now have 4921 tests
+* Documentation for `hangman.p6` added in `examples/games/hangman.pod`
+* New "Monads in Perl 6" example in `examples/functional/monads.p6`
+* Script to generate a Pugs Live CD in `util/livecd`
+* Several IRC bots added to `examples/network` including svnbot and logbot
+* TODO tests now use `:todo<reason>` for better reporting
+* The first Perl 6 poem in `examples/poetry/`
+
+=== Bug Fixes
+
+* Logical short-circuiting operators no longer flattens references
+* Prohibit Array and Hash dereference on plain values
+* Slurpy context no longer flattens
+* Stringifying IO handles is no longer fatal
+* `$*PID` now works on Win32
+* `%*ENV` now completely works on Win32
+* `(a => 3+4)` is now parsed as `(a => (3+4))`, not `(a => 3)+4`
+* `any().pick` no longer dies
+* `my @x = [1]; @x[0][0] = 2` should now work
+* `next` in nested `for {}` blocks no longer escapes the outer loop
+* `to => 123` parses again; arrow pairs now always trumps unary functions
+* `{}` in P5 rules is no longer closure interpolation
+
 == Changes for 6.2.2 - May 1, 2005
 
 === Pugs Internals
@@ -46,7 +124,7 @@
 
 * Constant references now automatically dereference when used in rvalue context
 * Junctive `^` should join junctions instead of autothread them
-* Lone block does not count as `simple expression` anymore
+* Lone block does not count as /simple expression/ anymore
 * Repair single statements in shell to preserve lexical context
 * Repair the `list` context hinter
 * The dot in `123.ref` is now parsed correctly as `(123).ref`

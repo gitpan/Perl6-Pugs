@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 
-{-
+{-|
     Context propagators and equalizers.
 
-    Tree and flower and leaf and grass,
-    Let them pass! Let them pass!
-    Hill and water under sky,
-    Pass them by! Pass them by!
+>   Tree and flower and leaf and grass,
+>   Let them pass! Let them pass!
+>   Hill and water under sky,
+>   Pass them by! Pass them by!
 -}
 
 module Pugs.Context where
@@ -51,11 +51,10 @@ isaType' = junctivate (||) (&&) $ \tree base target ->
 
 -- XXX -- Junctive Types -- XXX --
 distanceType :: ClassTree -> Type -> Type -> Int
-distanceType tree base target
+distanceType tree base target = compareList l1 l2
 --  | not (castOk base target)  = 0
-    | otherwise         = distance
+--  | otherwise = compareList l1 l2
     where
-    distance  = compareList l1 l2
     l1 = findList base tree
     l2 = findList target tree
 
@@ -80,6 +79,11 @@ findList base (Node l cs)
 
 prettyTypes :: String
 prettyTypes = drawTree $ fmap show initTree
+
+addNode :: Tree Type -> Type -> Tree Type
+addNode (Node any [Node void (Node obj ns:rest)]) typ =
+    Node any [Node void (Node obj ((Node typ []):ns):rest)]
+addNode _ _ = error "malformed tree"
 
 initTree :: Tree Type
 initTree = fmap MkType $ Node "Any" [ Node "Void"
@@ -122,6 +126,7 @@ initTree = fmap MkType $ Node "Any" [ Node "Void"
                         [ Node "Parametric" [] ] ]
                 ]
             , Node "Rule" []
+            , Node "Match" []
             , Node "Junction" []
             , Node "Scalar::Const" []
             , Node "Scalar::Proxy" []
@@ -129,10 +134,10 @@ initTree = fmap MkType $ Node "Any" [ Node "Void"
             ]
         ]
     , Node "Grammar" []
-    , Node "Package"
-        [ Node "Module"
-            [ Node "Class" [] ] ]
-    , Node "Action" []
-    , Node "Trait"
-        [ Node "PkgTrait" [] ] ] ]
+    , Node "Type"
+        [ Node "Package"
+            [ Node "Module"
+                [ Node "Class" [] ] ]
+        , Node "Trait"
+            [ Node "PkgTrait" [] ] ] ] ]
 

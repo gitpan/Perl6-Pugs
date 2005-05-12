@@ -1,16 +1,17 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 
-{-
+{-|
     The Main REPL loop.
 
-    A ship then new they built for him
-    Of mithril and of elven-glass
-    With shining prow; no shaven oar
-    Nor sail she bore on silver mast;
-    The Silmaril as lantern light
-    And banner bright with living flame
-    To gleam thereon by Elbereth
-    Herself was set, who thither came...
+>   A ship then new they built for him
+>   Of mithril and of elven-glass
+>   With shining prow; no shaven oar
+>   Nor sail she bore on silver mast;
+>   The Silmaril as lantern light
+>   And banner bright with living flame
+>   To gleam thereon by Elbereth
+>   Herself was set, who thither came...
+
 -}
 
 module Main where
@@ -26,11 +27,17 @@ import Pugs.Parser
 import Pugs.Help
 import Pugs.Pretty
 import Pugs.Compile
+import Pugs.Embed
 import qualified Data.Map as Map
+import Data.IORef
 
+-- |Pugs' entry point. Uses 'Pugs.Run.runWithArgs' to normalise the command-line 
+-- arguments and pass them to 'run'.
 main :: IO ()
 main = do
     hSetBuffering stdout NoBuffering
+    when (isJust _DoCompile) $ do
+        writeIORef (fromJust _DoCompile) doCompile
     runWithArgs run
 
 warn :: Show a => a -> IO ()
@@ -63,8 +70,12 @@ run ("-v":_)                    = banner
 run ("-c":"-e":prog:_)          = doCheck "-e" prog
 run ("-c":file:_)               = readFile file >>= doCheck file
 
-run ("-C":backend:"-e":prog:_)           = doCompile backend "-e" prog
-run ("-C":backend:file:_)                = readFile file >>= doCompile backend file
+run ("-C":backend:"-e":prog:_)           = doCompileDump backend "-e" prog
+run ("-C":backend:file:_)                = readFile file >>= doCompileDump backend file
+
+run ("-B":backend:"-e":prog:_)           = doCompileRun backend "-e" prog
+run ("-B":backend:file:_)                = readFile file >>= doCompileRun backend file
+
 run ("--external":mod:"-e":prog:_)    = doExternal mod "-e" prog
 run ("--external":mod:file:_)         = readFile file >>= doExternal mod file
 
@@ -116,6 +127,10 @@ repLoop = do
             CmdHelp           -> printInteractiveHelp >> loop
             CmdReset          -> tabulaRasa >>= (liftSTM . writeTVar env) >> loop
 
+-- |Create a \'blank\' 'Env' for our program to execute in. Of course,
+-- 'prepareEnv' actually declares quite a few symbols in the environment,
+-- e.g. \'\@\*ARGS\', \'\$\*PID\', \'\$\*ERR\' etc.
+-- ('Tabula rasa' is Latin for 'a blank slate'.)
 tabulaRasa :: IO Env
 tabulaRasa = prepareEnv "<interactive>" []
 
@@ -128,20 +143,29 @@ doExternal mod = doParseWith $ \env _ -> do
     str <- externalize mod $ envBody env
     putStrLn str
 
-doCompile :: [Char] -> FilePath -> String -> IO ()
+doCompile :: String -> FilePath -> String -> IO String
 doCompile backend = doParseWith $ \env _ -> do
     globRef <- liftSTM $ do
         glob <- readTVar $ envGlobal env
         newTVar $ userDefined glob
-    str     <- compile backend env{ envGlobal = globRef }
+    compile backend env{ envGlobal = globRef }
+
+doCompileDump :: String -> FilePath -> String -> IO ()
+doCompileDump backend file prog = do
+    str <- doCompile backend file prog
     writeFile "dump.ast" str
+
+doCompileRun :: String -> FilePath -> String -> IO ()
+doCompileRun backend file prog = do
+    str <- doCompile backend file prog
+    evalEmbedded backend str
 
 doParseWith :: (Env -> FilePath -> IO a) -> FilePath -> String -> IO a
 doParseWith f name prog = do
     env <- emptyEnv name []
     runRule env f' ruleProgram name $ decodeUTF8 prog
     where
-    f' Env{ envBody = Val err@(VError _ _) } = do
+    f' env | Val err@(VError _ _) <- envBody env = do
         hPutStrLn stderr $ pretty err
         exitFailure
     f' env = f env name
@@ -159,7 +183,7 @@ doLoad env fn = do
     runImperatively env (evaluate exp)
     return ()
     where
-    exp = App "&require" [] [Val $ VStr fn]
+    exp = App (Var "&require") [] [Val $ VStr fn]
 
 doRunSingle :: TVar Env -> RunOptions -> String -> IO ()
 doRunSingle menv opts prog = (`catch` handler) $ do
@@ -202,7 +226,6 @@ doRunSingle menv opts prog = (`catch` handler) $ do
     makeDumpEnv (Pad x y exp)   = Pad x y   $ makeDumpEnv exp
     makeDumpEnv (Sym x y exp)   = Sym x y   $ makeDumpEnv exp
     makeDumpEnv (Pos x exp)     = Pos x     $ makeDumpEnv exp
-    makeDumpEnv (Parens exp)    = Parens    $ makeDumpEnv exp
     makeDumpEnv exp = Stmts exp (Syn "env" [])
     handler err = if not (isUserError err) then ioError err else do
         putStrLn "Internal error while running expression:"

@@ -9,14 +9,14 @@ Pair test
 
 =cut
 
-plan 36;
+plan 56;
 
 # basic Pair
 
 my $pair = 'foo' => 'bar';
 isa_ok($pair, 'Pair');
 
-# get key and value from the pair as many was as possible
+# get key and value from the pair as many ways as possible
 
 is(key($pair), 'foo', 'got the right key($pair)');
 is(value($pair), 'bar', 'got the right value($pair)');
@@ -93,4 +93,59 @@ my $val;
 ("foo" => $val) = "baz";
 is($val, "baz", "lvalue lists");
 
+# illustrate a bug
 
+my $var   = 'foo' => 'bar';
+sub test1 (Any $pair) {
+	isa_ok($pair,'Pair') ; 
+	my $testpair = $pair;
+	isa_ok($testpair,'Pair'); # new lvalue variable is also a Pair
+	my $boundpair := $pair;
+	isa_ok($boundpair,'Pair'); # bound variable is also a Pair
+	is($pair.key, 'foo', 'in sub test1 got the right $pair.key');
+	is($pair.value, 'bar', 'in sub test1 got the right $pair.value');
+
+}
+test1 $var;
+
+my %hash  = ('foo' => 'bar');
+for  %hash.pairs -> $pair {
+	isa_ok($pair,'Pair',:todo<bug>) ; 
+	my $testpair = $pair;
+	isa_ok($testpair,'Pair',:todo<bug>); # new lvalue variable is also a Pair
+	my $boundpair := $pair;
+	isa_ok($boundpair,'Pair',:todo<bug>); # bound variable is also a Pair
+	is($pair.key, 'foo', 'in for loop got the right $pair.key');
+	is($pair.value, 'bar', 'in for loop got the right $pair.value');
+}
+
+sub test2 (Hash %h){
+	for %h.pairs -> $pair {
+		isa_ok($pair,'Pair',:todo<bug>) ; 
+		is($pair.key, 'foo', 'in sub test2 got the right $pair.key',:todo<bug>);
+		is($pair.value, 'bar', 'in sub test2 got the right $pair.value',:todo<bug>);
+	}
+}
+test2 %hash;
+
+sub test3 (Hash %h){
+	for %h.pairs -> $pair {
+		isa_ok($pair,'Pair',:todo<bug>) ; 
+		is($pair[0], 'foo', 'sub test3: access by $pair[0] got the right $pair.key',:todo<bug>);
+		is($pair[1], 'bar', 'sub test3: access by $pair[1] got the right $pair.value',:todo<bug>);
+	}
+}
+test3 %hash;
+
+sub test4 (Hash %h){
+	for %h.pair -> $pair {
+		isa_ok($pair,'Pair',:todo<bug>) ; 
+		is($pair.key, 'foo', 'sub test4: access by unspecced "pair" got the right $pair.key');
+		is($pair.value, 'bar', 'sub test4: access by unspecced "pair" got the right $pair.value');
+
+	}
+}
+test4 %hash;
+
+my $should_be_a_pair = (a => 25/1);
+isa_ok $should_be_a_pair, "Pair", "=> has correct precedence";

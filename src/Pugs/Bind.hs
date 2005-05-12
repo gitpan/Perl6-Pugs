@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 
-{-
+{-|
     Parameter binding.
 
-    A star was bound upon her brows,
-    A light was on her hair
-    As sun upon the golden boughs
-    In Lorien the fair...
+>   A star was bound upon her brows,
+>   A light was on her hair
+>   As sun upon the golden boughs
+>   In Lorien the fair...
 -}
 
 module Pugs.Bind where
@@ -14,11 +14,20 @@ import Pugs.Internals
 import Pugs.AST
 import Pugs.Types
 
+-- |Contains either a valid value of @a@ (@Right@), or a @String@ error
+-- message (@Left@).
 type MaybeError a = Either String a
 
 isRequired prm = not ( isOptional prm || isNamed prm )
 
-bindNames :: [Exp] -> [Param] -> (Bindings, [Exp], [Param])
+-- |Match up named arguments with named parameters, producing a list of new
+-- bindings, and lists of remaining unbound args and params.
+bindNames :: [Exp] -- ^ List of argument expressions to be bound
+          -> [Param] -- ^ List of parameters to try binding; includes both
+                     --     named params and positional params
+          -> (Bindings, [Exp], [Param]) -- ^ Bindings made;
+                                        --   remaining (unbound) named args;
+                                        --   remaining (positional) params
 bindNames exps prms = (bound, exps', prms')
     where
     prms' = prms \\ (map fst bound)
@@ -27,24 +36,33 @@ bindNames exps prms = (bound, exps', prms')
         | Just prm <- find ((name ==) . tail . paramName) prms
         = ( ((prm, exp) : bound), exps )
         | otherwise
-        = ( bound, (exp:exps) )
+        = ( bound, (Syn "=>" [Val (VStr name), exp]:exps) )
 
 emptyHashExp :: Exp
 emptyHashExp  = Val $ VList [] -- VHash $ vCast $ VList []
 emptyArrayExp :: Exp
 emptyArrayExp = Val $ VList [] -- VArray $ vCast $ VList []
 
-bindHash :: [Exp] -> [Param] -> MaybeError Bindings
+{-|
+Create a binding from the slurpy hash parameter (e.g. @\*%_@) to a hash
+containing all the remaining named arguments. If multiple slurpy hashes
+are given, only the first gets the arguments--the rest get an empty hash.
+Used by 'bindSomeParams'.
+-}
+bindHash :: [Exp]   -- ^ Named arguments (pair expressions) that were not
+                    --     consumed by explicit named parameters
+         -> [Param] -- ^ List of slurpy hash parameters
+         -> MaybeError Bindings
 bindHash _ []           = return []
 bindHash [] [p]         = return [ (p, emptyHashExp) ]
 bindHash vs (p:ps@(_:_))= do
     first <- (bindHash vs [p])
     return $ first ++ (ps `zip` repeat emptyHashExp)
-bindHash vs [p]         = return [ (p, Syn "\\{}" vs) ] -- XXX cast to Hash
+bindHash vs [p]         = return [ (p, Syn "\\{}" [Syn "," vs]) ] -- XXX cast to Hash
 
 bindArray :: [Exp] -> [Param] -> SlurpLimit -> MaybeError (Bindings, SlurpLimit)
 bindArray vs ps oldLimit = do
-    let exp = Syn "*" [Syn "," vs]
+    let exp = Cxt cxtSlurpyAny (Syn "," vs)
     case foldM (doBindArray exp) ([], 0) prms of
         Left errMsg      -> fail errMsg
         Right (bound, n) -> do
@@ -56,10 +74,19 @@ bindArray vs ps oldLimit = do
     where
     prms = map (\p -> (p, (head (paramName p)))) ps 
 
-doSlice :: Exp -> VInt -> Exp
+-- |Construct an expression representing an infinite slice of the given
+-- array expression, beginning at element /n/ (i.e. @\@array\[\$n...\]@).
+-- Used by 'doBindArray' to bind a slurpy array parameter to the rest of
+-- the slurpable arguments.
+doSlice :: Exp -- ^ The array expression to slice
+        -> VInt -- ^ Index of the first element in the resulting slice (/n/)
+        -> Exp 
 doSlice v n = Syn "[...]" [v, Val $ VInt n]
 
 -- XXX - somehow force failure
+-- |Construct an expression representing element /n/ in the given array
+-- expression (i.e. @\@array\[\$n\]@). Used by 'doBindArray' to bind a
+-- particular slurpy scalar parameter to one of the slurpable arguments.
 doIndex :: Exp -> VInt -> Exp
 doIndex v n = Syn "[]" [Syn "val" [v], Val $ VInt n]
 
@@ -72,6 +99,8 @@ doBindArray v (xs, n)  (p, '$') = case v of
     _               -> return (((p, doIndex v n):xs), n+1)
 doBindArray _ (_, _)  (_, x) = internalError $ "doBindArray: unexpected char: " ++ (show x)
 
+-- |(Does this even get used? It seems to be a leftover fragment of
+-- 'doBindArray'...)
 bindEmpty :: Param -> MaybeError (Param, Exp)
 bindEmpty p = case paramName p of
     ('@':_) -> return (p, emptyArrayExp)
@@ -79,31 +108,48 @@ bindEmpty p = case paramName p of
     (x:_)   -> internalError $ "bindEmpty: unexpected char: " ++ (show x)
     []      -> internalError $ "bindEmpty: empty string encountered"
 
+-- |Return @True@ if the given expression represents a pair (i.e. it uses the
+-- \"=>\" pair constructor).
 isPair :: Exp -> Bool
 isPair (Pos _ exp) = isPair exp
 isPair (Cxt _ exp) = isPair exp
 isPair (Syn "=>" [(Val _), _])   = True
-isPair (App "&infix:=>" [(Cxt _ (Val _)), _] [])   = True
-isPair (App "&infix:=>" [(Val _), _] [])   = True
+isPair (App (Var "&infix:=>") [(Cxt _ (Val _)), _] [])   = True
+isPair (App (Var "&infix:=>") [(Val _), _] [])   = True
 isPair _                         = False
 
+-- |Decompose a pair-constructor 'Exp'ression (\"=>\") into a Haskell pair
+-- (@key :: 'String'@, @value :: 'Exp'@).
 unPair :: Exp -> (String, Exp)
 unPair (Pos _ exp) = unPair exp
 unPair (Cxt _ exp) = unPair exp
 unPair (Syn "=>" [(Val k), exp]) = (vCast k, exp)
-unPair (App "&infix:=>" [(Cxt _ (Val k)), exp] []) = (vCast k, exp)
-unPair (App "&infix:=>" [(Val k), exp] []) = (vCast k, exp)
+unPair (App (Var "&infix:=>") [(Cxt _ (Val k)), exp] []) = (vCast k, exp)
+unPair (App (Var "&infix:=>") [(Val k), exp] []) = (vCast k, exp)
 unPair x                                = error ("Not a pair: " ++ show x)
 
--- performs a binding and then verifies that it's complete in one go
-bindParams :: VCode -> [Exp] -> [Exp] -> MaybeError VCode
+{-|
+Bind parameters to a callable, then verify that the binding is complete
+(i.e. all mandatory params are bound; all unspecified params have default
+bindings). Uses 'bindSomeParams' to perform the initial binding, then uses
+'finalizeBindings' to check all required params and give default values to
+any unbound optional ones. Once this is complete, /everything/ should be
+bound.
+-}
+bindParams :: VCode -- ^ A code object to perform bindings on
+           -> [Exp] -- ^ List of invocants to bind
+           -> [Exp] -- ^ List of arguments (actual params) to bind
+           -> MaybeError VCode -- ^ Returns either a new 'VCode' with all the
+                               --     bindings in place, or an error message
 bindParams sub invsExp argsExp = do
     case bindSomeParams sub invsExp argsExp of
         Left errMsg -> Left errMsg
         Right boundSub -> finalizeBindings boundSub
 
--- verifies that all invocants and required params were given
--- and binds default values to unbound optionals
+{-|
+Verify that all invocants and required parameters are bound, and give default
+values to any unbound optional parameters.
+-}
 finalizeBindings :: VCode -> MaybeError VCode
 finalizeBindings sub = do
     let params    = subParams sub
@@ -129,15 +175,23 @@ finalizeBindings sub = do
             ++ (show $ length reqPrms) ++ " expected"
 
     let unboundOptPrms = optPrms \\ (map fst boundOpt) -- unbound optParams are allPrms - boundPrms
-        optPrmsDefaults = map paramDefault $ unboundOptPrms -- get a list of default values
-        boundDefOpts = unboundOptPrms `zip` (map Parens optPrmsDefaults) -- turn into exprs, so that +$y = $x will work
+        optPrmsDefaults = [ Syn "default" [paramDefault prm] | prm <- unboundOptPrms ] -- get a list of default values
+        boundDefOpts = unboundOptPrms `zip` optPrmsDefaults -- turn into exprs, so that +$y = $x will work
         
     return sub {
         subBindings = ((subBindings sub) ++ boundDefOpts)
     }
 
--- takes invocants and arguments, and creates a binding from the remaining params in the sub
-bindSomeParams :: VCode -> [Exp] -> [Exp] -> MaybeError VCode
+{-|
+Take a code object and lists of invocants and arguments, and produce (if
+possible) a new 'VCode' value representing the same code object, with as many
+parameters bound as possible (using the given invocants and args).
+-}
+bindSomeParams :: VCode -- ^ Code object to perform bindings on
+               -> [Exp] -- ^ List of invocant expressions
+               -> [Exp] -- ^ List of argument expressions
+               -> MaybeError VCode -- ^ A new 'VCode' structure, augmented
+                                   --     with the new bindings
 bindSomeParams sub invsExp argsExp = do
     let params     = subParams sub
         bindings   = subBindings sub

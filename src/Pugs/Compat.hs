@@ -1,14 +1,14 @@
 {-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 
-{-
+{-|
     POSIX calls and emulations.
 
-    And now all those lands lie under the wave.
-    And I walk in Ambarona, in Tauremorna, in Aldalome.
-    In my own land, in the country of Fangorn,
-    Where the roots are long,
-    And the years lie thicker than the leaves
-    In Tauremornalome.
+>   And now all those lands lie under the wave.
+>   And I walk in Ambarona, in Tauremorna, in Aldalome.
+>   In my own land, in the country of Fangorn,
+>   Where the roots are long,
+>   And the years lie thicker than the leaves
+>   In Tauremornalome.
 -}
 
 #undef PUGS_HAVE_POSIX
@@ -30,8 +30,10 @@ module Pugs.Compat (
     getRealGroupID,
     getEffectiveGroupID,
     setEnv,
+    getEnv,
     unsetEnv,
     signalProcess,
+    executeFile,
 ) where
 
 import Foreign
@@ -40,9 +42,10 @@ import System.Posix.Types
 
 #ifdef PUGS_HAVE_POSIX
 import System.Posix.Process
-import System.Posix.Env
+import System.Posix.Env hiding (getEnvironment)
 import System.Posix.Files
 import System.Posix.User
+import System.Environment (getEnvironment)
 import qualified System.Posix.Signals
 
 statFileSize :: FilePath -> IO Integer
@@ -58,18 +61,47 @@ signalProcess = System.Posix.Signals.signalProcess
 #else
 
 import Debug.Trace
-import System.Environment
+-- import System.Environment
+import qualified System.Environment
 import IO
 import System.IO
+import Foreign.C.String
+import Foreign.Ptr
 
 failWith s = fail $ "'" ++ s ++ "' not implemented on this platform."
 warnWith s = trace ("'" ++ s ++ "' not implemented on this platform.") $ return ()
 
+-- This should all be moved into Compat.Win32, once we go that route
+
+foreign import stdcall unsafe "SetEnvironmentVariableW" win32SetEnv :: CWString -> CWString -> IO ()
+foreign import stdcall unsafe "GetEnvironmentVariableW" win32GetEnv :: CWString -> CWString -> Int -> IO Int
+-- also implement/redefine getEnvironment as GetEnvironmentStrings
+
 setEnv :: String -> String -> Bool -> IO ()
-setEnv _ _ _ = warnWith "setEnv"
+setEnv k v _ = withCWString k $ \ key ->
+               withCWString v $ \ value -> do
+                 rc <- win32SetEnv key value
+                 return $ rc
+
+getEnv :: String -> IO (Maybe String)
+getEnv k = withCWString k $ \ key ->
+    withCWString (replicate size ' ') $ \ buf -> do
+      rc <- win32GetEnv key buf size
+      if rc > 0
+        then do
+          t <- peekCWString buf
+          return $ Just t
+        else
+          return $ Nothing
+      where
+        size = 32768
 
 unsetEnv :: String -> IO ()
-unsetEnv _ = warnWith "unsetEnv"
+unsetEnv k = withCWString k $ \ key -> withCWString "" $ \ v -> do
+               win32SetEnv key v
+-- #unsetEnv _ = warnWith "unsetEnv"
+
+getEnvironment = System.Environment.getEnvironment
 
 createLink :: FilePath -> FilePath -> IO ()
 createLink _ _ = warnWith "link"
@@ -94,8 +126,11 @@ statFileSize :: FilePath -> IO Integer
 statFileSize n = bracket (openFile n ReadMode) hClose hFileSize
 -- statFileSize _ = failWith "-s"
 
-getProcessID :: IO ProcessID
-getProcessID = return 1
+-- Again, Win32 specific magic, as stolen from GHC
+foreign import stdcall "GetCurrentProcessId" getProcessID :: IO Int -- relies on Int == Int32 on Windows
+
+-- getProcessID :: IO Int
+-- getProcessID = return $ 1
 
 type UserID = Int
 type GroupID = Int
@@ -115,6 +150,9 @@ getEffectiveGroupID = return 1
 signalProcess :: Int -> Int -> IO ()
 signalProcess _ _ = failWith "kill"
 
+executeFile :: FilePath -> Bool -> [String] -> Maybe [(String, String)] -> IO ()
+executeFile _ _ _ _ = failWith "executeFile"
+
 #endif
 
 foreign import ccall unsafe "getProgArgv"
@@ -127,4 +165,3 @@ getArg0 = do
         getProgArgv p_argc p_argv
         argv <- peek p_argv
         peekCString =<< peekElemOff argv 0
-

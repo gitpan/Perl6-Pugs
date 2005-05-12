@@ -15,6 +15,7 @@ import Pugs.Run
 import Pugs.Prim
 
 genGHC :: Eval Val
+-- Haddock doesn't like Template Haskell.
 #ifndef HADDOCK
 genGHC = do
     exp <- asks envBody
@@ -24,6 +25,7 @@ genGHC = do
         , "import qualified GHC.Base"
         , "import qualified Pugs.Run"
         , "import qualified Pugs.AST"
+        , "import qualified Pugs.AST.Internals"
         , "import qualified Pugs.Types"
         , "import qualified Pugs.Prim"
         , "import qualified Pugs.Internals"
@@ -33,6 +35,7 @@ genGHC = do
         ]
 #endif
 
+-- Haddock doesn't like Template Haskell.
 #ifndef HADDOCK
 compile (Stmts stmt rest) = [| do
         $(argC)
@@ -40,14 +43,14 @@ compile (Stmts stmt rest) = [| do
     |] where
     argC = compile stmt
     argRest = compile rest
-compile (App op [] []) = [| op0 op [] |]
-compile (App op [] args) = compile (App op args [])
-compile (App ('&':op) [arg] []) = [| do
+compile (App (Var op) [] []) = [| op0 op [] |]
+compile (App (Var op) [] args) = compile (App (Var op) args [])
+compile (App (Var ('&':op)) [arg] []) = [| do
         val <- $(argC)
         op1 op val
     |] where
     argC = compile arg
-compile (App ('&':op) [arg1, arg2] []) = [| do
+compile (App (Var ('&':op)) [arg1, arg2] []) = [| do
         val1 <- $(argC1)
         val2 <- $(argC2)
         op2 op val1 val2
@@ -56,7 +59,6 @@ compile (App ('&':op) [arg1, arg2] []) = [| do
     argC2 = compile arg2
 compile (Cxt _ arg) = compile arg
 compile (Pos _ arg) = compile arg
-compile (Parens arg) = compile arg
 compile (Val (VInt i)) = [| return (VInt i) |]
 compile (Val (VStr s)) = [| return (VStr s) |]
 compile (Val (VBool b)) = [| return (VBool b) |]

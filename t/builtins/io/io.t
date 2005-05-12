@@ -11,7 +11,8 @@ I/O tests
 
 plan 48;
 
-my $filename = 'tempfile';
+sub nonces () { return (".$*PID." ~ int rand 1000) }
+my $filename = 'tempfile' ~ nonces();
 
 # create and write a file
 
@@ -105,7 +106,6 @@ is(@lines7[1], "Foo Bar Baz\n", 'readline($in) worked in list context');
 is(@lines7[2], "The End\n", 'readline($in) worked in list context');
 is(@lines7[3], "... Its not over yet!\n", 'readline($in) worked in list context');
 
-# now be sure to delete the file as well
+#now be sure to delete the file as well
 
-ok(?unlink($filename), 'file has been removed');
-
+is(unlink($filename), 1, 'file has been removed');

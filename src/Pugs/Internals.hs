@@ -1,24 +1,22 @@
 {-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
 
-{-
+{-|
     Internal utilities and library imports.
 
-    Though here at journey's end I lie
-    in darkness buried deep,
-    beyond all towers strong and high,
-    beyond all mountains steep,
-    above all shadows rides the Sun
-    and Stars for ever dwell:
-    I will not say the Day is done,
-    nor bid the Stars farewell.
+>   Though here at journey's end I lie
+>   in darkness buried deep,
+>   beyond all towers strong and high,
+>   beyond all mountains steep,
+>   above all shadows rides the Sun
+>   and Stars for ever dwell:
+>   I will not say the Day is done,
+>   nor bid the Stars farewell.
 -}
 
 module Pugs.Internals (
     module UTF8,
     module Unicode,
-    module Pugs.Embed,
     module Pugs.Compat,
-    module Pugs.Cont,
     module RRegex,
     module RRegex.Syntax,
     module Pugs.Rule.Pos,
@@ -51,6 +49,7 @@ module Pugs.Internals (
     module Data.Complex,
     module Data.Set,
     module Data.Map,
+    module Data.IntMap,
     module Debug.Trace,
     module Network,
     internalError,
@@ -69,15 +68,13 @@ module Pugs.Internals (
 
 import UTF8
 import Unicode
-import Pugs.Cont hiding (shiftT, resetT)
-import Pugs.Embed
 import Pugs.Compat
 import RRegex
 import RRegex.Syntax
 import Data.Dynamic
 import Data.Array (elems)
 import Network
-import System.Environment (getArgs, withArgs, getProgName, getEnv)
+import System.Environment (getArgs, withArgs, getProgName)
 import System.Random hiding (split)
 import System.Exit
 import System.Time
@@ -108,11 +105,11 @@ import Data.Unique
 import Data.Ratio
 import Data.Word
 import Data.Char (chr, ord, digitToInt)
-import Data.Ratio
 import Data.Complex
 import Data.Tree
 import Data.Set (Set)
 import Data.Map (Map)
+import Data.IntMap (IntMap)
 import Debug.Trace
 import Pugs.Rule.Pos
 -- import GHC.Conc (unsafeIOToSTM)
@@ -128,7 +125,7 @@ instance Ord (a -> b) where
     compare _ _ = LT
 
 internalError :: String -> a
-internalError s = error $ 
+internalError s = error $
     "Internal error:\n    " ++ s ++ "\nPlease file a bug report."
 
 split :: (Eq a) => [a] -> [a] -> [[a]]

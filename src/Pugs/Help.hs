@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 
-{-
+{-|
     Online help and banner text.
 
-    But if of ships I now should sing,
-    what ship would come to me,
-    What ship would bear me ever back
-    across so wide a Sea?
+>   But if of ships I now should sing,
+>   what ship would come to me,
+>   What ship would bear me ever back
+>   across so wide a Sea?
 -}
 
 #define PUGS_VERSION "6"
@@ -38,11 +38,12 @@ printCommandLineHelp
         putStrLn "Command-line flags:"
         putStrLn "-e program       one line of program (several -e's allowed, omit programfile)"
         putStrLn "-n               wrap the -e fragments in while(=<>){...} loop"
-        putStrLn "-p               wrap the -e fragments in while(=<>){...;print} loop"
-        putStrLn "-c               parses the file or -e, but does not run it"
-        putStrLn "-Cbackend        uses the compiler backend"
+        putStrLn "-p               wrap the -e fragments in while(=<>){...;say} loop"
+        putStrLn "-c               parse the file or -e, but do not run it"
+        putStrLn "-Bbackend        execute using the compiler backend"
+        putStrLn "-Cbackend        compile using the compiler backend"
         putStrLn "-M module        execute 'use module' before executing the program"
-        putStrLn "-h or --help     gives this message"
+        putStrLn "-h or --help     give this message"
         putStrLn "-V               long configuration information & version"
         putStrLn "-V:item          short configuration information for item"
         putStrLn "-v or --version  version"

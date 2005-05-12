@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Config;
+use Cwd qw(abs_path);
 use File::Spec;
 use lib 'lib';
 use inc::Module::Install;
@@ -44,6 +45,7 @@ clean_files     (map fixpaths($_),
     "pugs*", "src/Pugs/pugs_config.h", $version_h, $config_h,
     'src/Pugs/Config.hs', 'blib6',
     'test.log',
+    'src/Pugs/Embed/Parrot.hs',
     map {("$_/*.hpp", "$_/*.hi", "$_/*.o*")} @srcdirs
 );
 
@@ -52,12 +54,23 @@ no_index        (directory => 'inc', 'examples');
 sign            (1);
 WritePugs       (5);
 
+print << ".";
+
+*** Enter '$Config{make}' to build Pugs.  If compilation is too slow,
+    consider using '$Config{make} unoptimized' instead.
+
+.
+
 ################################################################################
 sub set_postamble {
-    my @srcfiles = grep !/MainCC/, map glob("$_/*.*hs"), @srcdirs;
-    push @srcfiles, grep !/MainCC/, map glob("$_/*.*hs-boot"), @srcdirs;
+    my @srcfiles = map { glob("$_/*.*hs") } @srcdirs;
+    push @srcfiles, map { glob("$_/*.*hs-boot") } @srcdirs;
+    push @srcfiles, map { map { substr($_, 0, -1) } glob("$_/*.*hsc") } @srcdirs;
 
     my ($ghc, $ghc_version, $ghc_flags) = assert_ghc();
+    my $hsc2hs = $ghc;
+    $hsc2hs =~ s{(.*)ghc}{$1hsc2hs};
+
     # $ghc_flags .= ' -dcore-lint';
     $ghc_flags .= " -keep-tmp-files";
 	if (!has_ghc_package('plugins')) {
@@ -85,18 +98,58 @@ sub set_postamble {
 
 .
     }
-        
 
     my $ghc_output = "-o pugs$Config{_exe} src/Main.hs";
     my $hasktags = $ENV{HASKTAGS} || 'hasktags';
 
-    my $pcre = "src/pcre/pcre.o";
     my $pcre_c = "src/pcre/pcre.c";
+    my @syck_c = glob("src/syck/*.c");
+    my $pcre = "src/pcre/pcre.o";
+    my @syck = map { substr($_, 0, -1) . 'o' } @syck_c;
     my $unicode = "src/UnicodeC.o";
     my $unicode_c = "src/UnicodeC.c";
 
-    my @prereqs = ($config_h, $pcre, $unicode);
-    $ghc_output .= " $pcre $unicode";
+    my @prereqs = ($config_h, $pcre, @syck, $unicode);
+    $ghc_output .= " $pcre @syck $unicode";
+
+    my $embed_flags = "";
+    my $hsc2hs_flags = "";
+    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bparrot\b/i) {
+        my $base = $ENV{PARROT_PATH};
+        if (!$base and -d "../parrot") {
+            $base = abs_path('../parrot/');
+        }
+        (-d $base and -e "$base/parrot-config.imc")
+            or die "*** Please set \$ENV{PARROT_PATH} to the base path with a built parrot tree.\n";
+        my $ldflags = parrot_config($base, 'ldflags');
+        my $libs = parrot_config($base, 'libs');
+        my $icuflags = parrot_config($base, 'icu_shared');
+
+        # strip non-GHC flags
+        $ldflags =~ s/-[^IlL]\S*//g;
+        $libs =~ s/-[^IlL]\S*//g;
+        $icuflags =~ s/-[^IlL]\S*//g;
+
+        $embed_flags .= " -I$base/include -L$base/blib/lib -DPUGS_HAVE_PARROT=1 -L$base/blib/lib -L/usr/local/lib $ldflags ";
+        $ghc_output .= " -lparrot $libs $icuflags ";
+        my $config = "$base/src/parrot_config$Config{_o}";
+        $ghc_output .= " $config " if -e $config;
+
+        # parrot include paths for hsc2hs
+        $hsc2hs_flags .= " -DPUGS_HAVE_PARROT -I$base/include ";
+    }
+    else {
+    warn << '.';
+
+*** Parrot linking disabled; external 'parrot' executable will be used for
+    Rules support.  If you want to link against Parrot, set the PUGS_EMBED
+    environment variable to 'parrot', the PARROT_PATH environment variable
+    to the path of a built parrot source tree, then run Makefile.PL again.
+
+.
+    }
+
+    $hsc2hs_flags .= " -Isrc/syck "; # for Data.Yaml
 
     my $config = get_pugs_config();
     my $is_win32 = ($^O =~ /MSWin|mingw|cygwin/i);
@@ -106,6 +159,12 @@ sub set_postamble {
     # XXX - hsplugins doesn't build with profiles
     my $profiled_flags = $ghc_flags;
     $profiled_flags =~ s{-DPUGS_HAVE_HSPLUGINS=1}{};
+
+    my $emit = sub {
+        my $c = shift;
+        my $o = substr($c, 0, -1) . 'o';
+        return "$o : $c\n\t$ghc $threaded $ghc_flags -no-link -no-hs-main -O -o $o $c\n";
+    };
 
     postamble(fixpaths(<< "."));
 $config_h : lib/Perl6/Pugs.pm util/config_h.pl
@@ -117,11 +176,7 @@ $version_h : .svn/entries util/version_h.pl
 .svn/entries :
 	\$(NOOP)
 
-$pcre : $pcre_c
-	$ghc $threaded -no-link -no-hs-main -O -o $pcre $pcre_c
-
-$unicode : $unicode_c
-	$ghc $threaded -no-link -no-hs-main -O -o $unicode $unicode_c
+@{[join("\n", map {$emit->($_)} ($unicode_c, $pcre_c, @syck_c))]}
 
 src/Pugs/Config.hs : util/PugsConfig.pm
 	\$(PERL) -Iutil -MPugsConfig -e "PugsConfig->write_config_module" > src/Pugs/Config.hs
@@ -136,8 +191,13 @@ ${() = '%.hpp : %.hs @prereqs $version_h
 	$ghc $threaded $ghc_flags -DHADDOCK -E \$< -o \$@
 	\$(PERL) util/munge_haddock.pl \$@
 
+.SUFFIXES: .hsc .hs
+
+.hsc.hs :
+	$hsc2hs $hsc2hs_flags \$<
+
 haddock : $version_h $config_h @hppfiles docs/haddock
-	haddock -h -o docs/haddock/ @hppfiles
+	haddock -t Pugs-$version -h -o docs/haddock/ @hppfiles
 	\@\$(PERL) -le "print q-*** API Documentation generated in @{[File::Spec->catdir('docs', 'haddock').File::Spec->catdir('')]}.-"
 
 docs/haddock :
@@ -152,15 +212,15 @@ pugs.prof :: profiled
 optimised :: optimized
 
 optimized :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
-	$ghc $threaded -O --make $ghc_flags $ghc_output
+	$ghc $threaded -O --make $ghc_flags $embed_flags $ghc_output
 
-unoptimised :: optimized
+unoptimised :: unoptimized
 
 unoptimized :: src/Pugs/Config.hs @srcfiles $version_h @prereqs
-	$ghc $threaded -O0 --make $ghc_flags $ghc_output
+	$ghc $threaded -O0 --make $ghc_flags $embed_flags $ghc_output
 
 $pugs : src/Pugs/Config.hs @srcfiles $version_h @prereqs
-	$ghc $threaded -O --make $ghc_flags $ghc_output
+	$ghc $threaded -O --make $ghc_flags $embed_flags $ghc_output
 
 smoke : $pugs util/run-smoke.pl
 	\$(PERL) util/run-smoke.pl . smoke.html
@@ -217,4 +277,16 @@ sub try_compile {
     unlink("$temp.hi");
     unlink("$temp.o");
     return $ok;
+}
+
+sub parrot_config {
+    my ($base, $config) = @_;
+    my $ac_path = abs_path();
+    my $sp_base = $base;
+    $sp_base =~ s{\\}{\/}g;
+    chdir( $sp_base ) or die "Can't change dir to '$sp_base'";
+    my $value = `./parrot parrot-config.imc $config`;
+    chomp($value);
+    chdir( $ac_path ) or die "Can't change dir to '$ac_path'";
+    return $value;
 }

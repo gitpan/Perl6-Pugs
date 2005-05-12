@@ -80,13 +80,15 @@ instance HashClass IHashEnv where
         return . Map.map VStr $ Map.fromList envs
     hash_fetchVal _ key = tryIO undef $ do
         str <- getEnv key
-        return $ VStr str
+        return $ fromMaybe VUndef (fmap VStr str)
     hash_storeVal _ key val = do
         str <- fromVal val
         liftIO $ setEnv key str True
     hash_existsElem _ key = tryIO False $ do
-        getEnv key
-        return True
+        str <- getEnv key
+        return $ case str of
+            Just (_:_)  -> True
+            _           -> False
     hash_deleteElem _ key = do
         liftIO $ unsetEnv key
 

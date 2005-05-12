@@ -21,20 +21,20 @@ sub obj_ok_in_rw {
 }
 
 eval_is 'my $scalar_ctx = obj_ok_in_scalar()', 42,
-  "want() works correctly in Scalar context (object-form)", :todo;
+  "want() works correctly in Scalar context (object-form)", :todo<feature>;
 
 eval_is 'my @list_ctx   = obj_ok_in_list()',   42,
-    "want() works correctly in List context (object-form)", :todo;
+    "want() works correctly in List context (object-form)", :todo<feature>;
 
 my ($a, $b, $c, $d, $e);
 eval_is '($a, $b)    = obj_ok_in_count2()', 42,
-  "want.count() works correct if two return values are expected (object-form)", :todo;
+  "want.count() works correct if two return values are expected (object-form)", :todo<feature>;
 
 eval_is '($c,$d,$e)  = obj_ok_in_count3()', 42,
-  "want.count() works correct if three return values are expected (object-form)", :todo;
+  "want.count() works correct if three return values are expected (object-form)", :todo<feature>;
 
 eval_is 'obj_ok_in_count3() = 23',             42,
-  "want() works correctly in rw context (object-form)", :todo;
+  "want() works correctly in rw context (object-form)", :todo<feature>;
 
 
 
@@ -48,16 +48,16 @@ sub sm_ok_in_count3 { want ~~ 3        ?? 42 :: 0 }
 my ($scalar_ctx, @list_ctx);
 
 eval_is '$scalar_ctx = sm_ok_in_scalar()', 42,
-  "want() works correctly in Scalar context (smartmatch-form)", :todo;
+  "want() works correctly in Scalar context (smartmatch-form)", :todo<feature>;
 
 eval_is '@list_ctx   = sm_ok_in_list()',   42,
-    "want() works correctly in List context (smartmatch-form)", :todo;
-fail "want() works correctly in List context (smartmatch-form)", :todo;
+    "want() works correctly in List context (smartmatch-form)", :todo<feature>;
+fail "want() works correctly in List context (smartmatch-form)", :todo<feature>;
 
 eval_is '($a, $b)    = sm_ok_in_count2()', 42,
-  "want.count() works correct if two return values are expected (smartmatch-form)", :todo;
+  "want.count() works correct if two return values are expected (smartmatch-form)", :todo<feature>;
 eval_is '($c,$d,$e)  = sm_ok_in_count3()', 42,
-  "want.count() works correct if three return values are expected (smartmatch-form)", :todo;
+  "want.count() works correct if three return values are expected (smartmatch-form)", :todo<feature>;
   
 # Test the identity of want() across function calls:
 sub wants_array( @got ) { return @got };
@@ -66,8 +66,8 @@ my @a = gives_array;
 @a = wants_array( @a );
 my @b = wants_array(gives_array());
 is( substr(@a, 0, 4), substr(@b, 0, 4), "want() context propagates consistently" ); 
-like( @a[0], rx:P5/List/, "The context is Scalar" );
-like( @b[0], rx:P5/List/, "... on both subs" );
+like( @a[0], rx:P5/Scalar/, "The context is Scalar" );
+like( @b[0], rx:P5/Scalar/, "... on both subs" );
 
 # Test the identity again, via splice(), a builtin:
 sub wants_array( @got ) { return @got };

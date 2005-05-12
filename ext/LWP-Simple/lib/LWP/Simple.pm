@@ -68,7 +68,7 @@ sub head (Str $url) is export {
   # memory all at once
 
   if ($head ~~ rx:perl5{^HTTP\/\d+\.\d+\s+(\d+) (?:.*?\015?\012)((?:.*?\015?\012)*?)\015?\012}) {
-    my ($code,$head) = ($1,$2);
+    my ($code,$head) = ($0,$1);
 
     # if (want.Boolean) {
     #  return $code ~~ rx:perl5/^2/;
@@ -86,7 +86,7 @@ sub head (Str $url) is export {
     # my @list = "X-LWP-HTTP-Status: $code", (split rx:perl5/\015?\012/, $head);
     #if (want.List) { return @list };
     #if (want.Hash) {
-    #  my %res = map { rx:perl5/^(.*?): (.*)/; ($1 => $2) } @list;
+    #  my %res = map { rx:perl5/^(.*?): (.*)/; ($0 => $1) } @list;
     #  return %res
     #} else {
     #  # What context can we also get?
@@ -97,11 +97,11 @@ sub head (Str $url) is export {
 
 # Unify with URI.pm
 sub split_uri (Str $url) {
-  $url ~~ rx:perl5{^http://([^/:\@]+)(?::(\d+))?(/\S*)?$};
+  $url ~~ rx:Perl5{^http://([^/:\@]+)(?::(\d+))?(/\S*)?$}; #/#--vim
 
-  my ($host) = $1;
-  my ($port) = $2 || 80;
-  my ($path) = $3 || "/";
+  my ($host) = $0;
+  my ($port) = $1 || 80;
+  my ($path) = $2 || "/";
 
   return ($host,$port,$path);
 };
@@ -127,12 +127,12 @@ sub _trivial_http_get (Str $url) returns Str {
   # memory all at once
 
   # if ($buffer ~~ s:perl5{^HTTP\/\d+\.\d+\s+(\d+)([^\012]*?\015?\012)+?\015?\012}{}) {
-  if ($buffer ~~ s:perl5{^HTTP\/\d+\.\d+\s+(\d+)([^\x0A]*?\x0D?\x0A)+?\x0D?\x0A}{}) {
-    my $code = $1;
+  if ($buffer ~~ s:Perl5{^HTTP\/\d+\.\d+\s+(\d+)([^\x0A]*?\x0D?\x0A)+?\x0D?\x0A}{}) {
+    my $code = $0;
 
     # XXX: Add 30[1237] checking/recursion
 
-    if ($code ~~ rx:perl5/^[^2]../) {
+    if ($code ~~ rx:Perl5/^[^2]../) {  # /#--vim
        return ();
     };
 
@@ -148,29 +148,28 @@ sub _make_request (Str $method, Str $uri) {
   };
 
   join "\n", # $CRLF,
-    "$method $u HTTP/1.1",
+    "$method $u HTTP/1.0",
     "Host: $h",
     "User-Agent: lwp-trivial-pugs/$VERSION",
     "Connection: close",
     $CRLF;
 };
 
-sub _send_request (Str $host, Str $port, Str $request) {
+sub _send_request (Str $host, Int $port, Str $request) {
   # XXX clean up!
 
   my ($h,$p) = ($host,$port);
-  # TODO: Replace with exists() once it is there
-  if (%*ENV.exists("HTTP_PROXY")) {
-    #if (%*ENV<HTTP_PROXY> ~~ rx:perl5!http://()(:(\d+))?$!) {
-    if (%*ENV<HTTP_PROXY> ~~ rx:perl5!http://()(:(\d+))?$!) {
-      $h = $1;
-      $p = $2 || 80;
+  my $http_proxy = %*ENV<HTTP_PROXY> // %*ENV<http_proxy>;
+  if defined $http_proxy {
+    if $http_proxy ~~ rx:Perl5!http://()(:(\d+))?$! {
+      $h = $0;
+      $p = $1 || 80;
     } else {
-      die "Unhandled/unknown proxy settings: \"" ~ %*ENV<HTTP_PROXY> ~ "\"";
+      die "Unhandled/unknown proxy settings: \"$http_proxy\"";
     }
   }
 
-  my $hdl = connect($h, $p);
+  my $hdl = connect $h, $p;
   $hdl.print($request);
   $hdl.flush;
   $hdl;

@@ -3,18 +3,18 @@
 use v6;
 use Test;
 
-plan 51;
+plan 52;
 
 # tests various assignment styles
 
 {
-	my ($foo, $bar) = ("FOO", "BAR");
-	is($foo, "FOO", "assigned correct value to first of two scalars");
-	is($bar, "BAR", "... and second");
+    my ($foo, $bar) = ("FOO", "BAR");
+    is($foo, "FOO", "assigned correct value to first of two scalars");
+    is($bar, "BAR", "... and second");
 
-	($foo, $bar) = ($bar, $foo);
-	is($foo, "BAR", "swap assignment works for the first value");
-	is($bar, "FOO", "... and second");
+    ($foo, $bar) = ($bar, $foo);
+    is($foo, "BAR", "swap assignment works for the first value");
+    is($bar, "FOO", "... and second");
 };
 
 
@@ -41,32 +41,32 @@ plan 51;
 {
    # testing list assignment syntax 
 
-	my ($a,$b,$c,@a);
-	($a,$b,$c) = 1 .. 3;
-	@a = 1 .. 3;
-	my($s,@b) = 1 .. 3;
+    my ($a,$b,$c,@a);
+    ($a,$b,$c) = 1 .. 3;
+    @a = 1 .. 3;
+    my($s,@b) = 1 .. 3;
 
-	is($a,1,"'$a' is '1'?: ($,$,$) = 1 .. 3");
-	is($b,2,"'$b' is '2'?: ($,$,$) = 1 .. 3");
-	is($c,3,"'$c' is '3'?: ($,$,$) = 1 .. 3"); 
-	is(@a,'1 2 3',"'{@a}' is '1 2 3'?:       @a = 1 .. 3");
-	is($s,'1',  "$s is '1'?:       my ($s,@a) = 1 .. 3");
-	is(@b,'2 3',"'{@b}' is '2 3'?: my ($s,@a) = 1 .. 3"); 
+    is($a,1,"'$a' is '1'?: ($,$,$) = 1 .. 3");
+    is($b,2,"'$b' is '2'?: ($,$,$) = 1 .. 3");
+    is($c,3,"'$c' is '3'?: ($,$,$) = 1 .. 3"); 
+    is(@a,'1 2 3',"'{@a}' is '1 2 3'?:       @a = 1 .. 3");
+    is($s,'1',  "$s is '1'?:       my ($s,@a) = 1 .. 3");
+    is(@b,'2 3',"'{@b}' is '2 3'?: my ($s,@a) = 1 .. 3"); 
 }
 
 {
-	my @a;
-	@a[1, 2, 3] = (100, 200, 300);
-	is(@a[1], 100, "assigned correct value from list to sliced list");
-	is(@a[2], 200, "... and second");
-	is(@a[3], 300, "... and third");
-	is(@a[0], undef, "won't modify unassigned one");
+    my @a;
+    @a[1, 2, 3] = (100, 200, 300);
+    is(@a[1], 100, "assigned correct value from list to sliced array");
+    is(@a[2], 200, "... and second");
+    is(@a[3], 300, "... and third");
+    is(@a[0], undef, "won't modify unassigned one");
 
-	my @b;
-	@b[2, 1, 0] = (401, 201, 1);
-	is(@b[0], 1, "assigned correct value from list to unsorted sliced list");
-	is(@b[1], 201, "... and second");
-	is(@b[2], 401, "... and third");
+    my @b;
+    @b[2, 1, 0] = (401, 201, 1);
+    is(@b[0], 1, "assigned correct value from list to unsorted sliced array");
+    is(@b[1], 201, "... and second");
+    is(@b[2], 401, "... and third");
     
 }
 
@@ -84,6 +84,9 @@ plan 51;
     is($a, 3, "//= operator");
     $a //= 10;
     is($a, 3, "... and second");
+    my %hash;
+    %hash<foo> //= hash();
+    is(ref %hash<foo>, 'Hash', "Verify //= autovivifies correctly");
 }
 
 {
@@ -180,26 +183,26 @@ plan 51;
 }
 
 {
-	my $x = 4;
-	$x %= 3;
-	is($x, 1, '%= operator');
+    my $x = 4;
+    $x %= 3;
+    is($x, 1, '%= operator');
 }
 
 {
-	my $x = 1;
-	$x +^= 3;
-	is($x, 2, '+^= operator');
+    my $x = 1;
+    $x +^= 3;
+    is($x, 2, '+^= operator');
 }
 
 {
-	my $x = "z";
-	$x ~^= "C";
-	is($x, 9, '~^= operator');
+    my $x = "z";
+    $x ~^= "C";
+    is($x, 9, '~^= operator');
 }
 
 {
-	my $x = 0;
-	$x ^^= 42;
-	is($x, 42, '^^= operator');
+    my $x = 0;
+    $x ^^= 42;
+    is($x, 42, '^^= operator');
 }
 

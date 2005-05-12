@@ -23,6 +23,14 @@ HaskellDemo                                     - Shae Erisson (aka "shapr")
   <http://www.haskell.org/hawiki/HaskellDemo>
 Yet Another Haskell Tutorial                                  - Hal Daume II
   <http://www.isi.edu/~hdaume/htut/>
+Haskell Mini-Primer                    (this covers infix $ and . operators)
+  <http://conal.net/pan/haskell-primer.htm>  
+
+= Perl 6 books (always outdated :))
+
+Perl 6 and Parrot Essenti     - Allison Randal, Dan Sugalski, Leopold Tőtsch
+Perl 6 Now: The core ideas illustrated with Perl 5           - Scott Walters
+Perl 6 Bible (Perl6::Bible)                                             - VA
 
 = Non-Haskell books
 
@@ -35,4 +43,3 @@ Higher Order Perl                                       - Mark Jason Dominus
 The Silmarillion                                            - J.R.R. Tolkien
 The Demolished Man                                           - Alfred Bester
 Flow My Tears the Policeman Said                           - Phillip K. Dick
-

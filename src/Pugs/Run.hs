@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 
-{-
+{-|
     Runtime engine.
 
-    The mountain throne once more is freed!
-    O! Wandering folk, the summons heed!
-    Come haste! Come haste! Across the waste!
-    The king of friend and kin has need...
+>   The mountain throne once more is freed!
+>   O! Wandering folk, the summons heed!
+>   Come haste! Come haste! Across the waste!
+>   The king of friend and kin has need...
 -}
 
 module Pugs.Run where
@@ -17,11 +17,19 @@ import Pugs.AST
 import Pugs.Types
 import Pugs.Eval
 import Pugs.Prim
+import Pugs.Embed
 import qualified Data.Map as Map
 
 runWithArgs f = do
     args <- getArgs
     f $ canonicalArgs args
+
+runEvalMain :: Env -> Eval Val -> IO Val
+runEvalMain env eval = withSocketsDo $ do
+    my_perl <- initPerl5 ""
+    val     <- runEvalIO env eval
+    freePerl5 my_perl
+    return val
 
 runEnv :: Env -> IO Val
 runEnv env = runEvalMain env $ evaluateMain (envBody env)
@@ -63,7 +71,7 @@ prepareEnv name args = do
     execSV  <- newScalar (VStr exec)
     progSV  <- newScalar (VStr name)
     endAV   <- newArray []
-    matchAV <- newArray []
+    matchAV <- newScalar (VMatch mkMatchFail)
     incAV   <- newArray (map VStr libs)
     argsAV  <- newArray (map VStr args)
     inGV    <- newHandle stdin
@@ -78,8 +86,8 @@ prepareEnv name args = do
     hspluginsSV <- newScalar (VInt 0)
 #endif
     let subExit = \x -> case x of
-            [x] -> op1 "exit" x
-            _   -> op1 "exit" undef
+            [x] -> op1Exit x     -- needs refactoring (out of Prim)
+            _   -> op1Exit undef
     emptyEnv name $
         [ genSym "@*ARGS"       $ MkRef argsAV
         , genSym "@*INC"        $ MkRef incAV
@@ -117,7 +125,7 @@ prepareEnv name args = do
 getLibs :: IO [String]
 getLibs = do
     args    <- getArgs
-    p6lib   <- tryIO "" (getEnv "PERL6LIB")
+    p6lib   <- (getEnv "PERL6LIB") >>= (return . (fromMaybe ""))
     return $ filter (not . null) (libs p6lib $ canonicalArgs args)
     where
     -- broken, need real parser

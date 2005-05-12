@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 
-{-
+{-|
     Junction logic.
 
-    Still round the corner there may wait
-    A new road or a secret gate,
-    And though we pass them by today,
-    Tomorrow we may come this way...
+>   Still round the corner there may wait
+>   A new road or a secret gate,
+>   And though we pass them by today,
+>   Tomorrow we may come this way...
 -}
 
 module Pugs.Junc where
@@ -14,28 +14,42 @@ import Pugs.Internals
 import Pugs.AST
 import qualified Data.Set as Set
 
+-- |Construct a @none(...)@ junction from a list of values.
+-- Delegates to 'opJunc'.
 opJuncNone :: [Val] -> Val
 opJuncNone = opJunc JNone
+-- |Construct an @all(...)@ junction from a list of values.
+-- Delegates to 'opJunc'.
 opJuncAll :: [Val] -> Val
 opJuncAll = opJunc JAll
+-- |Construct a n@any(...)@ junction from a list of values.
+-- Delegates to 'opJunc'.
 opJuncAny :: [Val] -> Val
 opJuncAny = opJunc JAny
+-- |Construct a @one(...)@ junction from a list of values.
+-- Handled differently!
 opJuncOne :: [Val] -> Val
-opJuncOne args = VJunc (Junc JOne dups vals)
+opJuncOne args = VJunc (MkJunc JOne dups vals)
     where
     vals = Set.fromList [ v | [v] <- groups ]
     dups = Set.fromList [ v | (v:_:_) <- groups ]
     groups = group $ sort args
 
+-- |Construct a junction of the specified junctive type, containing all the
+-- values in the list.
 opJunc :: JuncType -> [Val] -> Val
-opJunc t vals = VJunc $ Junc t Set.empty (joined `Set.union` Set.fromList vs)
+opJunc t vals = VJunc $ MkJunc t Set.empty (joined `Set.union` Set.fromList vs)
     where
     joined = Set.unions $ map (\(VJunc s) -> juncSet s) js
     (js, vs) = partition sameType vals
-    sameType (VJunc (Junc t' _ _))  = t == t'
+    sameType (VJunc (MkJunc t' _ _))  = t == t'
     sameType _                      = False
 
-juncTypeIs :: Val -> [JuncType] -> Maybe VJunc
+-- |Check if the specified value is a 'VJunc' of one of the specified
+-- junctive types.
+juncTypeIs :: Val -- ^ Value to test
+           -> [JuncType] -- ^ Types to check against
+           -> Maybe VJunc -- ^ Returns 'Nothing' if the test fails
 juncTypeIs v ts
     | (VJunc j) <- v
     , juncType j `elem` ts
@@ -45,8 +59,8 @@ juncTypeIs v ts
 
 mergeJunc j ds vs
     = case j of
-       JAny -> Junc j (Set.fromList ds) (Set.fromList vs)
-       JOne -> Junc j dups vals
+       JAny -> MkJunc j (Set.fromList ds) (Set.fromList vs)
+       JOne -> MkJunc j dups vals
        x    -> internalError $ "mergeJunc pattern failure: " ++ (show x)
     where
     vals = Set.fromList [ v | [v] <- group $ sort vs ]
@@ -55,12 +69,12 @@ mergeJunc j ds vs
 juncApply :: ([ApplyArg] -> Eval Val) -> [ApplyArg] -> Eval Val
 juncApply f args
     | this@(_, (pivot:_)) <- break isTotalJunc args
-    , VJunc (Junc j dups vals) <- argValue pivot
+    , VJunc (MkJunc j dups vals) <- argValue pivot
     = do
         vals' <- appSet this vals
-        return $ VJunc (Junc j dups vals')
+        return $ VJunc (MkJunc j dups vals')
     | this@(_, (pivot:_)) <- break isPartialJunc args
-    , VJunc (Junc j dups vals) <- argValue pivot
+    , VJunc (MkJunc j dups vals) <- argValue pivot
     = do
         dups' <- appList this dups
         vals' <- appList this vals

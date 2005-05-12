@@ -1,14 +1,14 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 
-{-
+{-|
     Pretty printing for various data structures.
 
-    Galadriel! Galadriel!
-    Clear is the water of your well;
-    White is the stars in your white hand;
-    Unmarred, unstained is leaf and land
-    In Dwimordene, in Lorien
-    More fair than thoughts of Mortal Men.
+>   Galadriel! Galadriel!
+>   Clear is the water of your well;
+>   White is the stars in your white hand;
+>   Unmarred, unstained is leaf and land
+>   In Dwimordene, in Lorien
+>   More fair than thoughts of Mortal Men.
 -}
 
 module Pugs.Pretty where
@@ -33,7 +33,8 @@ instance Pretty Exp where
     format (Val v) = format v
     format (Syn x vs) = text "Syn" <+> format x <+> (braces $ vcat (punctuate (text ";") (map format vs)))
     format (Stmts exp1 exp2) = (vcat $ punctuate (text ";") $ (map format) [exp1, exp2])
-    format (App sub invs args) = text "App" <+> format sub <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
+    format (App (Var name) invs args) = text "App" <+> text name <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
+    format (App sub invs args) = text "App" <+> parens (format sub) <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
     format (Sym scope name exp) = text "Sym" <+> text (show scope) <+> format name $+$ format exp
     format (Pad scope pad exp) = text "Pad" <+> text (show scope) <+> format pad $+$ format exp
     format (Pos _ exp) = format exp
@@ -76,11 +77,13 @@ instance Pretty VRef where
     format x = braces $ text $ "ref:" ++ show x
 
 instance Pretty Val where
-    format (VJunc (Junc j dups vals)) = parens $ joinList mark items 
+    format (VJunc j) = parens $ joinList mark items 
         where
+        dups = juncDup j
+        vals = juncSet j
         items = map format $ values
         values = Set.elems vals ++ (concatMap (replicate 2)) (Set.elems dups)
-        mark  = case j of
+        mark  = case juncType j of
             JAny  -> text " | "
             JAll  -> text " & "
             JOne  -> text " ^ "
@@ -93,6 +96,7 @@ instance Pretty Val where
     format (VComplex x) = text $ show x
     format (VControl x) = text $ show x
     format (VProcess x) = text $ show x
+    format (VMatch x) = text $ show x
     format (VOpaque (MkOpaque x)) = braces $ text $ "obj:" ++ show x
 {-
     format (VRef (VList x))
@@ -121,6 +125,8 @@ instance Pretty Val where
     --     return $ pretty val
     format (VRule _) = text $ "{rule}"
     format (VSubst _) = text $ "{subst}"
+    format (VType t) = text $ "::" ++ showType t
+    format (VObject o) = text $ "{obj:" ++ showType (objType o) ++ "}"
     format VUndef = text $ "undef"
 
 quoted :: Char -> String

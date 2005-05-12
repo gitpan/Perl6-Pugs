@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 
-{-
+{-|
     Monad structures.
 
-    One Ring to rule them all,
-    One Ring to find them,
-    One Ring to bring them all
-    and in the darkness bind them...
+>   One Ring to rule them all,
+>   One Ring to find them,
+>   One Ring to bring them all
+>   and in the darkness bind them...
 -}
 
 module Pugs.Monads where
@@ -15,19 +15,31 @@ import Pugs.AST
 import Pugs.Context
 import Pugs.Types
 
+headVal :: [Val] -> Eval Val
 headVal []    = retEmpty
 headVal (v:_) = return v
 
-enterLex :: [Pad -> Pad] -> Eval a -> Eval a
+-- |Perform the specified evaluation in a lexical scope that has been
+-- augmented by the given list of lexical 'Pad' transformers. Subsequent
+-- chained 'Eval's do /not/ see this new scope.
+enterLex :: [Pad -> Pad] -- ^ Transformations on current 'Pad' to produce the
+                         --     new 'Pad'.
+         -> Eval a       -- ^ Evaluation to be performed in the new scope
+         -> Eval a       -- ^ Resulting evaluation (lexical scope enter & exit
+                         --     are encapsulated)
 enterLex newSyms = local (\e -> e{ envLexical = combine newSyms (envLexical e) })
 
+-- |Perform the specified evaluation in the specified context ('Cxt').
+-- Subsequent chained 'Eval's do /not/ see this new scope.
 enterContext :: Cxt -> Eval a -> Eval a
 enterContext cxt = local (\e -> e{ envContext = cxt })
 
+enterGiven :: VRef -> Eval a -> Eval a
 enterGiven topic action = do
     sym <- genSym "$_" topic
     enterLex [sym] action
 
+enterWhen :: Exp -> Eval Val -> Eval Val
 enterWhen break action = callCC $ \esc -> do
     env <- ask
     contRec  <- genSubs env "&continue" $ continueSub esc
@@ -45,10 +57,16 @@ enterWhen break action = callCC $ \esc -> do
         , subBody = break
         }
 
+enterLoop :: Eval Val -> Eval Val
 enterLoop action = genSymCC "&last" $ \symLast -> do
     genSymPrim "&next" (const action) $ \symNext -> do
         enterLex [symLast, symNext] action
 
+genSymPrim :: (MonadSTM m) 
+           => String 
+           -> ([Val] -> Eval Val)     
+           -> ((Pad -> Pad) -> m t)
+           -> m t
 genSymPrim symName@('&':name) prim action = do
     newSym <- genSym symName . codeRef $ mkPrim
         { subName = name
@@ -57,9 +75,13 @@ genSymPrim symName@('&':name) prim action = do
     action newSym
 genSymPrim _ _ _ = error "need a &name"
 
+genSymCC :: String
+         -> ((Pad -> Pad) -> Eval Val)
+         -> Eval Val
 genSymCC symName action = callCC $ \esc -> do
     genSymPrim symName (const $ esc undef) action
 
+enterBlock :: Eval Val -> Eval Val
 enterBlock action = callCC $ \esc -> do
     env <- ask
     exitRec <- genSubs env "&?BLOCK_EXIT" $ escSub esc
@@ -70,7 +92,8 @@ enterBlock action = callCC $ \esc -> do
         , subParams = makeParams env
         , subBody = Prim ((esc =<<) . headVal)
         }
-  
+
+enterSub :: VCode -> Eval Val -> Eval Val
 enterSub sub action
     | typ >= SubPrim = action -- primitives just happen
     | otherwise     = do
@@ -84,44 +107,37 @@ enterSub sub action
                 local doFix action
     where
     typ = subType sub
-    doReturn [] = shiftT $ const $ retEmpty
-    doReturn [v] = shiftT $ const $ evalVal v
-    doReturn _   = internalError "enterSub: doReturn list length /= 1"
     doCC cc [v] = cc =<< evalVal v
     doCC _  _   = internalError "enterSub: doCC list length /= 1"
     orig sub = sub { subBindings = [], subParams = (map fst (subBindings sub)) }
-    fixEnv cc env@Env{ envLexical = pad }
+    fixEnv cc env
         | typ >= SubBlock = do
             blockRec <- genSym "&?BLOCK" (codeRef (orig sub))
             return $ \e -> e
-                { envLexical = combine [blockRec] (subPad sub `unionPads` pad) }
+                { envLexical = combine [blockRec]
+                    (subPad sub `unionPads` envLexical env) }
         | otherwise = do
             subRec <- sequence
                 [ genSym "&?SUB" (codeRef (orig sub))
                 , genSym "$?SUBNAME" (scalarRef $ VStr $ subName sub)]
-            retRec    <- genSubs env "&return" retSub
+            -- retRec    <- genSubs env "&return" retSub
             callerRec <- genSubs env "&?CALLER_CONTINUATION" (ccSub cc)
             return $ \e -> e
-                { envLexical = combine (concat [subRec, retRec, callerRec]) (subPad sub) }
-    retSub env = mkPrim
-        { subName = "return"
-        , subParams = makeParams env
-        , subBody = Prim doReturn
-        }
+                { envLexical = combine (concat [subRec, callerRec]) (subPad sub) }
     ccSub cc env = mkPrim
         { subName = "CALLER_CONTINUATION"
         , subParams = makeParams env
         , subBody = Prim $ doCC cc
         }
 
-genSubs :: t -> Ident -> (t -> VCode) -> Eval [Pad -> Pad]
+genSubs :: t -> Var -> (t -> VCode) -> Eval [Pad -> Pad]
 genSubs env name gen = sequence
     [ genMultiSym name (codeRef $ gen env)
     , genMultiSym name (codeRef $ (gen env) { subParams = [] })
     ]
 
 makeParams :: Env -> [Param]
-makeParams Env{ envContext = cxt, envLValue = lv }
+makeParams MkEnv{ envContext = cxt, envLValue = lv }
     = [ MkParam
         { isInvocant = False
         , isOptional = False
@@ -145,7 +161,8 @@ caller n = do
 
 evalVal :: Val -> Eval Val
 evalVal val = do
-    Env{ envLValue = lv, envClasses = cls } <- ask
+    lv  <- asks envLValue
+    cls <- asks envClasses
     typ <- evalValType val
     if lv then return val else do
     case val of

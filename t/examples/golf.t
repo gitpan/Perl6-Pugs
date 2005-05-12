@@ -14,21 +14,16 @@ original golf solutions and rg0now's improved solutions.
 
 plan 10;
 
-skip 10, 'Skipping becuase it never ends';
-
-
-=pod
-
 # XXX: in file paths, '/' works on Unix and Windows.
 # For greater portability, we will need File::Spec or equivalent.
 
 my $PUGS        = './pugs';
 $PUGS           = 'pugs' if $*OS eq any(<MSWin32 mingw msys cygwin>);
 
-# XXX: should make $outtmp unique (using $$ say).
 # XXX: this $outtmp/slurp will go away when backticks supported.
 # XXX: should also check to verify that nothing is written to stderr.
-my $outtmp      = 'outgolf.tmp';
+sub nonces () { return (".$*PID." ~ int rand 1000) }
+my $outtmp      = 'outgolf' ~ nonces();
 my $golfdir     = 'examples/golf';
 my $tsanta      = "$golfdir/tsanta.p6";
 

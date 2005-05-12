@@ -3,7 +3,7 @@
 use Test;
 use v6;
 
-plan 2;
+plan 6;
 
 =head1 DESCRIPTION
 
@@ -17,7 +17,14 @@ L<http://groups.google.com/groups?selm=420DB295.3000902%40conway.org>
 my @array = <5 -3 7 0 1 -9>;
 my $sum   = 5 + -3 + 7 + 0 + 1 + -9; # laziness :)
 
-eval_is 'reduce:{ $^a + $^b } 0, @array', $sum,
-  "basic reduce works (1)", :todo;
-eval_is 'reduce:{ $^a + $^b } 100, @array', 100 + $sum,
-  "basic reduce works (2)", :todo;
+is((reduce { $^a + $^b } 0, @array), $sum, "basic reduce works (1)");
+is((reduce { $^a + $^b } 100, @array), 100 + $sum, "basic reduce works (2)");
+
+
+# New [...] metaoperator
+# Thread "reduce metaoperator" from p6l
+is(([+] @array),        $sum, "[+] works");
+is(([*] 1,2,3),   (1*2*3), "[*] works");
+is(([-] 1,2,3),   (1-2-3), "[-] works");
+is(([/] 12,4,3), (12/4/3), "[/] works");
+

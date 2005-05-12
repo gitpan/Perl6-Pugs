@@ -1,14 +1,14 @@
 {-# OPTIONS_GHC -fglasgow-exts -cpp #-}
 
-{-
+{-|
     Class meta-model.  (object meta-meta-model)
 
-    Learn now the lore of Living Creatures!
-    First name the four, the free peoples:
-    Eldest of all, the elf-children;
-    Dwarf the delver, dark are his houses;
-    Ent the earthborn, old as mountains;
-    Man the mortal, master of horses...
+>   Learn now the lore of Living Creatures!
+>   First name the four, the free peoples:
+>   Eldest of all, the elf-children;
+>   Dwarf the delver, dark are his houses;
+>   Ent the earthborn, old as mountains;
+>   Man the mortal, master of horses...
 -}
 
 module Pugs.Class where
@@ -49,7 +49,7 @@ data MetaClass = MetaClass
     Rules of these collections; note that the meta-model is *not* a
     multiple inheritance model.
 
-    ∃ MetaClass A, B : A.clsSuper = B ↔ A ∈ B.clsSupClasses
+    ∀ MetaClass A, B : A.clsSuper = B ↔ A ∈ B.clsSupClasses
 
 -}
 
@@ -94,19 +94,20 @@ data MetaAssoc = MetaAssoc
 
 {-
 
-    ∃ MetaClass A, MetaAssoc C : A.clsCats ∋ C ↔ C.catClass = A
+    ∀ MetaClass A, MetaAssoc C : A.clsCats ∋ C ↔ C.catClass = A
 
-    ∃ MetaAssoc C₁, C₂ : C₁.catPair = C₂ ↔ C₂.catPair = C₁
+    ∀ MetaAssoc C₁, C₂ : C₁.catPair = C₂ ↔ C₂.catPair = C₁
 
     -- can't be composite both ways
 
-    ∃ MetaAssoc C₁, C₂ : C₁.catPair = C₂ ∧ C₁.catIsComposite
+    ∀ MetaAssoc C₁, C₂ : C₁.catPair = C₂ ∧ C₁.catIsComposite
          → ¬(C₂.catIsComposite)
 
     -- this seems the simplest way to specify complementary categories
 
-    ∃ MetaAssoc C₁, C₂, MetaClass M₁, M₂
-       : C₁.catPair = C₂ ∧ C₁.catClass = M₁ ∧ C₂.catClass = M₂
+    ∀ MetaAssoc C₁, C₂, MetaClass M₁, M₂
+       :   C₁.catPair = C₂  ∧ C₁.assocCompanion
+         ∧ C₁.catClass = M₁ ∧ C₂.catClass = M₂
        → (   ∃ M₁.clsCats{C₂.catCompanion}
            ∧ ∃ M₂.clsCats{C₁.catCompanion}
            ∧ M₁.clsCats{C₂.catCompanion}[1] = C₁
@@ -125,10 +126,10 @@ data Multi = Zero | One | Many
 
 {-
   simple range sanity stuff... enforce ordering
-    ∃ Range R : R[0] = One → R[1] ∈ ( One | Many )
-    ∃ Range R : R[1] = One → R[0] ∈ ( Zero | One )
-    ∃ Range R : R[0] = Many → R[1] = Many
-    ∃ Range R : R[1] = Zero → R[1] = Zero
+    ∀ Range R : R[0] = One → R[1] ∈ ( One | Many )
+    ∀ Range R : R[1] = One → R[0] ∈ ( Zero | One )
+    ∀ Range R : R[0] = Many → R[1] = Many
+    ∀ Range R : R[1] = Zero → R[1] = Zero
 
  -}
 
@@ -146,7 +147,7 @@ data Type = Int | Str
     Note: in the below expression, N₁ ∋ N₂ means (N₂ is a direct
     child member of N₁ within the tree it exists in)
 
-    ∃ initTree Node N₁, N₂, MetaClass M₁, M₂ 
+    ∀ initTree Node N₁, N₂, MetaClass M₁, M₂ 
       : N₁ ∋ N₂ ∧ N₁ = M₁.clsName ∧ N₂ = M₂.clsName
       → M₁.subClasses ∋ M₂ 
 
@@ -252,12 +253,11 @@ data Type = Int | Str
 
   -- starting to look like the beginning again?  :)
 
-  ∃ Class C₁, C₂ : C₁.superClasses ∋ C₂
+  ∀ Class C₁, C₂ : C₁.superClasses ∋ C₂
                  ↔ C₂.subClasses ∋ C₁ ∧ C₂ ∉ C₁.subClasses
 
   -- hmm, anyone know how to induct the above to disallow circular inheritance?
 
-  -- perhaps stating axioms here isn't the right place, anyway.
   -- & (reading TAPL)
 
 -}

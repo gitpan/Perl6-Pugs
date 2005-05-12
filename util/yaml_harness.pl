@@ -48,8 +48,11 @@ exit 0;
 
 sub fixup_concurrency {
     $Config{"concurrent"} ||= $ENV{PUGS_TESTS_CONCURRENT} || 1;
-    die "Sorry, concurrency not supported on your platform\n" if
-        $^O =~ /MSWin32|msys/; # On cygwin we are okay.
+    if ($^O =~ /MSWin32|msys/) { # On cygwin we are okay.
+		warn "Sorry, concurrency not supported on your platform\n";
+		$Config{"concurrent"} = 1;
+		return;
+	}
     require POSIX;
 }
 
@@ -133,8 +136,8 @@ sub _init {
     $self->get_smoker;
     $self->get_revision;
     
-    # XXX: should i just include \%Config here?
-    $self->{_config} = { shuffle => $Config{shuffle}+=0 };
+	$Config{shuffle}+=0;
+    $self->{_config} = \%Config;
     $self->{_timing}{start} = time;
 
     $self->SUPER::_init(@_);
@@ -228,6 +231,7 @@ sub gather_results {
         push @{ $self->{meat}{test_files} }, @{$chunk->{test_files}};
         unlink $file or die "unlink: $!";
     }
+	warn "all chunks completed.\n";
 }
 
 sub run_test {
