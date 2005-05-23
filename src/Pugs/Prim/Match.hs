@@ -65,6 +65,7 @@ doMatch csChars MkRulePCRE{ rxRegex = re } = do
     where
     csBytes = encodeUTF8 csChars
 
+matchFromMR :: MatchResult Char -> Val
 matchFromMR mr = VMatch $ mkMatchOk 0 0 (decodeUTF8 all) subsMatch Map.empty
     where
     (all:subs) = elems $ mrSubs mr
@@ -75,11 +76,6 @@ op2Match :: Val -> Val -> Eval Val
 op2Match x (VRef y) = do
     y' <- readRef y
     op2Match x y'
-
-op2Match x (VType t) = do
-    typ <- evalValType x
-    cls <- asks envClasses
-    return $ VBool (isaType cls (showType t) typ)
 
 op2Match x (VSubst (rx, subst)) | rxGlobal rx = do
     str         <- fromVal x
@@ -119,9 +115,12 @@ op2Match x (VSubst (rx, subst)) = do
 op2Match x (VRule rx) | rxGlobal rx = do
     str     <- fromVal x
     rv      <- matchOnce str
-    ifListContext
-        (return $ VList rv)
-        (return . VInt $ genericLength rv)
+    cxt	    <- asks envContext
+    if (not $ isSlurpyCxt cxt)
+	then return (VInt $ genericLength rv)
+	else return . VList $ if rxStringify rx
+	    then map (VStr . vCast) rv
+	    else rv
     where
     matchOnce :: String -> Eval [Val]
     matchOnce str = do
@@ -140,6 +139,18 @@ op2Match x (VRule rx) = do
         (return $ VList (matchSubPos match))
         (return $ VMatch match)
 
+op2Match (VRef x) y = do
+    x' <- readRef x
+    op2Match x' y
+
+op2Match (VType typ) (VType t) = do
+    cls <- asks envClasses
+    return $ VBool (isaType cls (showType t) typ)
+
+op2Match x y@(VType _) = do
+    typ <- evalValType x
+    op2Match (VType typ) y
+
 op2Match x y = op2Cmp (fromVal :: Val -> Eval VStr) (==) x y
 
 op2Cmp :: (a -> Eval b) -> (b -> b -> VBool) -> a -> a -> Eval Val
@@ -148,19 +159,18 @@ op2Cmp f cmp x y = do
     y' <- f y
     return $ VBool $ x' `cmp` y'
 
-rxSplit :: VRule -> String -> Eval [String]
+rxSplit :: VRule -> String -> Eval [Val]
 rxSplit _  [] = return []
 rxSplit rx str = do
     match <- str `doMatch` rx
-    if not (matchOk match) then return [str] else do
+    if not (matchOk match) then return [VStr str] else do
     if matchFrom match == matchTo match
         then do
             let (c:cs) = str
             rest <- rxSplit rx (cs)
-            return ([c]:rest)
+            return (VStr [c]:rest)
         else do
             let before = genericTake (matchFrom match) str
                 after  = genericDrop (matchTo match) str
             rest <- rxSplit rx after
-            strs <- mapM fromVal (matchSubPos match)
-            return $ (before:concat strs) ++ rest
+            return $ (VStr before:matchSubPos match) ++ rest

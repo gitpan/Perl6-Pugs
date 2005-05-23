@@ -17,6 +17,7 @@
 
 -}
 
+-- | Command line argument parser for pugs.
 module Pugs.Run.Args (canonicalArgs
 , gatherArgs
 , unpackOptions
@@ -25,6 +26,15 @@ module Pugs.Run.Args (canonicalArgs
 where
 import Pugs.Internals
 
+{- | 
+  Convert command line arguments into canonical form for 
+  'Pugs.Run.runWithArgs'.  The switch ordering is defined
+  by compareArgs and is currently:
+
+  > (-h -v -V) (-I) (-d) (-w) (-c) (-C) (--external) (-M) (-n -p) (-l -0 -e other)
+
+  Args -M, -n and -p are converted to -e scripts by joinDashE.
+-}
 canonicalArgs :: [String] -> [String]
 canonicalArgs x = concatMap procArg
                 . joinDashE
@@ -56,30 +66,42 @@ unpackOption opt
     | Just (prefix, param) <- prefixOpt opt = ['-':prefix, param]
     | otherwise = ['-':opt]
 
+-- | List of options with long and sort variants, as tupples of long, short (with the dashes).
+longOptions :: [(String, String)]
 longOptions = [("--help", "-h"), ("--version", "-v")]
+
+-- | List of options that can have their argument just after, with no space.
+composable :: [Char]
 composable = "cdlnpw"
+
+-- | List of options that can take arguments
+withParam :: [String]
 withParam = words "e C B I M V:"
+
+prefixOpt :: [Char] -> Maybe (String, String)
 prefixOpt opt = msum $ map (findArg opt) withParam
+
+findArg :: Eq a => [a] -> [a] -> Maybe ([a], [a])
 findArg arg prefix = do
     param <- afterPrefix prefix arg
     guard (not (null param))
     return (prefix, param)
 
 {-
+  Enforce a canonical order of command line switches.  Currently this is:
 
-  compareArgs enforces a canonical order of command line switches.
-  Currently this is:
-
-    (-h -v -V) (-I) (-d) (-w) (-c) (-C) (--external) (-M) (-n -p) (-l -0 -e other)
+  > (-h -v -V) (-I) (-d) (-w) (-c) (-C) (--external) (-M) (-n -p) (-l -0 -e other)
 
   This makes pattern matching more convenient
 
   Backwards incompatible changes:
-    -p and -n autochomp.
-    -p uses say() instead of print()
 
+   *  -p and -n autochomp.
+
+   *  -p uses say() instead of print()
 -}
 
+compareArgs :: Arg -> Arg -> Ordering
 compareArgs a b = compare (argRank a) (argRank b)
 
 argRank :: Arg -> Int

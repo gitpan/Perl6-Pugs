@@ -9,14 +9,14 @@ Test handling of C<-Cbackend>.
 
 =cut
 sub flatten (Any|Junction $x) {
-    ($x.isa('Junction')) ?? map &flatten, $x.values :: $x
+    ($x.isa(Junction)) ?? map &flatten, $x.values :: $x
 }
 
 my @t_good = map &flatten, (
   any('-C')
-    ~ any('Pugs')
+    ~ any('Pugs', 'pugs', 'pUGs')
     ~ ' '
-    ~ any('-e1', map( {"examples/$_.p6"}<
+    ~ any('-e1', map { "examples/$_.p6" } <
   functional/fp
   hanoi
   junctions/1
@@ -24,19 +24,23 @@ my @t_good = map &flatten, (
   junctions/3 junctions/all-any junctions/any-any
   junctions/any-any2 junctions/grades
   quicksort
->)), '-CParrot ' ~ any('-e1', map( {"examples/$_.p6"}<
+>),
+  any('-C')
+    ~ any('Parrot', 'parrot', 'paRRot')
+    ~ ' '
+    ~ any('-e1', map {"examples/$_.p6"} <
   junctions/1
   junctions/any-any
   junctions/any-any2
   junctions/3
   junctions/all-all
   junctions/grades
->))
+>)
 );
 
 my @t_todo = map &flatten, (
   '-C'
-    ~ any('Parrot')
+    ~ any('Parrot', 'parrot', 'paRRot')
     ~ ' examples/'
     ~ any(<
   functional/fp
@@ -66,8 +70,9 @@ if($*OS eq any(<MSWin32 mingw msys cygwin>)) {
   $pugs = 'pugs.exe';
 };
 
+sub nonce () { return (".$*PID." ~ int rand 1000) }
 sub run_pugs ($c) {
-  my $tempfile = "temp-ex-output";
+  my $tempfile = "temp-ex-output" ~ nonce;
   my $command = "$pugs $c $redir $tempfile $redir_stderr";
   diag $command;
   system $command;

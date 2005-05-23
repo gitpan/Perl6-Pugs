@@ -19,7 +19,7 @@ under the Perl license.  See src/pge/README.
 The "PCRE" subsystem is derived from PCRE 5.0 by Philip Hazel,
 under a BSD-style license.  See src/pcre/LICENCE.
 
-The "Syck" subsystem is derived from Syck 0.54 by "why the lucky stiff",
+The "Syck" subsystem is derived from Syck 0.55 by "why the lucky stiff",
 under a BSD-style license.  See src/syck/COPYING.
 
 The "Rule" subsystem is derived from Parsec 2.0 by Daan Leijen,
@@ -59,8 +59,11 @@ download a binary build from http://haskell.org/ghc/.  Although source code
 for GHC is available, it will take a very long time to build by yourself. 
 
 Pugs needs Parrot 0.2.0 or above to support Perl 6 Rules.  To install Parrot,
-follow the instructions at http://www.parrotcode.org/.  Binary builds for
-Win32 are available at http://jwcs.net/~jonathan/perl6/.
+follow the instructions at http://www.parrotcode.org/.
+
+http://www.jwcs.net/~jonathan/perl6/ has binary builds for Win32.  If you'd
+like to build by hand, http://wiki.kn.vutbr.cz/mj/?Perl%206%20and%20Parrot has
+instructions (and binaries, too).
 
 For dynamic loading/inlining of Haskell modules, you should install the
 hs-plugin library, available here:
@@ -81,10 +84,33 @@ executable before you run "perl Makefile.PL", for example:
     export GHC=${HOME}/bin/ghc (bash)
     setenv GHC ${HOME}/bin/ghc (csh)
 
+CAVEATS FOR GCC 4.0 USERS
+-------------------------
+
+Mac OS X 10.4 "Tiger" users may see this error message when compiling Pugs:
+
+    ___DISCARD__
+    collect2: ld returned 1 exit status
+
+Until GHC 6.4.1 is released, you need to need to issue this command first:
+
+    sudo gcc_select 3.3
+
+Then recompiling Pugs using a clean tree.  Other users of GCC 4.0 systems
+may also need to switch to use GCC 3.3 to compile Pugs at this moment.
+
 CAVEATS FOR x86_64 MACHINES
 ---------------------------
 
-GHC 6.4 has a garbage collector bug on x86_64 (64 bit Athlon) machines;
+Until GHC 6.4.1 is released, users with x86_64 (64 bit Athlon) CPU's should
+consider using a development snapshot of GHC.  GHC 6.4 had bugs on x86_64
+which break garbage collection and rules (regexps).  These bugs were fixed
+in GHC CVS by around 11-May.  There are hints on using snapshots at the end
+of this section.
+
+Here are the known problems:
+
+(1) GHC 6.4 has a garbage collector bug on x86_64 (64 bit Athlon) machines;
 users may see crashes complaining about "strange objects".
 
 Until GHC 6.4.1 is released, a partial workaround is to avoid GC by
@@ -101,6 +127,34 @@ These request a 200 MB heap, which is sufficient to run most programs.
 Running all tests unfortunately requires a lot more memory (perhaps 1000M).
 A possible alternative, which someone could explore and report on, would be
 to try using a 32-bit GHC instead.
+
+(2) Rules (regexps) may not work with GHC 6.4 on x86_64.  Users may see
+"internal error: adjustor creation not supported on this platform".
+There is no known workaround.  This bug has been fixed in current
+development snapshots.
+
+Hints on using a development snapshot of GHC:
+
+Note that this will take a long time, and it may not work.
+
+First, check if a sufficiently recent "Stable" source snapshot is available
+(as of 15-May, there isn't one yet).  If not, you might try a "HEAD" snapshot
+(it is not clear anyone has actually tried this).  Otherwise, use might use
+cvs to grab your own snapshot:
+
+    CVSROOT=:pserver:anoncvs@glass.cse.ogi.edu:/cvs; export CVSROOT
+    cvs login     # passord cvs
+    cvs checkout fpconfig
+    cd fptools
+    cvs checkout ghc hslibs libraries happy alex
+
+    autoreconf
+    ./configure
+    make
+    make install
+
+There are no guarantees with a CVS snapshot.  It may not even compile.
+
 
 MAILING LISTS
 -------------

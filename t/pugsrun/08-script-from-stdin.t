@@ -11,8 +11,8 @@ indicated by the C<-> switch.
 =cut
 
 my @examples = map -> Junction $_ { $_.values } (
-   any('print qq.Hello Pugs.',
-       'print @ARGS',
+   any('say qq.Hello Pugs.',
+       'say @ARGS',
    )
 );
 
@@ -26,13 +26,16 @@ if($*OS eq any<MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 
+sub nonce () { return (".$*PID." ~ (int rand 1000) ~ ".tmp") }
+my $tempfile = "temp-ex-output" ~ nonce;
 for @examples -> $ex {
-  my $command = qq($echo $ex | $pugs - "Hello Pugs" $redir temp-ex-output);
+  my $command = qq($echo $ex | $pugs - "Hello Pugs" $redir $tempfile);
   diag $command;
   system $command;
 
-  my $expected = "Hello Pugs";
-  my $got      = slurp "temp-ex-output";
+  my $expected = "Hello Pugs\n";
+  my $got      = slurp $tempfile;
 
   is $got, $expected, "Running a script from stdin works";
+  unlink $tempfile;
 }

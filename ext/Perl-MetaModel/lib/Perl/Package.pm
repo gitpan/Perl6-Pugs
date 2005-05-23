@@ -1,21 +1,7 @@
 
-use v6;
-module Perl::Package-0.0.1;
+class Perl::Package-0.01;
 
-=pod
+has Hash of (Str, Any) %.variables;
 
-=head1 NAME
+has Hash of (Str, Code) %.subs;
 
-Perl::Package - A meta-model for Perl Packages
-
-=head1 DESCRIPTION
-
-This module will eventually hold the meta-model for perl6 packages.
-
-=head1 AUTHORS
-
-Sam Vilain
-
-Stevan Little E<lt>stevan@iinteractive.comE<gt>
-
-=cut

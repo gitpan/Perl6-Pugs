@@ -1,17 +1,17 @@
-class Test::Builder::Output-0.1.0;
+class Test::Builder::Output-0.1.1;
 
 has $.output;
 has $.error_output;
 
 submethod BUILD ( ?$.output = $*OUT, ?$.error_output = $*ERR ) {}
 
-method write ( Str $message )
+method write ( Str $message is copy )
 {
     $message ~~ s:perl5:g{\n(?!#)}{\n#};
     $.output.say( $message );
 }
 
-method diag ( Str $message )
+method diag ( Str $message is copy )
 {
     $message ~~ s:perl5{^(?!#)}{#};
     $message ~~ s:perl5:g{\n(?!#)}{\n#};

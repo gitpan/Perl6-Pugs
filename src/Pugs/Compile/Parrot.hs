@@ -44,10 +44,23 @@ genPIR = do
 instance Compile Doc where
     compile = return
 
+padSort :: (Var, [(TVar Bool, TVar VRef)]) -> (String, [(a, b)]) -> Ordering
+padSort ((a::[Char]), [(_, _)]) ((b::[Char]), [(_, _)])
+    | (head a == ':' && head b == '&') = LT
+    | (head b == ':' && head a == '&') = GT
+    | otherwise = GT
+padSort _ _ = EQ
+
 instance Compile Pad where
-    compile pad = fmap vcat $ mapM compile (padToList pad)
+    {- XXX The padSort will misplace multiple namespaces in the same pad.
+           We *should* compile the namespaces & subs in order of declaration.
+    -}   
+    compile pad = do
+        fmap vcat $ mapM compile (sortBy padSort $ padToList pad)
 
 instance Compile (Var, [(TVar Bool, TVar VRef)]) where
+    compile ((_:'?':_), _) = return empty -- XXX - @?INIT etc; punt for now
+    compile ((_:'=':_), _) = return empty -- XXX - @=POS etc; punt for now
     compile (('&':name), [(_, sym)]) = do
         ret <- askPMC
         imc <- compile sym
@@ -57,7 +70,10 @@ instance Compile (Var, [(TVar Bool, TVar VRef)]) where
             , text $ ".return (" ++ ret ++ ")"
             , text ".end"
             ]
-    compile _ = fail "fnord"
+    compile ((':':'*':name), [(_, _)]) =
+        return $ text ".namespace" <+> text "['" <> text name <> text "']"
+    -- compile v = error $ show v
+    compile _ = return $ empty
 
 instance Compile (TVar VRef) where
     compile x = do
@@ -84,11 +100,13 @@ instance Compile VCode where
 instance Compile Param where
     compile prm = return $ text ".param pmc" <+> varText (paramName prm)
 
+varText :: String -> Doc
 varText ('$':name)  = text $ "s__" ++ name
 varText ('@':name)  = text $ "a__" ++ name
 varText ('%':name)  = text $ "h__" ++ name
 varText x           = error $ "invalid name: " ++ x
 
+varInit :: String -> Doc
 varInit ('$':_) = text $ "PerlUndef"
 varInit ('@':_) = text $ "PerlArray"
 varInit ('%':_) = text $ "PerlHash"
@@ -109,6 +127,7 @@ tempLabels strs = do
     tmp <- incCounter "label" ("LABEL_" ++)
     return $ map ((tmp <> text "_" <>) . text) strs
 
+incCounter :: String -> (String -> String) -> Eval Doc
 incCounter key f = do
     Just ioRef <- asks envDebug
     liftSTM $ do
@@ -126,8 +145,10 @@ instance Compile Pos where
         ]
 
 
+label :: Doc -> Doc
 label doc = doc <> text ":"
 
+compileCond :: Compile a => String -> [a] -> Eval Doc
 compileCond neg [cond, bodyIf, bodyElse] = do
     [alt, end]  <- tempLabels ["else", "endif"]
     (condC, p)  <- compileArg cond
@@ -178,14 +199,13 @@ instance Compile Exp where
             , text "goto" <+> start
             , label last
             ]
-    -- XXX broken! this needs to emit PIR *outside* of the main sub
-    -- compile (Syn "module" [Val (VStr ns)]) = do
-    --    return $ text ".namespace ['_Pugs::" <> text ns <> text "']"
-    compile (App (Var "&return") [] [val]) = do
+    -- XXX "module" is handled in glob, need stub here to avoid compile error
+    compile (Syn "module" [Val (VStr _)]) = return empty
+    compile (App (Var "&return") [val] []) = do
         (valC, p) <- compileArg val
         return $ valC $+$ text ".return" <+> parens p
     compile (App (Var "&last") _ _) = return $ text "invoke last"
-    compile (App (Var "&substr") [] [str, idx, len])
+    compile (App (Var "&substr") [str, idx, len] [])
         | Val v <- unwrap len, vCast v == (1 :: VNum) = do
         (strC, p1) <- enterLValue $ compileArg str
         (idxC, p2) <- enterLValue $ compileArg idx
@@ -222,13 +242,35 @@ instance Compile Exp where
             _ -> do
                 constPMC $ p1 <+> text op <+> p2
         return $ vcat [ lhsC, rhsC, rv ]
+    -- XXX store return code in $@, whereever that may be in Parrotland
+    compile (App (Var "&system") [cmd] []) = do
+        (arg, p) <- compileArg cmd
+        rc <- constPMC (text "$I10")
+        return $ vcat $ 
+            [ arg
+            , text "$S9" <+> text "=" <+> p
+            , text "$I9" <+> text "=" <+> text "spawnw" <+> text "$S9"
+            , text "$I10 = 0"
+            , text "$I10 = iseq $I9, 0"
+            , rc
+            ]
+    compile (App (Var "&require_parrot") [arg] []) = do
+        (path, p) <- compileArg arg
+        return $ vcat $
+            [ path
+            , text "$S9" <+> text "=" <+> p
+            , text "load_bytecode" <+> text "$S9"
+            ]
     compile (App (Var "&say") invs args) = 
         compile $ App (Var "&print") invs (args ++ [Val $ VStr "\n"])
     compile (App (Var "&print") invs args) = do
         actions <- fmap vcat $ mapM (compileWith (text "print" <+>)) (invs ++ args)
         rv      <- compile (Val (VBool True))
         return $ actions $+$ rv
-    compile (App (Var ('&':name)) _ [arg]) = do
+    compile (App (Var ('&':method)) [(Var ('$':obj))] [arg]) = do
+        lhsC <- askPMC
+        compileWith (\tmp -> text lhsC <+> text "=" <+> varText ("$" ++ obj) <> text "." <> text ("'" ++ method ++ "'") <> parens tmp) arg
+    compile (App (Var ('&':name)) [arg] _) = do
         lhsC <- askPMC
         compileWith (\tmp -> text lhsC <+> text "=" <+> text name <> parens tmp) arg
     compile (App (Var "&not") [] []) = return $ text "new PerlUndef"
@@ -290,7 +332,10 @@ compileWith f x = do
     argC <- local (\e -> e{ envStash = pmc }) $ compile x
     return $ vcat [ argC, f tmp ]
 
+currentStash :: Eval Doc
 currentStash = fmap text $ asks envStash
+
+constPMC :: Doc -> Eval Doc
 constPMC doc = do
     tmp  <- currentStash
     return $ vcat
@@ -298,6 +343,7 @@ constPMC doc = do
         , tmp <+> text "=" <+> doc
         ]
 
+compileArg :: Compile a => a -> Eval (Doc, Doc)
 compileArg exp = do
     tmp  <- tempPMC
     pmc  <- askPMC

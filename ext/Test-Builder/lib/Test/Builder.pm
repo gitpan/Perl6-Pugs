@@ -1,4 +1,4 @@
-class Test::Builder-0.1.0;
+class Test::Builder-0.1.1;
 
 use Test::Builder::Test;
 use Test::Builder::Output;
@@ -29,6 +29,12 @@ submethod BUILD
     $.output //= Test::Builder::Output.new();
 }
 
+submethod DESTROY
+{
+	my $footer = $.plan.footer();
+	$.output.write( $footer ) if $footer;
+}
+
 method plan ( Str ?$explanation, Int ?$tests )
 {
     fail "Plan already set!" if $.plan;
@@ -49,9 +55,9 @@ method plan ( Str ?$explanation, Int ?$tests )
     $.output.write( $.plan.header() );
 }
 
-method ok returns Bit ( Bit $passed, Str ?$description = '' )
+method ok returns Bit ( $self: Bit $passed, Str ?$description = '' )
 {
-    .report_test(
+    $self.report_test(
         Test::Builder::Test.create(
             number      => +$.results + 1,
             passed      =>  $passed,
@@ -62,9 +68,9 @@ method ok returns Bit ( Bit $passed, Str ?$description = '' )
     return $passed;
 }
 
-method todo returns Bit ( Bit $passed, Str ?$description, Str ?$reason )
+method todo returns Bit ( $self: Bit $passed, Str ?$description, Str ?$reason )
 {
-    .report_test(
+    $self.report_test(
         Test::Builder::Test.create(
             todo        => 1,
             number      => +$.results + 1,
@@ -76,11 +82,11 @@ method todo returns Bit ( Bit $passed, Str ?$description, Str ?$reason )
     return $passed;
 }
 
-method skip ( Int ?$num = 1, Str ?$reason = 'skipped' )
+method skip ( $self: Int ?$num = 1, Str ?$reason = 'skipped' )
 {
     for 1 .. $num
     {
-        .report_test(
+        $self.report_test(
             Test::Builder::Test.create(
                 skip   => 1,
                 number => +$.results + 1,
@@ -120,7 +126,53 @@ Test::Builder - Backend for building test libraries
 
 =head1 SYNOPSIS
 
+  module My::Test::Module;
+
   use Test::Builder;
+  use Test::Builder::Output;
+
+  my Test::Builder $Test .= new(
+        output => Test::Builder::Output.new(
+	       error_output => open('my_error_log_file')
+        )
+    );
+
+  sub plan (Str ?$explanation, Int ?$tests) is export {
+	 $Test.plan($explanation, $tests);
+  }
+
+  sub ok ($passed, ?$description, ?$todo) is export {
+	 if $todo {
+		$Test.todo($passed, $description, $todo) 
+		    || $Test->diag("FAILED : $desciption");
+	 }
+	 else {
+		$Test.ok($passed, $description)
+		    || $Test->diag("FAILED : $desciption");
+	 }
+  }
+
+  sub is ($got, $expected, ?$description, ?$todo) is export {
+	 if $todo {
+		$Test.todo($got eq $expected, $description, $todo)
+		    || $Test->diag("FAILED : $desciption");		
+	 }
+	 else {
+		$Test.ok($got eq $expected, $description)
+		    || $Test->diag("FAILED : $desciption");		
+	 }
+  }
+
+  # then using our test module the test file themselves ...
+
+  use My::Test::Module;
+
+  plan('no_plan');
+  # or
+  plan :tests<20>;
+
+  ok(2 == 2, '... 2 is equal to 2');
+  is(2 + 2, 5, '... 2 plus 2 should be 5', :todo<bug>);
 
 =head1 DESCRIPTION
 

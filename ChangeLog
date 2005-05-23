@@ -1,4 +1,83 @@
-== Changes for 6.2.3 - May 12, 2005
+== Changes for 6.2.4 (r3790) - May 24, 2005
+
+=== Pugs Internals
+
+* All infix operators now receive reduction forms, such as `[+]`
+* All operators now receive hyperised forms, such as `>>+<<` and `~<<`
+* Dereferencers: `@{...}` and `@$var`
+* Experimental support for `coro { ... }`, `coro name { ... }` and `yield()`
+* Experimental support for `lazy {...}`
+* External Parrot for Rules is now kept in a single process
+* Inheritance: `class Foo is Bar` and `class Foo does Bar`
+* Interactive shell commands normalised to always begin with `:`
+* MMD handling is now more sophisticated, and `$.chained.attr.methods` works
+* Much better error messages, with cascading stack trace
+* New `./method` syntax implemented
+* Objects numify to a unique value accessible with `$obj.id()`
+* Parrot compiler backend now handles namespaces and method calls
+* Parsing of hierarchical return types: `sub foo returns Hash of Str`
+* Private attributes: `has $:foo` now generates private accessors
+* Private methods: `method :foo ()` and `$obj.:foo`
+* Switch to sum-of-inheritance-level distance for MMD dispatch on invocants
+* Symbolic references: `$::(...)` and `$::some::("var")::($bar)`
+* User-defined symbolic infix, postfix and prefix unary functions
+* `$?CLASS` and `$?PACKAGE` works; `$?ROLE` currently works as `$?CLASS`
+* `&code.name` and `&code.arity` added
+* `FIRST {...}` and `my $x = FIRST {...}` support
+* `INIT {...}` and `CHECK {...}` blocks in void context and as rvalues
+* `OUTER::` scope implemented
+* `do {...}` literal added
+* `gather { ... }` and `take()` implemented
+* `submethod BUILD` is called for each parent class and class itself
+* `time()` now returns a fractional number
+* `try {...}` literal allowed at expression level
+* `warn()`, `uniq()`, `fail()`, `times()` implemented
+
+=== Bundled Modules
+
+* `Inline::Pugs` and `pugs` module to inline Perl 6 into Perl 5 programs
+* `Locale::KeyedText` re-added (this was our first contributed module)
+* `Net::IRC`, OO version added
+* `Perl::MetaModel`, prototype of Perl 6 OO meta-model in Perl 6 OO
+* `Set::Junction` and `Set::Hash` added as implementation backends to `Set`
+* `Set` now has many overloaded operators
+* `Test::Builder`, with Perl 6 objects (parses, and mostly works -- see tests)
+* `Tree::Simple`, renamed to `Tree` and converted to OO
+* `Test` now gives better diagnostics to `cmp_ok()`
+* `fp` module added for functional programming
+
+=== Tests, Examples and Documentations
+
+* Many new test and several tests refactored, we now have 5600+ tests
+* Hangman IRC bot created from `hangman.p6`
+* IRC logfile to HTML converter added
+* Initial sketch of Pugs Apocryphon 2 as `docs/02Internals.pod`
+* Much work on internal Haddock Haskell documentation
+* OO Wizard RPG game added in `examples/games/`
+* Parrot is now included in the Pugs Live CD
+* Perl 6 quick reference documents added to `docs/quickref`
+* Perl6::Rules test suite incorporated into `t/rules/`
+* Removed usage of `force_todo()` in favor of `:todo`
+
+=== Bug Fixes
+
+* Bare blocks containing `$_` is now executed correctly
+* Correct parsing for user-defined nullary functions
+* Hash and array sub parameters are read-only by default, same as scalars
+* Post-term invocation in interpolation no longer eat trailing whitespace
+* Slurpy hash parameters no longer count as nonslurpy during arity matching
+* Type-to-type smartmatch, e.g. `Int ~~ Num`, now works
+* `$obj.method($arg1, $arg2)` can now MMD dispatch over all arguments
+* `foo 3 and foo 4` is now parsed as two separate function calls
+* `loop (;0;) {...}` will no longer execute the loop body
+* `map({...} @list)` is no longer valid syntax
+* `next` now re-evaluates condition in `loop` constructs
+* `returns Foo::Bar` from subs/methods now works
+* `split//` now attaches the submatches to the resulting list
+* `state $x = 42` now only assigns `$x` once
+* `system()` returns proper exit codes
+
+== Changes for 6.2.3 (r3111) - May 12, 2005
 
 === Pugs Internals
 
@@ -17,7 +96,7 @@
 ** Accessors generated for public attributes
 ** Identity operator: `=:=`
 ** Method chaining: `$foo.bar().baz()`
-** Method invocants `foo ($self: $x)` and topicalized invocants in `$_` 
+** Method invocant: `method foo ($self: $x)` and topicalized as `$_` 
 ** Public and private attributes, as well as `has $.attr is rw`
 ** `$obj ~~ Class` support
 ** `$obj.clone()` support
@@ -48,7 +127,7 @@
 * `Perl::MetaModel`, prototype of Perl 6 OO meta-model in Perl 6
 * `Pod::Stream::Parser` renamed to `Pod::Event::Parser` and added more functionality
 * `Set`, with Perl 6 objects
-* `Test::Builder`, with Perl 6 objects (parses, but does not working yet)
+* `Test::Builder`, with Perl 6 objects (parses, but does not work yet)
 * `Tree::Simple`, with closure objects
 
 === Tests, Examples and Documentations
@@ -76,7 +155,7 @@
 * `to => 123` parses again; arrow pairs now always trumps unary functions
 * `{}` in P5 rules is no longer closure interpolation
 
-== Changes for 6.2.2 - May 1, 2005
+== Changes for 6.2.2 (r2604) - May 1, 2005
 
 === Pugs Internals
 
@@ -135,7 +214,7 @@
 * `one(1,1).pick` bug fixed; it should return `undef`
 * `splice([], 1)` no longer causes division by zero errors
 
-== Changes for 6.2.1 - April 24, 2005
+== Changes for 6.2.1 (r2288) - April 24, 2005
 
 === Pugs Internals
 
@@ -221,7 +300,7 @@
 * `=cut` without a newline at EOF is now parsed correctly
 * `return() if 1` now works correctly
 
-== Changes for 6.2.0 - April 13, 2005
+== Changes for 6.2.0 (r1921) - April 13, 2005
 
 === Pugs Internals
 
@@ -439,7 +518,7 @@
 * Hanoi.p6 was broken due to premature binding of subroutine parameters
 * "&sub.foo" no longer attempts to interpolate
 
-== Changes for 6.0.11 - March 14, 2005
+== Changes for 6.0.11 (r690) - March 14, 2005
 
 === Pugs Internals
 
@@ -535,7 +614,7 @@
 * Fixed `grep`/`map`/`push`/`unshift` parsing so they are properly binOp now
 * Fixed prefix function parsing bug that eats more parens than it should
 
-== Changes for 6.0.9 - February 28, 2005
+== Changes for 6.0.9 (r335) - February 28, 2005
 
 * First Perl 6 module: `Test.pm`
 * First Pugs Apocryphon: `docs/01Overview.html`

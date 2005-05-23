@@ -5,11 +5,13 @@ module Pugs.Compile.Haskell where
 #undef PUGS_HAVE_TH
 #include "../pugs_config.h"
 #ifndef PUGS_HAVE_TH
+genGHC :: a
 genGHC = error "Template Haskell support not compiled in"
 #else
 
-import Pugs.Internals
 import qualified Language.Haskell.TH as TH
+import qualified Language.Haskell.TH.Lib
+import Pugs.Internals
 import Pugs.AST
 import Pugs.Run
 import Pugs.Prim
@@ -19,23 +21,27 @@ genGHC :: Eval Val
 #ifndef HADDOCK
 genGHC = do
     exp <- asks envBody
-    liftIO (TH.runQ [d| mainCC = runComp $(compile exp) |]) >>= \str -> return . VStr . unlines $
-        [ "{-# OPTIONS_GHC -fglasgow-exts -fth -O #-}"
-        , "module MainCC where"
-        , "import qualified GHC.Base"
-        , "import qualified Pugs.Run"
-        , "import qualified Pugs.AST"
-        , "import qualified Pugs.AST.Internals"
-        , "import qualified Pugs.Types"
-        , "import qualified Pugs.Prim"
-        , "import qualified Pugs.Internals"
-        , "import Language.Haskell.TH as TH"
-        , ""
-        , TH.pprint str
-        ]
+    liftIO (TH.runQ [d|
+        mainCC :: IO Val
+        mainCC = runComp $(compile exp) |]) >>= \str -> return . VStr . unlines $
+            [ "{-# OPTIONS_GHC -fglasgow-exts -fth -O #-}"
+            , "module MainCC where"
+            , "import qualified GHC.Base"
+            , "import qualified GHC.IOBase"
+            , "import qualified Pugs.Run"
+            , "import qualified Pugs.AST"
+            , "import qualified Pugs.AST.Internals"
+            , "import qualified Pugs.Types"
+            , "import qualified Pugs.Prim"
+            , "import qualified Pugs.Internals"
+            , "import Language.Haskell.TH as TH"
+            , ""
+            , TH.pprint str
+            ]
 #endif
 
 -- Haddock doesn't like Template Haskell.
+compile :: Exp -> Language.Haskell.TH.Lib.ExpQ
 #ifndef HADDOCK
 compile (Stmts stmt rest) = [| do
         $(argC)

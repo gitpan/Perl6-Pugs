@@ -10,7 +10,25 @@
 >   He drank from yet untasted wells...
 -}
 
-module Pugs.Lexer where
+module Pugs.Lexer (
+    RuleParser,
+    ParensOption(..),
+
+    wordAlpha, wordAny, isWordAlpha, isWordAny,
+    parens, whiteSpace, lexeme, identifier,
+    braces, brackets, angles, balanced, balancedDelim, decimal,
+
+    ruleQualifiedIdentifier, ruleWhiteSpaceLine,
+
+    symbol, interpolatingStringLiteral, escapeCode,
+
+    rule, verbatimRule, literalRule,
+    tryRule, tryVerbatimRule,
+    tryChoice,
+
+    ruleScope, ruleTrait, ruleTraitName, ruleBareTrait, ruleContext,
+    verbatimParens,
+) where
 import Pugs.Internals
 import Pugs.AST
 import Pugs.Rule
@@ -33,12 +51,6 @@ perl6Def  = javaStyle
           , P.caseSensitive  = False
           }
 
-literalIdentifier :: GenParser Char st String
-literalIdentifier = do
-    c <- wordAlpha
-    cs <- many wordAny
-    return (c:cs)
-    
 wordAlpha   :: GenParser Char st Char
 wordAny     :: GenParser Char st Char
 wordAlpha   = satisfy isWordAlpha <?> "alphabetic word character"
@@ -48,18 +60,6 @@ isWordAny   :: Char -> Bool
 isWordAlpha :: Char -> Bool
 isWordAny x = (isAlphaNum x || x == '_')
 isWordAlpha x = (isAlpha x || x == '_')
-
-setVar :: String -> Val -> RuleParser ()
-setVar = do
-    -- env <- getState
-    -- let lex = envLexical env
-    -- setState env{ envLexical = lex' }
-    error ""
-
-getVar :: String -> RuleParser Val
-getVar = do
-    -- env <- getState
-    error ""    
 
 perl6Lexer :: P.TokenParser st
 perl6Lexer = P.makeTokenParser perl6Def
@@ -254,19 +254,25 @@ postSpace rule = try $ do
 ruleTrait :: GenParser Char st String
 ruleTrait = rule "trait" $ do
     symbol "is" <|> symbol "does"
-    trait <- ruleQualifiedIdentifier
+    trait <- do
+        optional $ string "::" -- XXX Bad Hack
+        ruleQualifiedIdentifier
     return trait
 
 ruleTraitName :: String -> GenParser Char st String
 ruleTraitName trait = rule "named trait" $ do
     symbol "is"
     symbol trait
-    identifier
+    ruleQualifiedIdentifier
 
 ruleBareTrait :: String -> GenParser Char st String
 ruleBareTrait trait = rule "bare trait" $ do
     choice [ ruleTraitName trait
-           , do { symbol trait ; identifier }
+           , do symbol trait
+                str <- ruleQualifiedIdentifier
+                -- Hierarchical types like Hash of Str -- not yet recognised
+                many . try $ do { whiteSpace; symbol "of"; ruleQualifiedIdentifier }
+                return str
            ]
 
 ruleContext :: GenParser Char st String
@@ -277,4 +283,7 @@ ruleContext = literalRule "context" $ do
 
 tryChoice :: [GenParser tok st a] -> GenParser tok st a
 tryChoice = choice . map try
+
+verbatimParens :: GenParser Char st a -> GenParser Char st a
+verbatimParens = between (lexeme $ char '(') (char ')')
 

@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 8;
+plan 9;
 
 # L<S04/"The Relationship of Blocks and Declarations" /There is a new state declarator that introduces/>
 
@@ -35,18 +35,18 @@ plan 8;
     $a(); $a();     # $svar == 44
     my $b = $gen(); # $svar == 44
 
-    is $b(), 44, "state() works inside coderefs", :todo<feature>;
+    is $b(), 44, "state() works inside coderefs";
 }
 
 # state() inside for-loops
 {
-    for [1,2,3] -> $val {
+    for 1,2,3 -> $val {
         state $svar;
         $svar++;
 
         # Only check on last run
         if($val == 3) {
-            is $svar, 3, "state() works inside for-loops", :todo<feature>;
+            is $svar, 3, "state() works inside for-loops";
         }
     }
 }
@@ -78,7 +78,7 @@ plan 8;
     $svar_ref++; $svar_ref++;
 
     my $svar_ref = $gen();
-    is $svar_ref, 44, "reference to a state() var", :todo<feature>;
+    is $svar_ref, 44, "reference to a state() var", :todo<bug>;
 }
 
 # Anonymous state vars
@@ -90,7 +90,7 @@ plan 8;
     $svar_ref++; $svar_ref++; # $svar == 2
 
     my $svar_ref = $gen();    # $svar == 2
-    is $svar_ref, 2, "reference to a state() var", :todo<feature>;
+    is $svar_ref, 2, "anonymous state() vars", :todo<feature>;
 }
 
 # http://www.nntp.perl.org/group/perl.perl6.language/20888
@@ -108,4 +108,22 @@ plan 8;
         $b = $gen()();      # $svar == 42
     '
     is $b, 42, "state() and parens", :todo<feature>; # svar == 43
+}
+
+# state() inside regular expressions
+{
+    my $str = "abc";
+
+    my $re  = {
+	# Perl 5 RE, as we don't want to force people to install Parrot ATM. (The
+	# test passes when using the Perl 6 RE, too.)
+	s:Perl5/^(.)/{
+	  state $svar;
+	  ++$svar;
+	}/;
+    };
+    $re($str);
+    $re($str);
+    $re($str);
+    is +$str, 3, "state() inside regular expressions works";
 }

@@ -22,6 +22,7 @@ module Pugs.Internals (
     module Pugs.Rule.Pos,
     module Data.Dynamic,
     module Data.Unique,
+    module Data.FunctorM,
     module Control.Exception,
     module System.Environment,
     module System.Random,
@@ -64,6 +65,8 @@ module Pugs.Internals (
     combine,
     modifyTVar,
     unsafePerformSTM,
+    possiblyFixOperatorName,
+    maybeM,
 ) where
 
 import UTF8
@@ -83,7 +86,7 @@ import System.Process
 import System.IO (
     Handle, stdin, stdout, hClose, hGetLine, hGetContents,
     openFile, hPutStr, hPutStrLn, IOMode(..), stderr, SeekMode(..),
-    hSetBuffering, BufferMode(..), hIsTerminalDevice, hFlush, hPrint
+    hSetBuffering, BufferMode(..), hIsTerminalDevice, hFlush, hPrint, isEOF
     )
 import System.IO.Unsafe
 import System.IO.Error (ioeGetErrorString, isUserError)
@@ -96,6 +99,7 @@ import Control.Concurrent.STM
 import Data.Bits hiding (shift)
 import Data.Maybe
 import Data.Either
+import Data.FunctorM
 import Data.List (
     (\\), find, genericLength, insert, sortBy, intersperse,
     partition, group, sort, genericReplicate, isPrefixOf, isSuffixOf,
@@ -182,3 +186,36 @@ modifyTVar var f = do
 
 -- instance MonadIO STM where
 --     liftIO = unsafeIOToSTM
+
+maybeM :: (FunctorM f, Monad m) => m (f a) -> (a -> m b) -> m (f b)
+maybeM f m = fmapM m =<< f
+
+{-|
+Transform an operator name, for example @&infix:<+>@ or @&prefix:«[+]»@, into
+its internal name (@&infix:+@ and @&prefix:[+]@ respectively).
+-}
+possiblyFixOperatorName :: String -> String
+possiblyFixOperatorName name
+    -- It doesn't matter if we lookup &foo or &*foo.
+    | ('&':'*':rest) <- name = "&*" ++ fixName' rest
+    | ('&':rest)     <- name = "&"  ++ fixName' rest
+    | otherwise      = name
+    where
+    -- We've to strip the <>s for &infix:<...>, &prefix:<...>, and
+    -- &postfix:<...>.
+    -- The other &...:<...> things aren't that simple (e.g. circumfix.).
+    fixName' ('i':'n':'f':'i':'x':':':rest)         = "infix:"   ++ dropBrackets rest
+    fixName' ('p':'r':'e':'f':'i':'x':':':rest)     = "prefix:"  ++ dropBrackets rest
+    fixName' ('p':'o':'s':'t':'f':'i':'x':':':rest) = "postfix:" ++ dropBrackets rest
+    fixName' x                                      = x
+    -- We have to make sure that the last character(s) match the first one(s),
+    -- otherwise 4 <= 4 will stop working.
+    -- Kludge. <=> is ambigious.
+    dropBrackets "<=>" = "<=>"
+    -- «bar» --> bar
+    dropBrackets ('\171':(rest@(_:_)))    = if (last rest) == '\187' then init rest else '\171':rest
+    -- <<bar>> --> bar
+    dropBrackets ('<':'<':(rest@(_:_:_))) = if (last rest) == '>' && (last . init $ rest) == '>' then init . init $ rest else "<<" ++ rest
+    -- <bar> --> bar
+    dropBrackets ('<':(rest@(_:_)))       = if (last rest) == '>' then init rest else '<':rest
+    dropBrackets x                        = x

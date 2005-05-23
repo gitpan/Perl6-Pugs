@@ -23,13 +23,13 @@ printInteractiveHelp
    = do putStrLn "Commands available from the prompt:"
         putStrLn ":h              = show this help message"
         putStrLn ":q              = quit"
-        putStrLn ". <exp>         = show the syntax tree of an expression"
-        putStrLn "? <exp>         = evaluate an expression in small steps"
-        putStrLn "! <exp>         = same, but in the interactive environment"
-        putStrLn "<exp>           = run a command"
-        putStrLn ":i <exp>        = run a command, and ugly-print the result"
         putStrLn ":r              = reset the evaluation environment"
         putStrLn ":l <filename>   = load a pugs file"
+        putStrLn ":d <exp>        = show syntax tree of an expression"
+        putStrLn ":D <exp>        = show raw syntax tree of an expression"
+        putStrLn ":e <exp>        = run a command, and ugly-print the result"
+        putStrLn ":E <exp>        = same, but evaluate in small steps"
+        putStrLn "<exp>           = run a command"
 
 {- FIXME: Somebody with more UI skillz should make this nicer -}
 printCommandLineHelp :: IO ()
@@ -42,12 +42,13 @@ printCommandLineHelp
         putStrLn "-c               parse the file or -e, but do not run it"
         putStrLn "-Bbackend        execute using the compiler backend"
         putStrLn "-Cbackend        compile using the compiler backend"
+        putStrLn "                 (valid backends are: Pugs, Parrot, Haskell)"
         putStrLn "-M module        execute 'use module' before executing the program"
         putStrLn "-h or --help     give this message"
         putStrLn "-V               long configuration information & version"
         putStrLn "-V:item          short configuration information for item"
         putStrLn "-v or --version  version"
-        putStrLn "-l -d and -w are ignored for compatability with perl 5"
+        putStrLn "-l -d and -w are ignored for compatability with Perl 5"
 
 name :: String
 name       = "Perl6 User's Golfing System"
@@ -100,5 +101,5 @@ banner = putStrLn $ unlines
 intro :: IO ()
 intro = putStrLn $ unlines
     [ "Welcome to Pugs -- " ++ name
-    , "Type :h for help"
+    , "Type :h for help."
     ]

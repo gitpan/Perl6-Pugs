@@ -19,11 +19,14 @@ module Pugs.Prim (
     op1Exit,
     -- used by Pugs.Compile.Haskell
     op0, op1, op2,
+    -- used Pugs.Eval
+    foldParam, op2Hyper, op1HyperPrefix, op1HyperPostfix,
 ) where
 import Pugs.Internals
 import Pugs.Junc
 import Pugs.AST
 import Pugs.Types
+import Pugs.Monads
 import Pugs.Pretty
 import Text.Printf
 import Pugs.External
@@ -39,8 +42,12 @@ import Pugs.Prim.Numeric
 import Pugs.Prim.Lifts
 import Pugs.Prim.Eval
 
+clocksPerSecond :: (Num a) => a
+clocksPerSecond = 1000000
+
+-- |Implementation of 0-ary and variadic primitive operators and functions
+-- (including list ops).
 op0 :: String -> [Val] -> Eval Val
-op0 "!"  = fmap opJuncNone . mapM fromVal
 op0 "&"  = fmap opJuncAll  . mapM fromVal
 op0 "^"  = fmap opJuncOne  . mapM fromVal
 op0 "|"  = fmap opJuncAny  . mapM fromVal
@@ -49,11 +56,18 @@ op0 "bool::true" = const $ return (VBool True)
 op0 "bool::false" = const $ return (VBool False)
 op0 "time"  = const $ do
     clkt <- liftIO getClockTime
-    return $ VInt $ toInteger $ tdSec $ diffClockTimes clkt epochClkT
+    return $ VRat $ fdiff $ diffClockTimes clkt epochClkT
     where
-    epochClkT = toClockTime epoch
-    epoch = CalendarTime 2000 January 1 0 0 0 0 Saturday 0 "UTC" 0 False
-op0 "not" = const retEmpty
+       epochClkT = toClockTime epoch
+       epoch = CalendarTime 2000 January 1 0 0 0 0 Saturday 0 "UTC" 0 False
+       -- 10^12 is expanded because the alternatives tried gave type warnings.
+       fdiff = \d -> (fromInteger $ tdPicosec d)
+                   / (clocksPerSecond * clocksPerSecond)
+                   + (fromIntegral $ tdSec d)
+op0 "times"  = const $ do
+    ProcessTimes _ u s cu cs <- liftIO getProcessTimes
+    return . VList $ map (castV . (% (clocksPerSecond :: VInt)) . toInteger . fromEnum)
+        [u, s, cu, cs]
 op0 "so" = const (return $ VBool True)
 op0 "¥" = op0Zip
 op0 "Y" = op0 "¥"
@@ -66,15 +80,17 @@ op0 "File::Spec::tmpdir" = const $ do
 op0 "pi" = const $ return (VNum pi)
 op0 "say" = const $ op1 "say" =<< readVar "$_"
 op0 "print" = const $ op1 "print" =<< readVar "$_"
-op0 "return" = \_ -> do
-    depth <- asks envDepth
-    if depth == 0
-        then fail "cannot return() outside a subroutine"
-        else shiftT $ const $ retEmpty
+op0 "return" = const $ op1Return (shiftT . const $ retEmpty)
+op0 "yield" = const $ op1Yield (shiftT . const $ retEmpty)
+op0 "take" = const $ retEmpty
 op0 other = const $ fail ("Unimplemented listOp: " ++ other)
 
+-- |Implementation of unary primitive operators and functions
 op1 :: String -> Val -> Eval Val
 op1 "!"    = op1Cast (VBool . not)
+op1 "id" = \x -> do
+    (VObject o) <- fromVal x
+    return . castV . hashUnique $ objId o
 op1 "clone" = \x -> do
     (VObject o) <- fromVal x
     attrs   <- readIVar (IHash $ objAttrs o)
@@ -102,6 +118,15 @@ op1 "lc" = op1Cast (VStr . map toLower)
 op1 "lcfirst" = op1StrFirst toLower
 op1 "uc" = op1Cast (VStr . map toUpper)
 op1 "ucfirst" = op1StrFirst toUpper
+op1 "capitalize" = op1Cast $ VStr . (mapEachWord capitalizeWord)
+  where
+    mapEachWord _ [] = []
+    mapEachWord f str@(c:cs)
+        | isSpace c = c:(mapEachWord f cs)
+	| otherwise = f word ++ mapEachWord f rest
+	  where (word,rest) = break isSpace str
+    capitalizeWord []     = []
+    capitalizeWord (c:cs) = toUpper c:(map toLower cs)
 op1 "undef" = \x -> do
     when (defined x) $ do
         ref <- fromVal x
@@ -113,6 +138,7 @@ op1 "cos"  = op1Floating cos
 op1 "sin"  = op1Floating sin
 op1 "tan"  = op1Floating tan
 op1 "sqrt" = op1Floating sqrt
+op1 "atan" = op1Floating atan
 op1 "post:++" = \x -> do
     val <- fromVal x
     ref <- fromVal x
@@ -152,10 +178,8 @@ op1 "sort" = \v -> do
             return . VList . map snd . sort $ (strs :: [VStr]) `zip` valList
         Just subVal -> do
             sub <- fromVal subVal
-            evl <- asks envEval
             sorted <- (`sortByM` valList) $ \v1 v2 -> do
-                rv  <- local (\e -> e{ envContext = cxtItem "Int" }) $ do
-                    evl (App (Val sub) [Val v1, Val v2] [])
+                rv  <- enterEvalContext (cxtItem "Int") $ App (Val sub) [Val v1, Val v2] []
                 int <- fromVal rv
                 return (int <= (0 :: Int))
             return $ VList sorted
@@ -189,7 +213,6 @@ op1 "\\"   = \v -> do
         (VList vs)  -> VRef . arrayRef $ vs
         _           -> VRef . scalarRef $ v
 op1 "post:..."  = op1Cast op1Range
-op1 "not"  = op1 "!"
 op1 "true" = op1 "?"
 op1 "any"  = op1Cast opJuncAny
 op1 "all"  = op1Cast opJuncAll
@@ -210,47 +233,36 @@ op1 "eval_parrot" = \v -> do
         ('.':_) -> code
         _       -> ".sub pugs_eval_parrot\n" ++ code ++ "\n.end\n"
     return $ VBool True
-op1 "require" = \v -> do
-    file    <- fromVal v
-    incs    <- fromVal =<< readVar "@*INC"
-    requireInc incs file (errMsg file incs)
-    where
-    errMsg file incs = "Can't locate " ++ file ++ " in @INC (@INC contains: " ++ unwords incs ++ ")."
-    requireInc [] _ msg = do
-        return $ VError msg (Val VUndef)
-    requireInc (p:ps) file msg = do
-        let pathName = p ++ "/" ++ file
-        ok <- liftIO $ doesFileExist pathName
-        if (not ok)
-            then requireInc ps file msg
-            else do
-                str <- liftIO $ readFile pathName
-                opEval True pathName (decodeUTF8 str)
+op1 "use" = opRequire True
+op1 "require" = opRequire False
 op1 "eval" = \v -> do
     str <- fromVal v
-    opEval False "<eval>" str
+    opEval Nothing "<eval>" str
 op1 "eval_perl5" = boolIO evalPerl5
 op1 "eval_haskell" = op1EvalHaskell
 op1 "eval_yaml" = evalYaml
+op1 "try" = \v -> do
+    sub <- fromVal v
+    val <- resetT $ evalExp (App (Val $ VCode sub) [] [])
+    retEvalResult False val
+-- Tentative implementation of nothingsmuch's lazy proposal.
+op1 "lazy" = \v -> do
+    sub <- fromVal v
+    return $ VRef . thunkRef . MkThunk . evalExp $ App (Val $ VCode sub) [] []
 op1 "defined" = op1Cast (VBool . defined)
-op1 "last" = \v -> return (VError "cannot last() outside a loop" (Val v))
-op1 "next" = \v -> return (VError "cannot next() outside a loop" (Val v))
-op1 "redo" = \v -> return (VError "cannot redo() outside a loop" (Val v))
-op1 "return" = \v -> do
-    depth <- asks envDepth
-    if depth == 0
-        then fail "cannot return() outside a subroutine"
-        else shiftT $ const $ do
-            let exp = case v of
-                    VList [x]   -> Val x
-                    _           -> Val v
-            evl <- asks envEval
-            evl exp
+op1 "last" = const $ fail "cannot last() outside a loop"
+op1 "next" = const $ fail "cannot next() outside a loop"
+op1 "redo" = const $ fail "cannot redo() outside a loop"
+op1 "return" = op1Return . op1ShiftOut
+op1 "yield" = op1Yield . op1ShiftOut
+op1 "take" = \v -> do
+    lex <- asks envLexical
+    arr <- findSymRef "@?TAKE" lex
+    op2 "push" (VRef arr) v
 op1 "sign" = \v -> if defined v
     then op1Cast (VInt . signum) v
     else return undef
 
-op1 ('[':op) = op1Fold . op2 . init $ op
 op1 "rand"  = \v -> do
     x    <- fromVal v
     rand <- liftIO $ randomRIO (0, if x == 0 then 1 else x)
@@ -259,12 +271,39 @@ op1 "print" = op1Print hPutStr
 op1 "say" = op1Print hPutStrLn
 op1 "die" = \v -> do
     strs <- fromVal v
-    fail (concat strs)
+    fail (errmsg . concat $ strs)
+    -- To avoid the uncatchable error "Prelude.last: empty list" and to present
+    -- a nicer error message to the user.
+    where
+    errmsg "" = "Died"
+    errmsg x  = x
+op1 "warn" = \v -> do
+    strs <- fromVal v
+    errh <- readVar "$*ERR"
+    pos  <- asks envPos
+    op2 "say" errh $ VList [ VStr $ pretty (VError (errmsg strs) [pos]) ]
+    where
+    errmsg "" = "Warning: something's wrong"
+    errmsg x  = x
+op1 "fail_" = \v -> do
+    strs  <- fromVal v
+    throw <- fromVal =<< readVar "$?FAIL_SHOULD_DIE"
+    pos   <- asks envPos
+    let msg = pretty (VError (errmsg strs) [pos]) ++ "\n"
+    if throw
+	-- "use fatal" is in effect, so die.
+	then fail msg
+	-- We've to return a unthrown exception.
+        -- The error message to output
+	else shiftT . const $ return . VRef . thunkRef . MkThunk $ fail msg
+    where
+    errmsg "" = "Failed"
+    errmsg x  = x
 op1 "exit" = op1Exit
 op1 "readlink" = \v -> do
     str  <- fromVal v
     tryIO undef $ fmap VStr (readSymbolicLink str)
-op1 "sleep" = boolIO (threadDelay . (* 1000000))
+op1 "sleep" = boolIO (threadDelay . (* clocksPerSecond))
 op1 "mkdir" = boolIO createDirectory
 op1 "rmdir" = boolIO removeDirectory
 op1 "chdir" = boolIO setCurrentDirectory
@@ -329,14 +368,20 @@ op1 "Pugs::Internals::runInteractiveCommand" = \v -> do
                        , VHandle err
                        , VProcess (MkProcess phand)
                        ]
-op1 "system" = boolIO system
+op1 "system" = \v -> do
+    cmd         <- fromVal v
+    exitCode    <- liftIO $ system cmd
+    case exitCode of
+        ExitFailure x -> do
+            glob    <- askGlobal
+            errSV   <- findSymRef "$!" glob
+            writeRef errSV (VInt $ toInteger x)
+            return $ VBool False
+        ExitSuccess -> return $ VBool True
 op1 "accept" = \v -> do
     socket      <- fromVal v
     (h, _, _)   <- liftIO $ accept socket
     return $ VHandle h
-op1 "yield" = const $ do
-    ok <- tryIO False $ do { yield ; return True }
-    return $ VBool ok
 op1 "detach" = \v -> do
     case v of
         VThread thr -> do
@@ -359,9 +404,7 @@ op1 "async" = \v -> do
     lock    <- liftSTM $ newEmptyTMVar
     tid     <- liftIO . (if rtsSupportsBoundThreads then forkOS else forkIO) $ do
         val <- runEvalIO env $ do
-            evl <- asks envEval
-            local (\e -> e{ envContext = CxtVoid }) $ do
-                evl (App (Val code) [] [])
+            enterEvalContext CxtVoid $ App (Val code) [] []
         liftSTM $ tryPutTMVar lock val
         return ()
     return . VThread $ MkThread
@@ -437,6 +480,9 @@ op1 "pop"   = \x -> join $ doArray x array_pop -- monadic join
 op1 "shift" = \x -> join $ doArray x array_shift -- monadic join
 op1 "pick"  = op1Pick
 op1 "sum"   = op1Sum
+op1 "min"   = op1Min
+op1 "max"   = op1Max
+op1 "uniq"  = op1Uniq
 op1 "chr"   = op1Cast (VStr . (:[]) . chr)
 op1 "ord"   = op1Cast $ \str -> if null str then undef else (castV . ord . head) str
 op1 "hex"   = op1Cast (VInt . read . ("0x"++))
@@ -445,8 +491,67 @@ op1 "log10" = op1Cast (VNum . logBase 10)
 op1 "from"  = op1Cast (castV . matchFrom)
 op1 "to"    = op1Cast (castV . matchTo)
 op1 "matches" = op1Cast (VList . matchSubPos)
+op1 "gather" = \v -> do
+    evl <- asks envEval
+    evl (Syn "gather" [Val v])
+op1 "name" = \v -> do
+    sub <- fromVal v
+    return . castV $ subName sub
+op1 "arity" = \v -> do
+    sub <- fromVal v
+    return . castV . length $ subParams sub
+op1 "Thread::yield" = const $ do
+    ok <- tryIO False $ do { yield ; return True }
+    return $ VBool ok
+op1 "BUILDALL" = \v -> do
+    pkgs    <- pkgParents =<< fmap showType (evalValType v)
+    forM_ pkgs $ \pkg -> do
+        maybeM (fmap (findSym $ ('&':pkg) ++ "::BUILD") askGlobal) $ \tvar -> do
+            ref <- liftSTM $ readTVar tvar
+            enterEvalContext CxtVoid (App (Val $ VRef ref) [Val v] [])
+    return undef
+-- [,] is a noop -- It simply returns the input list
+op1 "prefix:[,]" = return
 op1 other   = \_ -> fail ("Unimplemented unaryOp: " ++ other)
 
+pkgParents :: VStr -> Eval [VStr]
+pkgParents pkg = do
+    ref     <- readVar (':':'*':pkg)
+    if ref == undef then return [] else do
+    meta    <- readRef =<< fromVal ref
+    fetch   <- doHash meta hash_fetchVal
+    attrs   <- fromVal =<< fetch "traits"
+    pkgs    <- mapM pkgParents attrs
+    return $ nub (pkg:concat pkgs)
+    
+op1Return :: Eval Val -> Eval Val
+op1Return action = do
+    depth <- asks envDepth
+    if depth == 0 then fail "cannot return() outside a subroutine" else do
+    sub   <- fromVal =<< readVar "&?SUB"
+    case subCont sub of
+        Nothing -> action
+        _       -> fail $ "cannot return() from a " ++ pretty (subType sub)
+
+op1Yield :: Eval Val -> Eval Val
+op1Yield action = do
+    depth <- asks envDepth
+    if depth == 0 then fail "cannot yield() outside a coroutine" else do
+    sub   <- fromVal =<< readVar "&?SUB"
+    case subCont sub of
+        Nothing -> fail $ "cannot yield() from a " ++ pretty (subType sub)
+        Just tvar -> callCC $ \esc -> do
+            liftSTM $ writeTVar tvar (MkThunk (esc undef))
+            action
+
+op1ShiftOut :: Val -> Eval Val
+op1ShiftOut v = shiftT . const $ do
+    evl <- asks envEval
+    evl $ case v of
+        VList [x]   -> Val x
+        _           -> Val v
+
+op1Exit :: Val -> Eval a
 op1Exit v = do
     rv <- fromVal v
     if rv /= 0
@@ -520,6 +625,7 @@ mapStr2Fill f x y = map (chr . fromEnum . uncurry f) $ x `zipFill` y
     zipFill (a:as) (b:bs) = (a,b) : zipFill as bs
 
 
+-- |Implementation of 2-arity primitive operators and functions
 op2 :: String -> Val -> Val -> Eval Val
 op2 "rename" = boolIO2 rename
 op2 "symlink" = boolIO2 createSymbolicLink
@@ -579,6 +685,12 @@ op2 "!!" = \x y -> callCC $ \esc -> do
     by <- fromVal y
     when by $ esc (VBool False)
     return (VBool True)
+op2 ".[]" = \x y -> do
+    evl <- asks envEval
+    evl $ Syn "[]" [Val x, Val y]
+op2 ".{}" = \x y -> do
+    evl <- asks envEval
+    evl $ Syn "{}" [Val x, Val y]
 -- XXX pipe forward XXX
 op2 "and"= op2 "&&"
 op2 "or" = op2 "||"
@@ -588,7 +700,7 @@ op2 "nor"= op2 "!!"
 op2 "grep" = op2Grep
 op2 "map"  = op2Map
 op2 "join" = op2Join
-op2 "reduce" = op2Fold
+op2 "reduce" = op2FoldL
 op2 "kill" = \s v -> do
     sig  <- fromVal s
     pids <- fromVals v
@@ -616,7 +728,7 @@ op2 "split"= \x y -> do
     case val of
         VRule rx -> do
             chunks <- rxSplit rx str
-            return . VList $ map VStr chunks
+            return $ VList chunks
         _ -> do
             delim <- fromVal val
             return $ split' delim str
@@ -661,11 +773,16 @@ op2 "exec" = \x y -> do
         executeFile prog True args Nothing
         return $ VBool True
 op2 "system" = \x y -> do
-    prog  <- fromVal x
-    args  <- fromVals y
-    tryIO (VBool False) $ do
-        rawSystem prog args
-        return $ VBool True
+    prog        <- fromVal x
+    args        <- fromVals y
+    exitCode    <- liftIO $ rawSystem prog args
+    case exitCode of
+        ExitFailure x -> do
+            glob    <- askGlobal
+            errSV   <- findSymRef "$!" glob
+            writeRef errSV (VInt $ toInteger x)
+            return $ VBool False
+        ExitSuccess -> return $ VBool True
 op2 "chmod" = \x y -> do
     mode  <- fromVal x
     files <- fromVals y
@@ -683,10 +800,9 @@ op2 "sort" = \x y -> do
     op1 "sort" . VList $ xs ++ ys
 op2 "say" = \x (VList ys) -> op1Print hPutStrLn (VList (x:ys))
 op2 "print" = \x (VList ys) -> op1Print hPutStr (VList (x:ys))
-op2 op | "»" `isPrefixOf` op = op2Hyper . init . init . drop 2 $ op
-op2 ('>':'>':op) = op2Hyper . init . init $ op
 op2 other = \_ _ -> fail ("Unimplemented binaryOp: " ++ other)
 
+-- |Implementation of 3-arity primitive operators and functions
 op3 :: String -> Val -> Val -> Val -> Eval Val
 op3 "index" = \x y z -> do
     str <- fromVal x
@@ -724,9 +840,14 @@ op3 "new" = \t n _ -> do
     attrs   <- liftSTM $ newTVar Map.empty
     writeIVar (IHash attrs) named
     uniq    <- liftIO $ newUnique
-    return . VObject $ MkObject{ objType = typ, objAttrs = attrs, objId = uniq }
+    let obj = VObject $ MkObject{ objType = typ, objAttrs = attrs, objId = uniq }
+    -- Now start calling BUILD for each of parent classes (if defined)
+    op1 "BUILDALL" obj
+    return obj
 op3 other = \_ _ _ -> fail ("Unimplemented 3-ary op: " ++ other)
 
+-- |Implementation of 4-arity primitive operators and functions.
+-- Only substr and splice
 op4 :: String -> Val -> Val -> Val -> Val -> Eval Val
 op4 "substr" = \x y z w -> do
     str  <- fromVal x
@@ -761,28 +882,53 @@ op4 "splice" = \x y z w -> do
 
 op4 other = \_ _ _ _ -> fail ("Unimplemented 4-ary op: " ++ other)
 
-op2Hyper :: String -> Val -> Val -> Eval Val
-op2Hyper op (VRef ref) y = do
+op1HyperPrefix :: VCode -> Val -> Eval Val
+op1HyperPrefix sub (VRef ref) = do
     x <- readRef ref
-    op2Hyper op x y
-op2Hyper op x (VRef ref) = do
+    op1HyperPrefix sub x
+op1HyperPrefix sub x
+    | VList x' <- x
+    = fmap VList $ hyperList x'
+    | otherwise
+    = fail "Hyper OP only works on lists"
+    where
+    doHyper x
+	| VRef x' <- x
+	= doHyper =<< readRef x'
+	| otherwise
+	= enterEvalContext cxtItemAny $ App (Val $ VCode sub) [Val x] []
+    hyperList []     = return []
+    hyperList (x:xs) = do
+        val  <- doHyper x
+        rest <- hyperList xs
+        return (val:rest)
+
+op1HyperPostfix :: VCode -> Val -> Eval Val
+op1HyperPostfix = op1HyperPrefix
+
+op2Hyper :: VCode -> Val -> Val -> Eval Val
+op2Hyper sub (VRef ref) y = do
+    x <- readRef ref
+    op2Hyper sub x y
+op2Hyper sub x (VRef ref) = do
     y <- readRef ref
-    op2Hyper op x y
-op2Hyper op x y
+    op2Hyper sub x y
+op2Hyper sub x y
     | VList x' <- x, VList y' <- y
     = fmap VList $ hyperLists x' y'
     | VList x' <- x
-    = fmap VList $ mapM ((flip (op2 op)) y) x'
+    = fmap VList $ mapM ((flip doHyper) y) x'
     | VList y' <- y
-    = fmap VList $ mapM (op2 op x) y'
+    = fmap VList $ mapM (doHyper x) y'
     | otherwise
-    = return $ VError "Hyper OP only works on lists" (Val VUndef)
+    = fail "Hyper OP only works on lists"
     where
+    doHyper x y = enterEvalContext cxtItemAny $ App (Val $ VCode sub) [Val x, Val y] []
     hyperLists [] [] = return []
     hyperLists xs [] = return xs
     hyperLists [] ys = return ys
     hyperLists (x:xs) (y:ys) = do
-        val  <- op2 op x y
+        val  <- doHyper x y
         rest <- hyperLists xs ys
         return (val:rest)
 
@@ -817,6 +963,7 @@ op2Logical f x y = do
 op2DefinedOr :: Val
 op2DefinedOr = undefined
 
+op2Identity :: Val -> Val -> Eval Val
 op2Identity (VObject x) (VObject y) = return $ VBool (objId x == objId y)
 op2Identity (VRef ref) y = do
     x <- readRef ref
@@ -841,6 +988,13 @@ op2Ord f x y = do
         EQ -> 0
         GT -> 1
 
+-- |Returns a transaction to install a primitive operator using 
+-- 'Pugs.AST.genMultiSym'.
+-- The associativity determines the arity and fixity of ops.
+-- The primitive\'s subBody is defined in 'op0', 'op1', etc depending on arity,
+-- the default is 'op0'.
+-- The Pad symbol name is prefixed with \"&*\" for functions and
+-- \"&*\" ~ fixity ~ \":\" for operators.
 primOp :: String -> String -> Params -> String -> STM (Pad -> Pad)
 primOp sym assoc prms ret = genMultiSym name sub
     where
@@ -872,6 +1026,8 @@ primOp sym assoc prms ret = genMultiSym name sub
         4 -> \[x,y,z,w] -> op4 symStr x y z w
         _ -> error (show arity)
     symName = if modify then assoc ++ ":" ++ symStr else symStr
+    -- prefix symName with post, circum or other (not yet used)
+    -- to disambiguate, for example, &*prefix:++ and &*postfix:++ in 'op0'
     (arity, fixity, modify) = case assoc of
         "pre"       -> (1, "prefix", False)
         "spre"      -> (1, "prefix", False)
@@ -884,6 +1040,7 @@ primOp sym assoc prms ret = genMultiSym name sub
         "list"      -> (0, "infix", False)
         other       -> (0, other, True)
 
+-- |Produce a Pad update transaction with 'primOp' from a string description
 primDecl :: String -> STM (Pad -> Pad)
 primDecl str = primOp sym assoc params ret
     where
@@ -925,21 +1082,26 @@ foldParam ('?':str)
 foldParam ('~':str) = \ps -> (((buildParam str "" "$?1" (Val VUndef)) { isLValue = False }) { isLazy = True }:ps)
 foldParam x         = doFoldParam x []
 
+-- op1 "perl"
 prettyVal :: Int -> Val -> Eval VStr
 prettyVal 10 _ = return "..."
 prettyVal d v@(VRef r) = do
     v'  <- readRef r
     ifValTypeIsa v "Pair"
-        (do let (VList [ks, vs]) = v'
-            kStr <- prettyVal (d+1) ks
-            vStr <- prettyVal (d+1) vs
-            return $ "(" ++ kStr ++ " => " ++ vStr ++ ")")
+        (case v' of
+            VList [ks, vs] -> do
+                kStr <- prettyVal (d+1) ks
+                vStr <- prettyVal (d+1) vs
+                return $ "(" ++ kStr ++ " => " ++ vStr ++ ")"
+            _ -> prettyVal (d+1) v'
+        )
         (do str <- prettyVal (d+1) v'
             ifValTypeIsa v "Array"
                 (return $ ('[':(init (tail str))) ++ "]")
                 (ifValTypeIsa v "Hash"
                     (return $ ('{':(init (tail str))) ++ "}")
-                    (return ('\\':str))))
+                    (return ('\\':str)))
+        )
 prettyVal d (VList vs) = do
     vs' <- mapM (prettyVal (d+1)) vs
     return $ "(" ++ concat (intersperse ", " vs') ++ ")"
@@ -950,12 +1112,18 @@ prettyVal _ v = return $ pretty v
 -- spre is "symbolic pre", that is, operators for which a precedence has
 -- already been assigned in Parser.hs
 
---    ret_val   assoc   op_name args
+-- |Initial set global symbols to populate the evaluation environment
+--  in the form of Pad mutating transactions built with 'primDecl'.
+--
+--  The source string format is:
+--
+-- >  ret_val   assoc   op_name args
 initSyms :: STM [Pad -> Pad]
 initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      spre    !       (Bool)\
 \\n   Num       spre    +       (Num)\
 \\n   Num       pre     abs     (?Num=$_)\
+\\n   Num       pre     atan    (Num)\
 \\n   Num       pre     atan    (Num, Num)\
 \\n   Num       pre     cos     (?Num=$_)\
 \\n   Num       pre     sin     (?Num=$_)\
@@ -1001,13 +1169,14 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Str       pre     lcfirst (?Str=$_)\
 \\n   Str       pre     uc      (?Str=$_)\
 \\n   Str       pre     ucfirst (?Str=$_)\
+\\n   Str       pre     capitalize (?Str=$_)\
 \\n   Any       post    ++      (rw!Num)\
 \\n   Num       post    --      (rw!Num)\
 \\n   Any       spre    ++      (rw!Num)\
 \\n   Num       spre    --      (rw!Num)\
-\\n   Any       pre     not     ()\
-\\n   Bool      pre     not     (Bool)\
+\\n   Bool      pre     not     (List)\
 \\n   Bool      pre     true    (Bool)\
+\\n   List      pre     gather  (Code)\
 \\n   List      pre     map     (Code, List)\
 \\n   List      pre     grep    (Code, List)\
 \\n   List      pre     sort    (Code, List)\
@@ -1024,7 +1193,10 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Int       pre     unshift (rw!Array, List)\
 \\n   Scalar    pre     pop     (rw!Array)\
 \\n   Scalar    pre     shift   (rw!Array)\
-\\n   Num       pre     sum     (List)\
+\\n   Scalar    pre     sum     (List)\
+\\n   Scalar    pre     min     (List)\
+\\n   Scalar    pre     max     (List)\
+\\n   List      pre     uniq    (List)\
 \\n   Str       pre     join    (Array: Str)\
 \\n   Str       pre     join    (Str, List)\
 \\n   Any       pre     join    (Thread)\
@@ -1043,12 +1215,15 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     exists  (rw!Hash: Str)\
 \\n   Bool      pre     exists  (rw!Array: Int)\
 \\n   Str       pre     perl    (rw!Any|Junction)\
+\\n   Any       pre     try     (Code)\
+\\n   Any       pre     lazy    (Code)\
 \\n   Any       pre     eval    (Str)\
 \\n   Any       pre     eval_parrot   (Str)\
 \\n   Any       pre     eval_perl5   (Str)\
 \\n   Any       pre     eval_haskell (Str)\
 \\n   Any       pre     eval_yaml    (Str)\
 \\n   Any       pre     require (?Str=$_)\
+\\n   Any       pre     use     (?Str=$_)\
 \\n   Any       pre     require_haskell (Str)\
 \\n   Any       pre     require_parrot  (Str)\
 \\n   Any       pre     last    (?Int=1)\
@@ -1060,6 +1235,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Str       pre     ref     (rw!Any|Junction)\
 \\n   Str       pre     isa     (rw!Any|Junction, Str)\
 \\n   Num       pre     time    ()\
+\\n   List      pre     times   ()\
 \\n   Str       pre     want    ()\
 \\n   Str       pre     File::Spec::cwd  ()\
 \\n   Str       pre     File::Spec::tmpdir  ()\
@@ -1076,7 +1252,8 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     flush   (IO)\
 \\n   Bool      pre     close   (Socket)\
 \\n   Bool      pre     die     (List)\
-\\n   Any       pre     do      (Str)\
+\\n   Bool      pre     warn    (List)\
+\\n   Bool      pre     fail_   (List)\
 \\n   IO        pre     open    (Str)\
 \\n   Socket    pre     listen  (Int)\
 \\n   Socket    pre     connect (Str, Int)\
@@ -1085,12 +1262,18 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     slurp   (Handle)\
 \\n   List      pre     readdir (Str)\
 \\n   Bool      pre     exec    (Str: List)\
-\\n   Bool      pre     system  (Str)\
-\\n   Bool      pre     system  (Str: List)\
+\\n   Int       pre     system  (Str)\
+\\n   Int       pre     system  (Str: List)\
 \\n   Bool      pre     binmode (IO: ?Int=1)\
 \\n   Void      pre     return  ()\
 \\n   Void      pre     return  (rw!Any)\
 \\n   Void      pre     return  (List)\
+\\n   Void      pre     yield   ()\
+\\n   Void      pre     yield   (rw!Any)\
+\\n   Void      pre     yield   (List)\
+\\n   Void      pre     take    ()\
+\\n   Void      pre     take    (rw!Any)\
+\\n   Void      pre     take    (List)\
 \\n   Junction  pre     any     (List)\
 \\n   Junction  pre     all     (List)\
 \\n   Junction  pre     one     (List)\
@@ -1124,12 +1307,10 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Junction  list    |       (Any|Junction)\
 \\n   Junction  list    &       (Any|Junction)\
 \\n   Junction  list    ^       (Any|Junction)\
-\\n   Junction  list    !       (Any|Junction)\
 \\n   Num       left    *       (Num, Num)\
 \\n   Num       left    /       (Num, Num)\
 \\n   Num       left    %       (Num, Num)\
 \\n   Str       left    x       (Str, Int)\
-\\n   Any       left    is      (Any, Any)\
 \\n   List      left    xx      (Any, Int)\
 \\n   Int       left    +&      (Int, Int)\
 \\n   Int       left    +<      (Int, Int)\
@@ -1137,11 +1318,6 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Str       left    ~&      (Str, Str)\
 \\n   Str       left    ~<      (Str, Str)\
 \\n   Str       left    ~>      (Str, Str)\
-\\n   Num       spre    [+]     (List)\
-\\n   Num       spre    [-]     (List)\
-\\n   Num       spre    [*]     (List)\
-\\n   Num       spre    [/]     (List)\
-\\n   Str       spre    [~]     (List)\
 \\n   Num       right   **      (Num, Num)\
 \\n   Num       left    +       (Num, Num)\
 \\n   Num       left    -       (Num, Num)\
@@ -1151,7 +1327,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Str       left    ~|      (Str, Str)\
 \\n   Str       left    ~^      (Str, Str)\
 \\n   Str       left    ?|      (Str, Str)\
-\\n   Pair      non     =>      (Any, Any)\
+\\n   Pair      right   =>      (Any, Any)\
 \\n   Int       non     cmp     (Str, Str)\
 \\n   Int       non     <=>     (Num, Num)\
 \\n   List      non     ..      (Scalar, Scalar)\
@@ -1175,18 +1351,8 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Scalar    left    ||      (Bool, ~Bool)\
 \\n   Scalar    left    ^^      (Bool, Bool)\
 \\n   Scalar    left    //      (Bool, ~Bool)\
-\\n   List      left    »+«     (Any, Any)\
-\\n   List      left    »*«     (Any, Any)\
-\\n   List      left    »/«     (Any, Any)\
-\\n   List      left    »x«     (Any, Any)\
-\\n   List      left    »xx«    (Any, Any)\
-\\n   List      left    >>+<<   (Any, Any)\
-\\n   List      left    >>*<<   (Any, Any)\
-\\n   List      left    >>/<<   (Any, Any)\
-\\n   List      left    >>x<<   (Any, Any)\
-\\n   List      left    >>xx<<  (Any, Any)\
-\\n   List      left    >>~<<   (Any, Any)\
-\\n   List      list    ,       (List)\
+\\n   Scalar    left    .[]     (Array, Int)\
+\\n   Scalar    left    .{}     (Hash, Str)\
 \\n   List      list    ¥               (Array)\
 \\n   List      list    Y               (Array)\
 \\n   List      spre    <==     (List)\
@@ -1206,16 +1372,20 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Num       pre     log     (Int)\
 \\n   Num       pre     log     (Num)\
 \\n   Num       pre     log10   (Num)\
-\\n   Any       list    ;       (Any)\
 \\n   Thread    pre     async   (Code)\
-\\n   Bool      pre     yield   (?Thread)\
 \\n   Int       pre     sign    (Num)\
 \\n   Bool      pre     kill    (Thread)\
 \\n   Int       pre     kill    (Int, List)\
 \\n   Object    pre     new     (Type: Named)\
+\\n   Object    pre     BUILDALL (Object)\
 \\n   Object    pre     clone   (Any)\
+\\n   Object    pre     id      (Any)\
+\\n   Str       pre     name    (Code)\
+\\n   Int       pre     arity   (Code)\
+\\n   Bool      pre     Thread::yield   (Thread)\
 \\n   List      pre     Pugs::Internals::runInteractiveCommand    (?Str=$_)\
 \\n   List      pre     Pugs::Internals::openFile    (?Str,?Str=$_)\
 \\n   Bool      pre     bool::true ()\
 \\n   Bool      pre     bool::false ()\
+\\n   List      spre    prefix:[,] (List)\
 \\n"

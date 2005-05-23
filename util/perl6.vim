@@ -12,29 +12,35 @@ if exists("b:current_syntax")
 endif
 
 " Billions of keywords
+syn keyword p6Attn		ACHTUNG ATTN ATTENTION FIXME NB todo Todo TODO WTF XXX contained
 syn keyword p6Module		module class use require
-syn keyword p6KeyDecl		sub submethod method is but multi returns
-syn keyword p6KeyScopeDecl	my our local let temp
+syn keyword p6KeyDecl		coro sub submethod method is but multi returns
+syn keyword p6KeyScopeDecl	let local my our state temp 
 syn keyword p6KeyFlow		else elsif for foreach loop while until if unless when
 syn keyword p6KeyFlow		given next last redo or and err xor return not
 syn keyword p6KeyException	die fail try CATCH
-syn keyword p6KeyIO		print open read write readline say seek
+syn keyword p6KeyIO			print open read write readline say seek
 syn keyword p6KeyProperty	constant prec key value kv irs ofs ors pos int export
 syn keyword p6KeyProperty	float str true false rw
 syn keyword p6KeyProperty	Int Str Num Hash Array Code Rule Class NumRange
 syn keyword p6KeyProperty	StrRange Role Bool Rat
-syn keyword p6KeyFunc		map sort split reduce keys grep values truncate
-syn keyword p6KeyFunc		defined exists
+syn keyword p6KeyFunc		grep map sort join split reduce reverse truncate zip
+syn keyword p6KeyFunc		keys values pairs defined delete exists  
+syn keyword p6KeyFunc		gather take any pick all none
+syn keyword p6KeyFunc		pop push shift splice unshift  
+syn keyword p6KeyFunc	    abs exp log log10 rand sign sqrt  	
 syn keyword p6KeySpecial	operator undef
 syn keyword p6KeyCompare	eq ne lt le gt ge
 
 syn match p6KeyIO "-[rwxoRWXOezsfdlpSbctugkTBMAC]"
 
 " Comments
-syn match p6Comment "#.*"
+syn match p6Comment "#.*" contains=p6Attn
 
 " POD
-syn region p6POD start="^=[a-z]" end="^=cut"
+syn region p6POD start="^=[a-z]\+$" end="^=cut" contains=p6Attn 
+syn region p6MultComment start="^=begin [A-Z]\+$" end="^=end [A-Z]\+$" contains=p6Attn 
+syn region p6ParaComment start="^=for [A-Z]\+$" end="^$" contains=p6Attn
 
 " Variables, arrays, and hashes with ordinary \w+ names
 syn match p6VarPlain "[$@%][a-zA-Z_]\w*"
@@ -42,6 +48,9 @@ syn match p6VarPlain "[$@%][:.][a-zA-Z_]\w*"
 syn match p6VarPlain "\$\^\w\+"
 syn match p6VarException "\$!"
 syn match p6VarPunct	"\$\d\+"
+
+syn match p6Invocant "./\w\+"
+syn match p6Invocant ":/\w\+"
 
 syn cluster p6Interp contains=p6VarPlain,p6InterpExpression,p6VarPunct,p6VarException,p6InterpClosure
 
@@ -150,7 +159,7 @@ syn region p6TestExpr contained start="<\s*!\{0,1}\s*(" end=")\s*>" contains=TOP
 
 syn match p6Normal "//"
 
-
+hi link p6Attn          Todo
 hi link p6Normal        Normal
 hi link p6Regex         String
 hi link p6SubNonBracket p6String
@@ -176,12 +185,15 @@ hi link p6KeyType       Type
 hi link p6Pattern       p6Keyword
 hi link p6VarPlain      p6Variable
 hi link p6VarPunct      p6Variable
+hi link p6Invocant   Identifier
 hi link p6InterpString  p6String
 hi link p6LiteralString p6String
 
 hi link p6Keyword  Statement
 hi link p6Number   Number
 hi link p6Comment  Comment
+hi link p6MultComment	Comment
+hi link p6ParaComment	Special
 hi link p6POD      Comment
 hi link p6Variable Identifier
 hi link p6VarException Special

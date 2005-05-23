@@ -22,22 +22,21 @@ sub step {
 
   $args{help} =~ s/# (.*)$/# @{[BOLD . WHITE]}$1@{[RESET]}/m;
 
-  if($args{help}) {
-    printf STDERR "%s»%s %s%s%s...\n", BOLD . BLUE, RESET, BOLD . RED, $args{descr}, RESET;
-    print STDERR "  : $_\n" for map { (/^\s*(.*)$/g)[0] } split "\n", $args{help};
-    print STDERR "  > ";
-  } else {
-    printf STDERR "%s»%s %s%s%s... ", BOLD . BLUE, RESET, BOLD . RED, $args{descr}, RESET;
-  }
+  printf STDERR "%s»%s %s%s%s... ", BOLD . BLUE, RESET, BOLD . RED, $args{descr}, RESET;
 
   if($args{ensure}->()) {
     printf STDERR "skipped (%sgood%s).\n", BOLD . GREEN, RESET;
   } else {
+    if($args{help}) {
+      printf STDERR "\b\n";
+      printf STDERR "  %s:%s %s\n", BOLD . BLUE, RESET, $_ for map { (/^\s*(.*)$/g)[0] } split "\n", $args{help};
+      printf STDERR "  %s»%s ", BOLD . BLUE, RESET;
+    }
     $args{using}->();
     if($args{pause}) {
-      print STDERR "\b\b\b\b\b   : Press a key to continue... ";
+      printf STDERR "\b\b\b\b\b   %s:%s Press a key to continue... ", BOLD . BLUE, RESET;
       <STDIN>;
-      print STDERR "  > ";
+      printf STDERR "  %s»%s ", BOLD . BLUE, RESET;
     }
     if($args{ensure}->()) {
       printf STDERR "%sgood%s.\n", BOLD . GREEN, RESET;
@@ -53,18 +52,23 @@ my $grub_uri     = "http://m19s28.vlinux.de/iblech/pugs/grub.tar.bz2";
 my $kernel_local = "vmlinuz";
 my $grub_local   = "grub.tar.bz2";
 my $pugs         = "../../pugs";
+my $pge          = "../../src/pge";
+my $parrot_path  = "../../../parrot-trunk";
 my $bash         = "/bin/bash";
+my $inputrc      = "/etc/inputrc";
+my $terminfo     = "/etc/terminfo/l/linux";
 my $linuxrc      = "linuxrc";
 my $welcome_p6   = "welcome.p6";
+my $splashscreen = "splashscreen.txt";
 my $lib6         = "../../blib6/lib";
 my $initrd_gz    = "initrd.gz";
 my $initrd_img   = "initrd.img";
 my $initrd_mnt   = "/mnt/loop0";
-my $initrd_size  = 9.5 * 1024;
+my $initrd_size  = 22 * 1024;
 my $cdroot       = "cdroot";
 my $iso          = "cd.iso";
 
-sub usage { die <<USAGE }
+sub usage { print <<USAGE; exit }
 Usage: $0 [options]
 
 $0 creates a very minimalistic Pugs Live CD.
@@ -101,13 +105,24 @@ Available options and defaults:
     Locally, the GRUB tarball is saved as --grub-local.
   --pugs=$pugs
     mklivecd.pl takes --pugs as the binary to put on the CD.
+  --parrot-path=$parrot_path
+    mklivecd.pl takes --parrot-path as the root of an Parrot source directory.
+  --pge=$pge
+    mklivecd.pl takes --pge as the path of the PGE shipped with Pugs.
   --bash=$bash
     linuxrc needs a bash-compatible shell.
+  --inputrc=$inputrc
+    The readline library likes to have a /etc/inputrc.
+  --terminfo=$terminfo
+    To make, for example, the <Pos1> and <End> keys working, we need a terminfo
+    file.
   --linuxrc=$linuxrc
     --linuxrc is the first script to run after the kernel has started.
   --welcome-p6=$welcome_p6
     --welcome-p6 is a Perl 6 program runnable by Pugs which will
     introduce Pugs.
+  --splashscreen=$splashscreen
+    The file referenced by --splashscreen will be displayed before booting.
   --lib6=$lib6
     --lib6 will be copied to the CD, too.
   --initrd-gz=$initrd_gz
@@ -146,7 +161,7 @@ GetOptions(
   "iso=s"          => \$iso,
   help             => \&usage,
 ) or usage();
-check_for_evil_chars($initrd_img, $initrd_gz, $lib6);
+check_for_evil_chars($initrd_img, $initrd_gz, $initrd_mnt, $lib6, $parrot_path);
 
 my $welcomed = 0;
 step
@@ -191,6 +206,10 @@ step
   ensure => sub { defined $pugs_version },
   using  => sub { $pugs_version = get_version($pugs) };
 
+step
+  descr  => "Checking for Parrot binary",
+  ensure => sub { -r "$parrot_path/parrot" and -s "$parrot_path/parrot" };
+
 my @modfiles;
 step
   descr  => "Searching for module files",
@@ -204,6 +223,21 @@ my $newest_mod_stamp = 100000; # ugly
 -M "$lib6/$_" <= $newest_mod_stamp and $newest_mod_stamp = -M "$lib6/$_"
   for @modfiles;
 
+my @pfiles;
+step
+  descr  => "Searching for Parrot include files",
+  ensure => sub { @pfiles > 0 },
+  using  => sub {
+    @pfiles = map { (/^\Q$parrot_path\/runtime\/parrot\/include\E(.+)$/)[0] }
+	      grep { !/(^|\/)\.(?!\.)/ }
+	      split "\000",
+	      `find $parrot_path/runtime/parrot/include -print0`;
+  };
+my $newest_p_stamp = 100000; # ugly
+-M "$parrot_path/runtime/parrot/include/$_" <= $newest_p_stamp and
+  $newest_p_stamp = -M "$parrot_path/runtime/parrot/include/$_"
+  for @pfiles;
+
 my $rebuild;
 step
   descr  => "Checking if we have to rebuild the initrd",
@@ -212,19 +246,23 @@ step
     $rebuild = !(
       -r $initrd_gz and
       -M $initrd_gz <= -M $pugs and
+      -M $initrd_gz <= -M "$parrot_path/parrot" and
       -M $initrd_gz <= -M $linuxrc and
       -M $initrd_gz <= -M $bash and
+      -M $initrd_gz <= -M $inputrc and
+      -M $initrd_gz <= -M $terminfo and
       -M $initrd_gz <= -M $welcome_p6 and
-      -M $initrd_gz <= $newest_mod_stamp,
+      -M $initrd_gz <= $newest_mod_stamp and
+      -M $initrd_gz <= $newest_p_stamp
     );
   };
 
 if($rebuild) {
   my @libs;
   step
-    descr  => "Checking which shared libraries pugs and bash require",
+    descr  => "Checking which shared libraries pugs, parrot and bash require",
     ensure => sub { @libs > 1 },
-    using  => sub { my %l; @l{ldd($pugs), ldd($bash)} = (); @libs = keys %l },
+    using  => sub { my %l; @l{ldd($pugs), ldd("$parrot_path/parrot"), ldd($bash)} = (); @libs = keys %l },
     help   => <<HELP;
       We use 'ldd' to read the list of shared libraries (*.so) pugs
       requires. This is necessary so we can copy them on the CD later.
@@ -251,7 +289,9 @@ HELP
       # mount -o loop -t ext2 $initrd_img $initrd_mnt
 HELP
 
-  my @dirs = map { "$initrd_mnt/$_" } "bin", "dev", "lib", "lib6";
+  my @dirs = map { "$initrd_mnt/$_" }
+	       "bin", "dev", "lib", "lib6",
+	       "etc", "etc/terminfo", "etc/terminfo/l";
   step
     descr  => "Creating directories " . join(", ", map { "$_" } @dirs),
     ensure => sub { -d $_ or return for @dirs; 1 },
@@ -262,17 +302,23 @@ HELP
 HELP
 
   my @files = (
-    [$pugs       => "$initrd_mnt/bin/pugs"],
-    [$bash       => "$initrd_mnt/bin/bash"],
-    [$linuxrc    => "$initrd_mnt/linuxrc"],
-    [$welcome_p6 => "$initrd_mnt/welcome.p6"],
+    [$pugs                 => "$initrd_mnt/bin/pugs"],
+    ["$parrot_path/parrot" => "$initrd_mnt/bin/parrot"],
+    [$bash                 => "$initrd_mnt/bin/bash"],
+    [$inputrc              => "$initrd_mnt/etc/inputrc"],
+    [$terminfo             => "$initrd_mnt/etc/terminfo/l/linux"],
+    [$linuxrc              => "$initrd_mnt/linuxrc"],
+    [$welcome_p6           => "$initrd_mnt/welcome.p6"],
   );
   step
-    descr  => "Copying Pugs, Bash, linuxrc, and welcome.p6 to the initrd",
+    descr  => "Copying Pugs, Parrot, Bash, inputrc, the terminfo description, linuxrc, and welcome.p6 to the initrd",
     ensure => sub {
       for(@files) {
 	my ($src, $dest) = @$_;
-        -r $dest and -x $dest and -M $dest <= -M $src or return;
+        -r $dest and -x $dest and
+	-M $dest <= -M $src   and
+	-s $dest == -s $src
+	  or return;
       }
       1;
     },
@@ -295,6 +341,35 @@ HELP
 	  mkdir "$initrd_mnt/lib6/$_";
 	} else {
 	  copy "$lib6/$_" => "$initrd_mnt/lib6/$_";
+	}
+      }
+    };
+
+  step
+    descr  => "Copying Parrot include files to the initrd",
+    ensure => sub { -r "$initrd_mnt/$_" or return for @pfiles; 1 },
+    using  => sub {
+      utime undef, undef, $initrd_img;
+      for(@pfiles) {
+	if(-d "$parrot_path/runtime/parrot/include/$_") {
+	  mkdir "$initrd_mnt/$_";
+	} else {
+	  copy "$parrot_path/runtime/parrot/include/$_" => "$initrd_mnt/$_";
+	}
+      }
+    };
+
+  my @pge = map { s/^\Q$pge//; $_ } glob "$pge/* $pge/*/* $pge/*/*/*";
+  step
+    descr  => "Copying PGE to the initrd",
+    ensure => sub { -r "$initrd_mnt/$_" or return for @pge; 1 },
+    using  => sub {
+      utime undef, undef, $initrd_img;
+      for(@pge) {
+	if(-d "$pge/$_") {
+	  mkdir "$initrd_mnt/$_";
+	} else {
+	  copy "$pge/$_" => "$initrd_mnt/$_";
 	}
       }
     };
@@ -354,26 +429,31 @@ step
   descr  => "Creating \"$cdroot/boot/grub/menu.lst\"",
   ensure => sub { -r "$cdroot/boot/grub/menu.lst" and $wrote_menulst },
   using  => sub { open my $fh, ">", "$cdroot/boot/grub/menu.lst"; print $fh <<GRUB; $wrote_menulst++ };
-default  0
-timeout  5
+default 0
+timeout 0
 color light-blue/black black/light-gray
+hiddenmenu
 
 title    $pugs_version
 root     (cd)
 kernel   /boot/vmlinuz root=/dev/ram init=/linuxrc ramdisk_size=$initrd_size quiet
 initrd   /boot/initrd.gz
-boot
+clear
+cat      /boot/splashscreen.txt
 GRUB
 
-step
-  descr  => "Copying \"$initrd_gz\" to \"$cdroot/boot/initrd.gz\"",
-  ensure => sub { -r "$cdroot/boot/initrd.gz" and -M "$cdroot/boot/initrd.gz" <= -M $initrd_gz },
-  using  => sub { copy $initrd_gz => "$cdroot/boot/initrd.gz" };
+for(
+  [$splashscreen => "$cdroot/boot/splashscreen.txt"],
+  [$initrd_gz    => "$cdroot/boot/initrd.gz"],
+  [$kernel_local => "$cdroot/boot/vmlinuz"],
+) {
+  my ($src, $dest) = @$_;
 
-step
-  descr  => "Copying kernel to \"$cdroot/boot/vmlinuz\"",
-  ensure => sub { -r "$cdroot/boot/vmlinuz" and -M "$cdroot/boot/vmlinuz" <= -M $kernel_local },
-  using  => sub { copy $kernel_local => "$cdroot/boot/vmlinuz" };
+  step
+    descr  => "Copying \"$src\" to \"$dest\"",
+    ensure => sub { -r $dest and -M $dest <= -M $src },
+    using  => sub { copy $src => $dest };
+}
 
 step
   descr  => "Creating final ISO",

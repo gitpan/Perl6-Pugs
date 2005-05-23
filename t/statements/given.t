@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 34;
+plan 41;
 
 =kwid
 
@@ -167,11 +167,42 @@ Tests the given block, as defined in L<S04/"Switch statements">
 {
     sub ret_test($arg) {
       given $arg {
-	when "a" { "A" }
-	when "b" { "B" }
+    	when "a" { "A" }
+    	when "b" { "B" }
       }
     }
 
    is ret_test("a"), "A", "given returns the correct value (1)"; 
    is ret_test("b"), "B", "given returns the correct value (2)"; 
 }
+
+# given/when and junctions
+{
+    my $any = 0;
+    my $all = 0;
+    my $one = 0;
+    given 1 {
+          when any(1 .. 3) { $any = 1; }
+    }
+    given 1 {
+          when all(1)      { $all = 1; }
+    }
+    given 1 {
+          when one(1)      { $one = 1; }          
+    }
+    is($any, 1, 'when any');
+    is($all, 1, 'when all');
+    is($one, 1, 'when one');
+}
+
+# given + objects
+{
+    class TestIt { method passit { 1; }; has %.testing is rw; };
+    my $passed = 0;
+    eval_ok( 'given TestIt.new { $_.passit; };', '$_. method calls' );    
+    eval_ok( 'given TestIt.new { .passit; };'  , '. method calls'   );
+    eval_ok( 'given TestIt.new { $_.testing<a> = 1; };','$_. attribute access');
+    eval_ok( 'given TestIt.new { .testing<a> = 1; };',  '. attribute access', :todo<bug>);
+             
+}
+

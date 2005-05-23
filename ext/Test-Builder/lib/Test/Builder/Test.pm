@@ -1,4 +1,4 @@
-class Test::Builder::Test-0.1.0
+class Test::Builder::Test-0.1.1
 {
     method new (
         $number,     
@@ -51,8 +51,8 @@ role Test::Builder::Test::Base {
 
     method report returns Str
     {
-        my $ok          = $.passed ?? 'ok ' :: 'not ok ';
-        my $description = " - $.description";
+        my $ok          = $.passed ?? 'ok' :: 'not ok';
+        my $description = "- $.description";
         return join( ' ', $ok, $.number, $description );
     }
 
@@ -67,7 +67,7 @@ role Test::Builder::Test::WithReason does Test::Builder::Test::Base
 
     submethod BUILD ( $.reason ) {}
 
-    method status returns Hash
+    method status returns Hash ( $self: )
     {
         my $status        = $self.*WALK[:super];
         $status{"skip"}   = 1;
@@ -83,7 +83,7 @@ class Test::Builder::Test::Skip does Test::Builder::Test::WithReason
         return "not ok $.number #skip $.reason";
     }
 
-    method status returns Hash
+    method status returns Hash ($self: ) 
     {
         my $status      = $self.*WALK[:super];
         $status{"skip"} = 1;
@@ -96,12 +96,12 @@ class Test::Builder::Test::TODO does Test::Builder::Test::WithReason
 {
     method report returns Str
     {
-        my $ok          = $.really_passed ?? 'ok ' :: 'not ok ';
-        my $description = " # TODO $.description";
+        my $ok          = $.really_passed ?? 'ok' :: 'not ok';
+        my $description = "# TODO $.description";
         return join( ' ', $ok, $.number, $description );
     }
 
-    method status returns Hash
+    method status returns Hash ( $self: ) 
     {
         my $status               = $self.*WALK[:super];
         $status{"TODO"}          = 1;

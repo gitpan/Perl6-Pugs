@@ -31,8 +31,10 @@ import Pugs.Embed
 import qualified Data.Map as Map
 import Data.IORef
 
--- |Pugs' entry point. Uses 'Pugs.Run.runWithArgs' to normalise the command-line 
--- arguments and pass them to 'run'.
+{-|
+Pugs' entry point. Uses 'Pugs.Run.runWithArgs' to normalise the command-line
+arguments and pass them to 'run'.
+-}
 main :: IO ()
 main = do
     hSetBuffering stdout NoBuffering
@@ -44,7 +46,7 @@ warn :: Show a => a -> IO ()
 warn x = do
             hPrint stderr $ show x
 
--- see also ArgParse.hs
+-- see also Run/Args.hs
 run :: [String] -> IO ()
 run (("-d"):rest)                 = run rest
 
@@ -80,15 +82,21 @@ run ("--external":mod:"-e":prog:_)    = doExternal mod "-e" prog
 run ("--external":mod:file:_)         = readFile file >>= doExternal mod file
 
 run (("-e"):prog:args)          = do doRun "-e" args prog
-run ("-":args)                  = do
-                                    prog <- getContents
-                                    doRun "-" args prog
+run ("-":args)                  = do doRun "-" args =<< readStdin
 run (file:args)                 = readFile file >>= doRun file args
 run []                          = do
     isTTY <- hIsTerminalDevice stdin
     if isTTY
         then do banner >> intro >> repLoop
         else run ["-"]
+
+readStdin :: IO String
+readStdin = do
+    eof     <- isEOF
+    if eof then return [] else do
+    ch      <- getChar
+    rest    <- readStdin
+    return (ch:rest)
 
 -- convenience functions for GHCi
 eval :: String -> IO ()
@@ -97,7 +105,7 @@ eval prog = do
     runProgramWith id (putStrLn . pretty) "<interactive>" args prog
 
 parse :: String -> IO ()
-parse = doParse "-"
+parse = doParse pretty "-"
 
 dump :: String -> IO ()
 dump = (doParseWith $ \env _ -> print $ envBody env) "-"
@@ -123,14 +131,18 @@ repLoop = do
             CmdQuit           -> putStrLn "Leaving pugs."
             CmdLoad fn        -> doLoad env fn >> loop
             CmdRun opts prog  -> doRunSingle env opts prog >> loop
-            CmdParse prog     -> doParse "<interactive>" prog >> loop
+            CmdParse prog     -> doParse pretty "<interactive>" prog >> loop
+            CmdParseRaw prog  -> doParse show   "<interactive>" prog >> loop
             CmdHelp           -> printInteractiveHelp >> loop
             CmdReset          -> tabulaRasa >>= (liftSTM . writeTVar env) >> loop
 
--- |Create a \'blank\' 'Env' for our program to execute in. Of course,
--- 'prepareEnv' actually declares quite a few symbols in the environment,
--- e.g. \'\@\*ARGS\', \'\$\*PID\', \'\$\*ERR\' etc.
--- ('Tabula rasa' is Latin for 'a blank slate'.)
+{-|
+Create a \'blank\' 'Env' for our program to execute in. Of course,
+'prepareEnv' actually declares quite a few symbols in the environment,
+e.g. \'\@\*ARGS\', \'\$\*PID\', \'\$\*ERR\' etc.
+
+('Tabula rasa' is Latin for 'a blank slate'.)
+-}
 tabulaRasa :: IO Env
 tabulaRasa = prepareEnv "<interactive>" []
 
@@ -152,17 +164,25 @@ doCompile backend = doParseWith $ \env _ -> do
 
 doCompileDump :: String -> FilePath -> String -> IO ()
 doCompileDump backend file prog = do
-    str <- doCompile backend file prog
+    str <- doCompile backend' file prog
     writeFile "dump.ast" str
+    where
+    backend' = capitalizeWord backend
+    capitalizeWord []     = []
+    capitalizeWord (c:cs) = toUpper c:(map toLower cs)
 
 doCompileRun :: String -> FilePath -> String -> IO ()
 doCompileRun backend file prog = do
-    str <- doCompile backend file prog
-    evalEmbedded backend str
+    str <- doCompile backend' file prog
+    evalEmbedded backend' str
+    where
+    backend' = capitalizeWord backend
+    capitalizeWord []     = []
+    capitalizeWord (c:cs) = toUpper c:(map toLower cs)
 
 doParseWith :: (Env -> FilePath -> IO a) -> FilePath -> String -> IO a
 doParseWith f name prog = do
-    env <- emptyEnv name []
+    env <- tabulaRasa
     runRule env f' ruleProgram name $ decodeUTF8 prog
     where
     f' env | Val err@(VError _ _) <- envBody env = do
@@ -170,13 +190,12 @@ doParseWith f name prog = do
         exitFailure
     f' env = f env name
 
-
-doParse :: FilePath -> String -> IO ()
-doParse name prog = do
-    env <- emptyEnv name []
+doParse :: (Exp -> String) -> FilePath -> String -> IO ()
+doParse prettyFunc name prog = do
+    env <- tabulaRasa
     case runRule env envBody ruleProgram name (decodeUTF8 prog) of
         (Val err@(VError _ _)) -> putStrLn $ pretty err
-        exp -> putStrLn $ pretty exp
+        exp -> putStrLn $ prettyFunc exp
 
 doLoad :: TVar Env -> String -> IO ()
 doLoad env fn = do
@@ -270,8 +289,7 @@ printConfigInfo [] = do
     putStrLn $ unlines $
         ["This is " ++ version ++ " built for " ++ getConfig "archname"
         ,""
-        ,"Summary of pugs configuration:"
-        ,"" ]
+        ,"Summary of pugs configuration:" ]
         ++ map (\x -> createConfigLine x) (map (fst) (Map.toList config))
         ++ [ "" ]
         ++ [ "@*INC:" ] ++ libs

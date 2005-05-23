@@ -1,17 +1,18 @@
-module Net::IRC-0.04;
+module Net::IRC-0.05;
 # This is a take at a Perl 6 IRC library.
-# You can run it, too.
 # This library provides the "classes" bot and queue, to be used in other bots.
-# One will be able/is able to say:
+# One is able to say:
 #   my $bot = new_bot(nick => $nick, host => $host, port => $port);
 #   $bot<connect>();
 #   $bot<login>();
 #   $bot<join>("#channel");
 #   $bot<run>();            # Enter main event loop
 # Note that this is *not* a port of Perl 5's Net::IRC.
+# See the POD of this document for more documentation.
 
 use v6;
 use Algorithm::TokenBucket;
+use Set;
 
 sub debug(Str $msg) is export {
   state $is_fresh;
@@ -43,7 +44,7 @@ sub new_bot(
 ) is export {
   my $connected = 0;
   my $inside    = 0;
-  my @on_chans;            # Which chans have we joined?
+  my $chans = set();       # Which chans have we joined?
   my $servername;          # What is the IRC servername?
   my $last_traffic;        # Timestamp of last traffic seen from server
   my $last_autoping;       # Timestamp of last ping sent to server
@@ -68,6 +69,20 @@ sub new_bot(
   my $in_login_phase;
 
   my $self;
+
+  # Sub which sends $msg, flushes $hdl and logs $msg to STDERR.
+  my $say = -> Str $msg {
+    debug_sent $msg if $debug_raw;
+    $hdl.print("$msg\13\10");
+    $hdl.flush();
+  };
+
+  # Thin wrapper around $queue<enqueue>.
+  # (Perl 6)++ for allowing me to define &subs easily. :)
+  my &enqueue = -> Str $msg {
+    $queue<enqueue>({ $say($msg) })
+      if $connected;
+  };
 
   # Default (passive) handlers
   # First event we get, indicating a successful login
@@ -158,7 +173,7 @@ sub new_bot(
   # Somebody joined. Update %channels and %users accordingly.
   %handler<JOIN> = [-> $event {
     if(normalize($event<from_nick>) eq normalize($curnick)) {
-      push @on_chans, $event<object>;
+      $chans.insert(normalize $event<object>);
       debug "Joined channel \"$event<object>\".";
     }
 
@@ -171,7 +186,7 @@ sub new_bot(
     my $chan = normalize $event<object>;
 
     if(normalize($event<from_nick>) eq normalize($curnick)) {
-      @on_chans .= grep:{ $^chan ne $event<object> };
+      $chans.remove(normalize $event<object>);
       for %channels{$chan}<users>.keys {
 	%users{$_}<channels>.delete($chan) if %users{$_}<channels>;
       }
@@ -191,7 +206,7 @@ sub new_bot(
     my $chan = normalize $event<object>;
 
     if(normalize($kickee) eq normalize($curnick)) {
-      @on_chans .= grep:{ $^chan ne $event<object> };
+      $chans.remove(normalize $event<object>);
       for %channels{$chan}<users>.keys {
 	%users{$_}<channels>.delete($chan) if %users{$_}<channels>;
       }
@@ -208,7 +223,7 @@ sub new_bot(
   %handler<KILL> = [-> $event {
     my ($killee, $reason) = $event<object rest>;
     if(normalize($killee) eq normalize($curnick)) {
-      @on_chans = ();
+      $chans.clear;
       debug "Was killed by \"$event<from>\" (\"$reason\").";
     }
 
@@ -249,13 +264,6 @@ sub new_bot(
     %users.delete($oldnick);
   }];
 
-  # Sub which sends $msg, flushes $hdl and logs $msg to STDERR.
-  my $say = -> Str $msg {
-    debug_sent $msg if $debug_raw;
-    $hdl.print("$msg\13\10");
-    $hdl.flush();
-  };
-
   # Instance methods
   $self = {
     # Readonly accessors
@@ -268,7 +276,7 @@ sub new_bot(
     logged_in     => { $inside },
     last_traffic  => { $last_traffic },
     last_autoping => { $last_autoping },
-    channels      => { @on_chans },
+    channels      => { $chans.members },
     channel       => -> Str $channel { %channels{normalize $channel} },
     user          => -> Str $nick    { %users{normalize $nick} },
 
@@ -281,9 +289,9 @@ sub new_bot(
       $self<disconnect>() if $connected;
 
       debug "Connecting to $host:$port... ";
-      try { $hdl = connect($host, $port) }
+      try { $hdl = connect($host, $port) };
       if($hdl) {
-	try { $hdl.autoflush(1) }
+	try { $hdl.autoflush(1) };
 	$connected++;
 	$last_traffic  = time;
 	$last_autoping = time;
@@ -295,11 +303,11 @@ sub new_bot(
     disconnect => {
       if($connected) {
 	debug "Disconnecting from $host:$port... ";
-	try { $hdl.close }
+	try { $hdl.close };
 	# We want to have a sane state when we connect next time.
 	$connected      = 0;
 	$inside         = 0;
-	@on_chans       = ();
+	$chans          = set();
 	$servername     = undef;
 	$hdl            = undef;
 	$curnick        = undef;
@@ -432,49 +440,48 @@ sub new_bot(
     join => -> Str $channel, Str ?$key {
       if $connected {
 	if defined $key {
-	  $queue<enqueue>({ $say("JOIN $channel $key") });
+	  enqueue "JOIN $channel $key";
 	} else {
-	  $queue<enqueue>({ $say("JOIN $channel") });
+	  enqueue "JOIN $channel";
 	}
       }
     },
-    part  => -> Str $channel { $queue<enqueue>({ $say("PART $channnel") }) if $connected },
-    quit  => -> Str $reason  { $queue<enqueue>({ $say("QUIT :$reason") })  if $connected },
-    nick  => -> Str $newnick { $queue<enqueue>({ $say("NICK $newnick") })  if $connected },
-    who   => -> Str $target  { $queue<enqueue>({ $say("WHO $target") })    if $connected },
+    part  => -> Str $channel { enqueue "PART $channnel" },
+    quit  => -> Str $reason  { enqueue "QUIT :$reason" },
+    nick  => -> Str $newnick { enqueue "NICK $newnick" },
+    who   => -> Str $target  { enqueue "WHO $target" },
+    whois => -> Str $target  { enqueue "WHOIS $target" },
+    ison  => -> Str @targets { enqueue "ISON @targets[]" },
     topic => -> Str $channel, Str ?$topic {
-      if $connected {
-	if defined $topic {
-	  $queue<enqueue>({ $say("TOPIC $channel :$topic") });
-	} else {
-	  $queue<enqueue>({ $say("TOPIC $channel") });
-	}
+      if defined $topic {
+	enqueue "TOPIC $channel :$topic";
+      } else {
+	enqueue "TOPIC $channel";
       }
     },
     kick  => -> Str $channel, Str $nick, Str ?$reason {
-      $queue<enqueue>({ $say("KICK $channel $nick :{$reason // ""}") })
-	if $connected;
+      enqueue "KICK $channel $nick :{$reason // ""}";
     },
     mode  => -> Str $target, Str ?$mode {
-      if $connected {
-	if defined $mode {
-	  $queue<enqueue>({ $say("MODE $target $mode") });
-	} else {
-	  $queue<enqueue>({ $say("MODE $target") });
-	}
+      if defined $mode {
+	enqueue "MODE $target $mode";
+      } else {
+	enqueue "MODE $target";
       }
     },
+    invite => -> Str $channel, Str $target { enqueue "INVITE $target $channel" },
+    oper   => -> Str $username, Str $password { enqueue "OPER $username $password" },
 
     # PRIVMSG/NOTICE
     privmsg => -> Str $to, Str $text {
-      $queue<enqueue>({ $say("PRIVMSG $to :$text") }) if $connected;
+      enqueue "PRIVMSG $to :$text";
     },
     notice  => -> Str $to, Str $text {
-      $queue<enqueue>({ $say("NOTICE $to :$text") }) if $connected;
+      enqueue "NOTICE $to :$text",
     },
 
     # RAW
-    raw => -> Str $command { $queue<enqueue>({ $say($command) }) if $connected }
+    raw => -> Str $command { enqueue $command },
   };
 
   return $self;
@@ -728,6 +735,19 @@ Retrieves a channel's topic or tries to set it.
 
 Kicks somebody from a channel, stating a reason optionally.
 
+=head2 C<$botE<lt>modeE<gt>(target =E<gt> $nick|$channel, mode =E<gt> "+o iblech")>
+
+Performs the C</MODE> command. Note that you can supply both a nickname and a
+channel name to the C<target> parameter.
+
+=head2 C<$botE<lt>inviteE<gt>(channel =E<gt> "#chan", target =E<gt> "nick")>
+
+Invites C<nick> to C<#chan>.
+
+=head2 C<$botE<lt>operE<gt>(username =E<gt> "...", password =E<gt> "...")>
+
+Tries to gain IRC operator rights.
+
 =head2 C<$botE<lt>privmsgE<gt>(to =E<gt> "...", text =E<gt> "...")>,
 C<E<lt>noticeE<gt>(to =E<gt> "...", text =E<gt> "...")>
 
@@ -761,6 +781,14 @@ The C<loggedin> event is fired when the bot has successfully logged in.
 
 The C<runloop> event is fired when an iteration of the main runloop is
 finished.
+
+=head1 FLOODCONTROL
+
+Most IRC servers disconnect you if you post too many commands in too short time.
+
+If you supply C<:floodcontrol(1)> to the constructor, C<Net::IRC> won't simply
+send all commands immediately to the server, but creates a queue, which is then
+slowly sent to the server.
 
 =head1 EXAMPLES
 

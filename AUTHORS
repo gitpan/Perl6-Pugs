@@ -3,16 +3,17 @@ log and the mailing list archives.  These people have either submitted
 patches or suggestions, or their bug reports or comments have inspired
 the appropriate patches.  Corrections, additions, deletions welcome:
 
+"Aankhen"
 Adam "alias" Kennedy             (ADAMK)     
 Adam Preble                                  
-"adehohum"
+Adrian "adehohum" Taylor
 Aldo "dada" Calpini              (ACALPINI)  
 Alin "alinbsp" Iacob             (ALIN)      
 Amir "lightstep" Livine Bar-On               עמיר ליבנה בר-און
 Andras Barthazi                              András Bártházi
 Andres "kosmikus" Loeh                       Andres Löh
 Andrew Savige                    (ASAVIGE)   
-Anton Berezin                    (GRUBER)    
+Anton "tobez" Berezin            (GRUBER)    
 Autrijus Tang                    (AUTRIJUS)  唐宗漢
 Benjamin Smith                   (BSMITH)    
 Bestian Tang                                 唐宗浩
@@ -25,28 +26,33 @@ Carl Masak                       (MASAK)
 Cheng-Lung Sung                  (CLSUNG)    宋政隆
 Chia-Liang Kao                   (CLKAO)     高嘉良
 Chip Salzenberg                  (CHIPS)     
-chromatic                        (CHROMATIC)
+chromatic                        (CHROMATIC) 
+Colin Paul Adams
+Chuck "sproingie" Adams
 Curtis "ovid" Poe                (OVID)      
 Damian Conway                    (DCONWAY)   
 Darren Duncan                    (DUNCAND)   
 David "machack666" Christensen   (DWC)       
 David Vergin                     (DVERGIN)   
 Dimitry Golubovsky                           
-Don Stewart                                  
-Edwin Steiner                                
+Don "dons" Stewart                           
+Edwin Steiner                              
+Eric "eric256" Hodges                      
 Fayland Lam                      (FAYLAND)   林道
 Gaal Yahas                       (GAAL)      גל יחס
 Garret Rooney                    (ROONEG)    
 "gcomnz"
 Hsin-Chan Chien                  (HCCHIEN)   簡信昌
+Ian "Igloo" Lynagh
 Ilmari "wolverian" Vacklin
 Ingo "iblech" Blechschmidt                   
 Isaac "SyntaxNinja" Jones                    
 James "theorbtwo" Mastros        (JMASTROS)  
-Jeff Horwitz                     (JHORWITZ)
+Jeff Horwitz                     (JHORWITZ)  
 Jesse "obra" Vincent             (JESSE)     
+Jody Belka                       (KNEW)      
 John van Krieken                 (VLADTZ)    
-Jonathan Scott Duff              (DUFF)      
+Jonathan Scott "PerlJam" Duff    (DUFF)      
 Jonathan Worthington             (JONATHAN)  
 Joshua "Limbic_Region" Gatcomb   (JGATCOMB)  
 Juerd Waalboer                   (JUERD)     
@@ -62,6 +68,7 @@ Mark "ninereasons" McConnell
 Mark Stosberg                                
 Markus "malaire" Laire                       
 "mattc"
+Matt Diephouse
 Max Maischein                    (CORION)    
 Michael G Schwern                (MSCHWERN)  
 Michal "rootmj" Jurosz
@@ -85,6 +92,7 @@ Scott McWhirter                  (KUNGFUFTR)
 Shae "shapr" Matijs Erisson                  
 Shawn Sorichetti                 (SSORICHE)  
 Shu-Chun "scw" Weng                          翁書鈞
+Solomon "colomon" Foster
 Stefano Rodighiero               (LARSEN)    
 Stephane "cognominal" Payrard    (STEF)      Stéphane Payrard
 Stevan "stevan" Little           (STEVAN)    
@@ -99,3 +107,4 @@ Will "coke" Coleda
 Yuan-Chen "ycheng" Cheng                     鄭原真
 Yung-chung Lin                   (XERN)      林永忠
 Yuval "nothingmuch" Kogman       (NUFFIN)    יובל קוג'מן
+Zhen-Bang "Forth" Wei

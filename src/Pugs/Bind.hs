@@ -14,14 +14,19 @@ import Pugs.Internals
 import Pugs.AST
 import Pugs.Types
 
--- |Contains either a valid value of @a@ (@Right@), or a @String@ error
--- message (@Left@).
+{-|
+Contains either a valid value of @a@ (@Right@), or a @String@ error
+message (@Left@).
+-}
 type MaybeError a = Either String a
 
+isRequired :: Param -> Bool
 isRequired prm = not ( isOptional prm || isNamed prm )
 
--- |Match up named arguments with named parameters, producing a list of new
--- bindings, and lists of remaining unbound args and params.
+{-|
+Match up named arguments with named parameters, producing a list of new
+bindings, and lists of remaining unbound args and params.
+-}
 bindNames :: [Exp] -- ^ List of argument expressions to be bound
           -> [Param] -- ^ List of parameters to try binding; includes both
                      --     named params and positional params
@@ -60,7 +65,26 @@ bindHash vs (p:ps@(_:_))= do
     return $ first ++ (ps `zip` repeat emptyHashExp)
 bindHash vs [p]         = return [ (p, Syn "\\{}" [Syn "," vs]) ] -- XXX cast to Hash
 
-bindArray :: [Exp] -> [Param] -> SlurpLimit -> MaybeError (Bindings, SlurpLimit)
+{-|
+Create bindings from the slurpy scalar and array parameters to the remaining
+positional arguments. The first slurpy array param gets all of the remaining
+args; subsequent slurpy array params get an empty array. Slurpy scalars may
+not appear after slurpy array params.
+
+Returns the bindings performed, and the sub's new 'SlurpLimit'.
+
+Mostly uses 'doBindArray' to do its dirty work. Used by 'bindSomeParams'.
+
+>[12:16] <scook0> autrijus: At the moment, if you call a sub that has multiple slurpy arrays, 
+>                   Pugs deliberately binds the first one normally, and makes all the rest empty
+>[12:17] <scook0> Is this proper behaviour, or is it just a quirk of the current implementation?
+>[12:17] <autrijus> no, that's specced.
+>[12:17] <autrijus> i.e. correct
+-}
+bindArray :: [Exp]      -- ^ List of slurpable argument expressions
+          -> [Param]    -- ^ List of all slurpy positional params (scalar and array)
+          -> SlurpLimit -- ^ The sub's current 'SlurpLimit'
+          -> MaybeError (Bindings, SlurpLimit)
 bindArray vs ps oldLimit = do
     let exp = Cxt cxtSlurpyAny (Syn "," vs)
     case foldM (doBindArray exp) ([], 0) prms of
@@ -74,19 +98,26 @@ bindArray vs ps oldLimit = do
     where
     prms = map (\p -> (p, (head (paramName p)))) ps 
 
--- |Construct an expression representing an infinite slice of the given
--- array expression, beginning at element /n/ (i.e. @\@array\[\$n...\]@).
--- Used by 'doBindArray' to bind a slurpy array parameter to the rest of
--- the slurpable arguments.
+{-|
+Construct an expression representing an infinite slice of the given
+array expression, beginning at element /n/ (i.e. @\@array\[\$n...\]@).
+
+Used by 'doBindArray' to bind a slurpy array parameter to the rest of
+the slurpable arguments.
+-}
 doSlice :: Exp -- ^ The array expression to slice
         -> VInt -- ^ Index of the first element in the resulting slice (/n/)
         -> Exp 
 doSlice v n = Syn "[...]" [v, Val $ VInt n]
 
 -- XXX - somehow force failure
--- |Construct an expression representing element /n/ in the given array
--- expression (i.e. @\@array\[\$n\]@). Used by 'doBindArray' to bind a
--- particular slurpy scalar parameter to one of the slurpable arguments.
+{-|
+Construct an expression representing element /n/ in the given array
+expression (i.e. @\@array\[\$n\]@).
+
+Used by 'doBindArray' to bind a particular slurpy scalar parameter to one of 
+the slurpable arguments.
+-}
 doIndex :: Exp -> VInt -> Exp
 doIndex v n = Syn "[]" [Syn "val" [v], Val $ VInt n]
 
@@ -99,8 +130,10 @@ doBindArray v (xs, n)  (p, '$') = case v of
     _               -> return (((p, doIndex v n):xs), n+1)
 doBindArray _ (_, _)  (_, x) = internalError $ "doBindArray: unexpected char: " ++ (show x)
 
--- |(Does this even get used? It seems to be a leftover fragment of
--- 'doBindArray'...)
+{-|
+(Does this even get used? It seems to be a leftover fragment of 
+'doBindArray'...)
+-}
 bindEmpty :: Param -> MaybeError (Param, Exp)
 bindEmpty p = case paramName p of
     ('@':_) -> return (p, emptyArrayExp)
@@ -108,8 +141,10 @@ bindEmpty p = case paramName p of
     (x:_)   -> internalError $ "bindEmpty: unexpected char: " ++ (show x)
     []      -> internalError $ "bindEmpty: empty string encountered"
 
--- |Return @True@ if the given expression represents a pair (i.e. it uses the
--- \"=>\" pair constructor).
+{-|
+Return @True@ if the given expression represents a pair (i.e. it uses the
+\"=>\" pair constructor).
+-}
 isPair :: Exp -> Bool
 isPair (Pos _ exp) = isPair exp
 isPair (Cxt _ exp) = isPair exp
@@ -118,8 +153,10 @@ isPair (App (Var "&infix:=>") [(Cxt _ (Val _)), _] [])   = True
 isPair (App (Var "&infix:=>") [(Val _), _] [])   = True
 isPair _                         = False
 
--- |Decompose a pair-constructor 'Exp'ression (\"=>\") into a Haskell pair
--- (@key :: 'String'@, @value :: 'Exp'@).
+{-|
+Decompose a pair-constructor 'Exp'ression (\"=>\") into a Haskell pair
+(@key :: 'String'@, @value :: 'Exp'@).
+-}
 unPair :: Exp -> (String, Exp)
 unPair (Pos _ exp) = unPair exp
 unPair (Cxt _ exp) = unPair exp
@@ -131,10 +168,16 @@ unPair x                                = error ("Not a pair: " ++ show x)
 {-|
 Bind parameters to a callable, then verify that the binding is complete
 (i.e. all mandatory params are bound; all unspecified params have default
-bindings). Uses 'bindSomeParams' to perform the initial binding, then uses
+bindings).
+
+Uses 'bindSomeParams' to perform the initial binding, then uses
 'finalizeBindings' to check all required params and give default values to
 any unbound optional ones. Once this is complete, /everything/ should be
 bound.
+
+Note that while 'bindParams' produces values /representing/ the bindings from
+params to args, it does not actually introduce any symbols--that occurs later
+on in the call process.
 -}
 bindParams :: VCode -- ^ A code object to perform bindings on
            -> [Exp] -- ^ List of invocants to bind
@@ -164,7 +207,7 @@ finalizeBindings sub = do
         fail $ "Wrong number of invocant parameters: "
             ++ (show $ act) ++ " actual, "
             ++ (show $ act + cnt) ++ " expected"
-   
+            
     let (boundReq, boundOpt) = partition (\x -> isRequired (fst x)) bindings -- bound params which are required
         (reqPrms, optPrms)   = span isRequired params -- all params which are required, and all params which are opt
 

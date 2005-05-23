@@ -1,21 +1,9 @@
 
-use v6;
-module Perl::Role-0.0.1;
+class Perl::Role-0.01;
 
-=pod
+isa Perl::Package;
 
-=head1 NAME
+has Array of Perl::Roles @.super_roles;
 
-Perl::Package - A meta-model for Perl Roles
-
-=head1 DESCRIPTION
-
-This module will eventually hold the meta-model for perl6 roles.
-
-=head1 AUTHORS
-
-Sam Vilain
-
-Stevan Little E<lt>stevan@iinteractive.comE<gt>
-
-=cut
+has Hash of Str, Perl::Meta::Property %.properties;
+has Hash of Str, Perl::Method %.methods;

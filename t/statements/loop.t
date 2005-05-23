@@ -11,8 +11,7 @@ L<S04/"The general loop statement">
 
 =cut
 
-plan 8;
-force_todo 8;
+plan 12;
 
 # basic loop
 
@@ -39,8 +38,48 @@ is($i, 0, 'verify our starting condition');
 loop (;;) { $i++; last(); }
 is($i, 1, 'verify our ending condition');
 
-# declare variable inside loop
-my $count = 0;
+# declare variable $j inside loop
+my $count  = 0;
 is($count, 0, 'verify our starting condition');
 eval 'loop (my $j = 0; $j < 10; $j++) { $count++; }';
-is($count, 10, 'verify our ending condition');
+is($count, 10, 'verify our ending condition',:todo);
+
+# Ensure condition is tested on the first iteration
+{
+	my $never_did_body = 1;
+	loop (;0;)
+	{
+		$never_did_body = 0;
+	}
+	ok($never_did_body, "loop with an initially-false condition executes 0 times");
+}
+
+# Loop with next should still execute the continue expression
+{
+	my ($i,	$continued);
+	loop ($i = 0;; $continued = 1)
+	{
+		last if $i;
+		$i++;
+		next;
+	}
+	ok($continued, "next performs a loop's continue expression");
+}
+
+=kwid
+
+loop { } while tests... i.e. loops without the () bits
+
+L<S04/"Loop statements">
+
+=cut
+
+{
+  my $x=0;
+  eval_is('loop { $x++ } while $x < 10; $x', 10, 'loop {} while', :todo<feature>);
+}
+
+{
+  my $x = 1;
+  eval_is('loop { $x++ } while false; $x', 2, 'ensure loop {} while runs at least once', :todo<feature>);
+}

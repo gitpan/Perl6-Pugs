@@ -7,6 +7,7 @@ use Net::IRC;
 my $nick     = @*ARGS[0] // "blechbot";
 my $server   = @*ARGS[1] // "localhost";
 my $interval = @*ARGS[2] // 300;
+my $repository = @*ARGS[3] // ".";
 my ($host, $port) = split ":", $server;
 $port //= 6667;
 
@@ -58,8 +59,12 @@ sub on_privmsg($event) {
     when rx:P5/^\?uptime$/ {
       # Note: This is not actually the time we were started, but the time we
       # were compiled (waiting for Pugs to support INIT {}).
-      my $start_time = BEGIN { time };
-      $bot<notice>(to => $reply_to, text => "Running for {time() - $start_time} seconds.");
+      my $start_time = INIT { time };
+      $bot<privmsg>(to => $reply_to, text => "Running for {time() - $start_time} seconds.");
+    }
+
+    when rx:P5/^\?check$/ {
+      svn_check "now";
     }
   }
 }
@@ -67,7 +72,9 @@ sub on_privmsg($event) {
 # This sub checks for new commits.
 sub svn_check($event) {
   state $last_check;
-  $last_check //= time;  # "state $last_check = 0" doesn't work yet in Pugs.
+  $last_check //= time;  # "state $last_check = time" doesn't work yet in Pugs.
+
+  $last_check = 0 if $event eq "now";
 
   # We don't want to flood poor openfoundry.
   if(time() - $last_check >= $interval) {
@@ -85,7 +92,7 @@ sub svn_check($event) {
     return unless $chans;
 
     # Finally, send the announcement.
-    $bot<notice>($chans, $_) for @lines;
+    $bot<privmsg>($chans, $_) for @lines;
   }
 }
 
@@ -98,10 +105,10 @@ sub svn_commits() {
   # If this is an incremental update...
   if($cur_svnrev) {
     # ...only query for new commits since we last checked.
-    system "svn log -r {$cur_svnrev + 1}:HEAD . > $tempfile";
+    system "svn log -r {$cur_svnrev + 1}:HEAD $repository > $tempfile";
   } else {
     # Else query only for the newest commit.
-    system "svn log -r HEAD . > $tempfile";
+    system "svn log -r HEAD $repository > $tempfile";
   }
 
   my $commits;
@@ -114,7 +121,7 @@ sub svn_commits() {
       }
 
       when rx:P5/^r(\d+) \| (\w+)/ {
-	$cur_entry = "r$0 ($1)";
+	$cur_entry = "r$0, $1++";
 	# Break the loop if we see $cur_svnrev -- that means, there're no new
 	# commits.
 	return if $0 == $cur_svnrev;
@@ -124,7 +131,7 @@ sub svn_commits() {
       when rx:P5/\S/ {
 	if($cur_entry) {
 	  $_ ~~ rx:P5/^(.*)$/;
-	  $commits ~= "$cur_entry -- $0\n";
+	  $commits ~= "$cur_entry | $0\n";
 	}
       }
     }

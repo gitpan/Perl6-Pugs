@@ -29,11 +29,13 @@ module Pugs.Compat (
     getEffectiveUserID,
     getRealGroupID,
     getEffectiveGroupID,
+    getProcessTimes,
     setEnv,
     getEnv,
     unsetEnv,
     signalProcess,
     executeFile,
+    ProcessTimes(..),
 ) where
 
 import Foreign
@@ -68,7 +70,10 @@ import System.IO
 import Foreign.C.String
 import Foreign.Ptr
 
+failWith :: (Monad m) => String -> m a
 failWith s = fail $ "'" ++ s ++ "' not implemented on this platform."
+
+warnWith :: String -> IO ()
 warnWith s = trace ("'" ++ s ++ "' not implemented on this platform.") $ return ()
 
 -- This should all be moved into Compat.Win32, once we go that route
@@ -101,6 +106,7 @@ unsetEnv k = withCWString k $ \ key -> withCWString "" $ \ v -> do
                win32SetEnv key v
 -- #unsetEnv _ = warnWith "unsetEnv"
 
+getEnvironment :: IO [(String, String)]
 getEnvironment = System.Environment.getEnvironment
 
 createLink :: FilePath -> FilePath -> IO ()
@@ -120,6 +126,25 @@ removeLink _ = warnWith "unlink"
 
 setFileMode :: FilePath -> FileMode -> IO ()
 setFileMode _ _ = warnWith "chmod"
+
+-- Win32 specific
+data ProcessTimes = ProcessTimes !Int !Int !Int !Int !Int
+foreign import stdcall unsafe "GetProcessTimes" win32GetProcessTimes ::
+  Int -> Ptr Int -> Ptr Int -> Ptr Int -> Ptr Int -> IO Int 
+-- relies on Int == Int32 on Windows
+
+-- See Perl5 win32/win32.c for the complete implementation
+-- that works on Windows 95 as well
+getProcessTimes :: IO ProcessTimes
+getProcessTimes = do
+                    pid <- getProcessID
+                    alloca $ \ pDummy  -> do
+                    alloca $ \ pKernel -> do
+                    alloca $ \ pUser   -> do
+                      rc      <- win32GetProcessTimes pid pDummy pDummy pKernel pUser
+                      user    <- peek pUser
+                      kernel  <- peek pKernel                    
+                      return $ ProcessTimes 0 user kernel 0 0
 
 -- This is Win32 specific, dunno about other non POSIX platforms
 statFileSize :: FilePath -> IO Integer

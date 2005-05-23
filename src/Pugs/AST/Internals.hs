@@ -1,7 +1,68 @@
 {-# OPTIONS_GHC -cpp -fglasgow-exts -fno-warn-orphans -funbox-strict-fields #-}
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
-module Pugs.AST.Internals where
+module Pugs.AST.Internals (
+    Eval,      -- uses Val, Env, SIO
+    Exp(..),   -- uses Pad, Eval, Val
+    Env(..),   -- uses Pad, TVar, Exp, Eval, Val
+    Val(..),   -- uses V.* (which ones?)
+    Value(..), -- uses Val, Eval
+
+    Pad(..), -- uses Var, TVar, VRef
+    Param(..), -- uses Cxt, Exp
+    Params, -- uses Param
+    Bindings, -- uses Param, Exp
+    SlurpLimit, -- VInt, Exp
+    
+    VRef(..), -- uses IVar
+    VOpaque(..), -- uses Value
+    VControl(..), -- uses Env, Eval, Val
+    VScalar, -- uses Val
+    VPair, -- uses Val
+    VList, -- uses Val
+    VSubst, -- uses VRule, Expr
+    VArray, -- uses Val
+    VHash, -- uses VStr, Val
+    VThunk(..), -- uses Eval, Val
+    VProcess(..),
+    VMatch(..), mkMatchFail, mkMatchOk, -- uses VList, VHash
+    VCode(..), SubType(..), -- uses Pad, Exp, Type
+    VJunc(..), JuncType(..), -- uss Val
+    VObject(..), -- uses VType, IHash, Unique
+    VType, -- uses Type
+
+    IVar(..), -- uses *Class and V*
+    IArray, IArraySlice, IHash, IScalar, ICode, IScalarProxy,
+    IScalarLazy, IPairHashSlice, IRule, IHandle, IHashEnv(..),
+    IScalarCwd(..),
+
+    ArrayClass(..), CodeClass(..), HandleClass(..), HashClass(..),
+    ObjectClass(..), PairClass(..), RuleClass(..), ScalarClass(..),
+    ThunkClass(..),
+
+    -- MonadEval(..),
+
+    runEvalSTM, runEvalIO, shiftT, resetT, callCC,
+    undef, defined,
+    readRef, writeRef, clearRef, dumpRef, forceRef,
+    askGlobal, writeVar, readVar,
+    findSymRef, findSym,
+    ifListContext, ifValTypeIsa, evalValType, fromVal',
+    scalarRef, codeRef, arrayRef, hashRef, thunkRef, pairRef,
+    newScalar, newArray, newHandle, newObject,
+    proxyScalar, constScalar, lazyScalar, lazyUndef, constArray,
+    retError, retControl, retEmpty, retIVar, readIVar, writeIVar,
+    fromVals, refType,
+    mkPad, lookupPad, padToList, diffPads, unionPads, subPad, updateSubPad,
+    mkPrim, mkSub,
+    cxtOfSigil, typeOfSigil,
+    buildParam, defaultArrayParam, defaultHashParam, defaultScalarParam,
+    emptyExp,
+    isSlurpy, envWant,
+    extract,
+    doPair, doHash, doArray,
+    unwrap, -- Unwrap(..) -- not used in this file, suitable for factoring out
+) where
 import Pugs.Internals
 import Pugs.Context
 import Pugs.Rule
@@ -67,8 +128,10 @@ getMapIndex idx def doList ext = do
             Just doExt -> do { doExt ; getMapIndex idx def doList Nothing }
             Nothing    -> errIndex def idx
 
--- |Check whether a 'Val' is of the specified type. Based on the result,
--- either the first or the second evaluation should be performed.
+{-|
+Check whether a 'Val' is of the specified type. Based on the result,
+either the first or the second evaluation should be performed.
+-}
 ifValTypeIsa :: Val      -- ^ Value to check the type of
              -> String   -- ^ Name of the type to check against
              -> (Eval a) -- ^ The @then@ case
@@ -82,8 +145,10 @@ ifValTypeIsa v typ trueM falseM = do
         then trueM
         else falseM
 
--- |If we are in list context (i.e. 'CxtSlurpy'), then perform the first
--- evaluation; otherwise perform the second.
+{-|
+If we are in list context (i.e. 'CxtSlurpy'), then perform the first
+evaluation; otherwise perform the second.
+-}
 ifListContext :: (MonadReader Env m)
               => m t -- ^ The @then@ case
               -> m t -- ^ The @else@ case
@@ -94,8 +159,10 @@ ifListContext trueM falseM = do
         CxtSlurpy _   -> trueM
         _           -> falseM
 
--- |Return the appropriate 'empty' value for the current context -- either
--- an empty list ('VList' []), or undef ('VUndef').
+{-|
+Return the appropriate 'empty' value for the current context -- either
+an empty list ('VList' []), or undef ('VUndef').
+-}
 retEmpty :: Eval Val
 retEmpty = do
     ifListContext
@@ -127,8 +194,11 @@ fromVal' v = return $ vCast v
         Left e  -> retError e v -- XXX: not working yet
 -}
 
--- |Typeclass indicating types that can be converted to\/from 'Val's.
--- Not to be confused with 'Val' itself, or the 'Exp' constructor @Val@.
+{-|
+Typeclass indicating types that can be converted to\/from 'Val's.
+
+Not to be confused with 'Val' itself, or the 'Exp' constructor @Val@.
+-}
 class (Typeable n, Show n, Ord n) => Value n where
     fromVal :: Val -> Eval n
     fromVal = fromVal'
@@ -199,6 +269,11 @@ instance Value [(VStr, Val)] where
              str <- fromVal k
              return (str, v)
 
+instance Value VObject where
+    fromVal (VObject o) = return o
+    fromVal v@(VRef _) = fromVal' v
+    fromVal _ = fail "auto-boxing not yet implemented"
+
 instance Value VHash where
     fromVal (VObject o) = do
         attrs <- liftSTM $ readTVar (objAttrs o)
@@ -216,6 +291,7 @@ instance Value [VPair] where
         list <- fromVals v
         doFrom $ concat list
         where
+        doFrom :: [Val] -> Eval [VPair]
         doFrom [] = return []
         doFrom (k:v:list) = do
             rest <- doFrom list
@@ -244,9 +320,12 @@ instance Value VBool where
     doCast (VList [])  = False
     doCast _           = True
 
--- |Collapse a junction value into a single boolean value. Works by
--- recursively casting the junction members to booleans, then performing
--- the actual junction test.
+{-|
+Collapse a junction value into a single boolean value.
+
+Works by recursively casting the junction members to booleans, then performing
+the actual junction test.
+-}
 juncToBool :: VJunc -> Bool
 juncToBool (MkJunc JAny  _  vs) = True `Set.member` Set.map vCast vs
 juncToBool (MkJunc JAll  _  vs) = not (False `Set.member` Set.map vCast vs)
@@ -297,7 +376,7 @@ instance Value VNum where
                 Right d -> realToFrac d
     doCast (VList l)    = genericLength l
     doCast t@(VThread _)  = read $ vCast t
-    doCast (VMatch m)   = genericLength $ matchSubPos m
+    doCast (VMatch m)   = vCast (VStr $ matchStr m)
     doCast _            = 0/0 -- error $ "cannot cast as Num: " ++ show x
 
 instance Value VComplex where
@@ -419,10 +498,13 @@ newtype VProcess = MkProcess (ProcessHandle)
 type VPair = (Val, Val)
 type VType = Type
 
--- |Represents a value. Note that 'Val' is also a constructor for 'Exp' (i.e.
--- an expression containing a value), so don't confuse the two. Similarly,
--- all the constructors for @data 'Val'@ are themselves puns on the types of
--- values they contain.
+{-|
+Represents a value.
+
+Note that 'Val' is also a constructor for 'Exp' (i.e. an expression containing 
+a value), so don't confuse the two. Similarly, all the constructors for 
+@data 'Val'@ are themselves puns on the types of values they contain.
+-}
 data Val
     = VUndef                 -- ^ Undefined value
     | VBool     !VBool       -- ^ Boolean value
@@ -436,7 +518,7 @@ data Val
     | VCode     !VCode       -- ^ A code object
     | VBlock    !VBlock
     | VJunc     !VJunc       -- ^ Junction value
-    | VError    !VStr !Exp
+    | VError    !VStr ![Pos] -- ^ Error
     | VHandle   !VHandle     -- ^ File handle
     | VSocket   !VSocket     -- ^ Socket handle
     | VThread   !(VThread Val)
@@ -450,8 +532,11 @@ data Val
     | VOpaque   !VOpaque
     deriving (Show, Eq, Ord, Typeable)
 
--- |Find the 'Type' of the value contained by a 'Val'. See "Pugs.Types" for
--- info on types.
+{-|
+Find the 'Type' of the value contained by a 'Val'.
+
+See "Pugs.Types" for info on types.
+-}
 valType :: Val -> Type
 valType VUndef          = mkType "Scalar"
 valType (VRef v)        = refType v
@@ -485,24 +570,26 @@ data VControl
     | ControlEnv   !Env
     deriving (Show, Eq, Ord)
 
--- |Represents a junction value.
--- Note that @VJunc@ is also a pun for a 'Val' constructor /containing/ a
--- 'VJunc'.
+{-|
+Represents a junction value.
+
+Note that @VJunc@ is also a pun for a 'Val' constructor /containing/ a 'VJunc'.
+-}
 data VJunc = MkJunc
     { juncType :: !JuncType -- ^ 'JAny', 'JAll', 'JNone' or 'JOne'
     , juncDup  :: !(Set Val)
     -- ^ Only used for @one()@ junctions. Contains those values
-    -- that appear more than once (the actual count is
-    -- irrelevant), since matching any of these would
-    -- automatically violate the 'match /only/ one value'
-    -- junctive semantics.
+    --     that appear more than once (the actual count is
+    --     irrelevant), since matching any of these would
+    --     automatically violate the 'match /only/ one value'
+    --     junctive semantics.
     , juncSet  :: !(Set Val)
     -- ^ Set of values that make up the junction. In @one()@
-    -- junctions, contains the set of values that appear exactly
-    -- /once/.
+    --     junctions, contains the set of values that appear exactly
+    --     /once/.
     } deriving (Eq, Ord)
 
--- |The combining semantics of a junction. See 'VJunc' for more info.
+-- | The combining semantics of a junction. See 'VJunc' for more info.
 data JuncType = JAny  -- ^ Matches if /at least one/ member matches
               | JAll  -- ^ Matches only if /all/ members match
               | JNone -- ^ Matches only if /no/ members match
@@ -523,22 +610,30 @@ instance Show VJunc where
 		else x ++ "," ++ (vCast :: Val -> VStr) y)
 	    "" $ Set.elems set) ++ ")"
 
--- |Each 'VCode' structure has a 'SubType' indicating what \'level\' of
--- callable item it is. 'doApply' uses this to figure out how to enter
--- the proper scope and 'Env' when the sub is called.
--- Note that this is the \'type\' of a \'sub\', and has nothing to do with
--- subtyping.
-data SubType = SubMethod  -- ^ Method
-             | SubRoutine -- ^ Regular subroutine
-             | SubBlock   -- ^ Pointy sub or bare block
-             | SubPrim    -- ^ Built-in primitive operator (see "Pugs.Prim")
+{-|
+Each 'VCode' structure has a 'SubType' indicating what \'level\' of
+callable item it is. 'doApply' uses this to figure out how to enter
+the proper scope and 'Env' when the sub is called.
+
+Note that this is the \'type\' of a \'sub\', and has nothing to do with
+subtyping.
+-}
+data SubType = SubMethod    -- ^ Method
+             | SubCoroutine -- ^ Coroutine
+             | SubRoutine   -- ^ Regular subroutine
+             | SubBlock     -- ^ Pointy sub or bare block
+             | SubPrim      -- ^ Built-in primitive operator (see "Pugs.Prim")
     deriving (Show, Eq, Ord)
 
 isSlurpy :: Param -> Bool
 isSlurpy param = isSlurpyCxt $ paramContext param
 
--- |A formal parameter of a sub (or other callable). These represent
--- declared parameters; don't confuse them with actual parameter values.
+{-|
+A formal parameter of a sub (or other callable).
+
+These represent declared parameters; don't confuse them with actual parameter 
+values.
+-}
 data Param = MkParam
     { isInvocant    :: !Bool        -- ^ Is it in invocant slot?
     , isOptional    :: !Bool        -- ^ Is it optional?
@@ -553,19 +648,44 @@ data Param = MkParam
     }
     deriving (Show, Eq, Ord)
 
--- |A list of formal parameters.
+-- | A list of formal parameters.
 type Params     = [Param]
--- |A list of bindings from formal parameters ('Param') to actual parameter
--- expressions ('Exp').
+{-|
+A list of bindings from formal parameters ('Param') to actual parameter
+expressions ('Exp').
+-}
 type Bindings   = [(Param, Exp)]
+{-|
+A sub that has a non-empty 'SlurpLimit' is a bound (or partially bound) sub
+that has a finite number of slurpy scalar params bound, and no slurpy array
+param bound (see 'VCode' and "Pugs.Bind").
+
+Each list entry consists of the number of slurpable args expected, and an
+expression that will evaluate to the actual list of slurpable args.
+When the sub is called (see 'Pugs.Eval.apply'), the expression is evaluated.
+If it evaluates to /too many/ args, the call will fail.
+
+This needs to be a list (rather than a @Maybe@) because Perl6's @.assuming@
+(i.e. explicit currying) means that a sub can have its arguments bound in
+separate stages, and each of the bindings needs to be checked.
+
+>[12:02] <autrijus> scook0: .assuming will impose multiple limits
+>[12:02] <autrijus> because you can assume (curry) multiple times
+>[12:02] <scook0> ah
+>[12:02] <scook0> I'll have to write that in the docs then
+>[12:03] <scook0> Am I correct in that they only apply to subs that take a finite number of slurpy scalars?
+>[12:04] <scook0> Slurpy array params seem to nuke the SlurpLimit
+>[12:04] <scook0> because slurpy arrays can take any number of args
+>[12:07] <autrijus> scook0: yes, and yes.
+-}
 type SlurpLimit = [(VInt, Exp)]
 
--- |Represents a sub, method, closure etc. -- basically anything callable.
+-- | Represents a sub, method, closure etc. -- basically anything callable.
 data VCode = MkCode
     { isMulti       :: !Bool        -- ^ Is this a multi sub\/method?
     , subName       :: !String      -- ^ Name of the closure
     , subType       :: !SubType     -- ^ Type of the closure
-    , subPad        :: !Pad         -- ^ Lexical pad for sub\/method
+    , subEnv        :: !(Maybe Env) -- ^ Lexical pad for sub\/method
     , subAssoc      :: !String      -- ^ Associativity
     , subParams     :: !Params      -- ^ Parameters list
     , subBindings   :: !Bindings    -- ^ Currently assumed bindings
@@ -573,17 +693,21 @@ data VCode = MkCode
     , subReturns    :: !Type        -- ^ Return type
     , subLValue     :: !Bool        -- ^ Is this a lvalue sub?
     , subBody       :: !Exp         -- ^ Body of the closure
+    , subCont       :: !(Maybe (TVar VThunk)) -- ^ Coroutine re-entry point
     }
     deriving (Show, Eq, Ord, Typeable)
 
--- |Construct a 'VCode' representing a built-in primitive operator.
--- See "Pugs.Prim" for more info.
+{-|
+Construct a 'VCode' representing a built-in primitive operator.
+
+See "Pugs.Prim" for more info.
+-}
 mkPrim :: VCode
 mkPrim = MkCode
     { isMulti = True
     , subName = "&?"
     , subType = SubPrim
-    , subPad = mkPad []
+    , subEnv = Nothing
     , subAssoc = "pre"
     , subParams = []
     , subBindings = []
@@ -591,6 +715,7 @@ mkPrim = MkCode
     , subReturns = anyType
     , subBody = emptyExp
     , subLValue = False
+    , subCont = Nothing
     }
 
 mkSub :: VCode
@@ -598,7 +723,7 @@ mkSub = MkCode
     { isMulti = False
     , subName = "&?"
     , subType = SubBlock
-    , subPad = mkPad []
+    , subEnv = Nothing
     , subAssoc = "pre"
     , subParams = []
     , subBindings = []
@@ -606,6 +731,7 @@ mkSub = MkCode
     , subReturns = anyType
     , subBody = emptyExp
     , subLValue = False
+    , subCont = Nothing
     }
 
 instance Ord VComplex where
@@ -627,7 +753,7 @@ instance (Typeable a) => Show (TVar a) where
    volume letters.
 -}
 
--- |Represents an expression tree.
+-- | Represents an expression tree.
 data Exp
     = Noop                              -- ^ No-op
     | App !Exp ![Exp] ![Exp]            -- ^ Function application
@@ -646,9 +772,11 @@ data Exp
      deriving (Show, Eq, Ord, Typeable)
 
 class Unwrap a where
-    -- |Unwrap a nested expression, throwing away wrappers (such as 'Cxt' or
-    -- 'Pos' to get at the more interesting expression underneath. Works both
-    -- on individual 'Exp's, and elementwise on ['Exp']s.
+    {-|
+    Unwrap a nested expression, throwing away wrappers (such as 'Cxt' or
+    'Pos' to get at the more interesting expression underneath. Works both
+    on individual 'Exp's, and elementwise on ['Exp']s.
+    -}
     unwrap :: a -> a
     unwrap = id
 
@@ -677,19 +805,18 @@ instance Eq VProcess
 instance Ord VProcess where
     compare _ _ = EQ
 
--- |(Is this even used? A @grep@ through the sources doesn't find any
--- callers...)
 extractExp :: Exp -> ([Exp], [String]) -> ([Exp], [String])
 extractExp ex (exps, vs) = (ex':exps, vs')
     where
     (ex', vs') = extract ex vs
 
--- |(Used by 'extractExp'...)
+-- | (Used by 'extractExp'...)
 extract :: Exp -> [String] -> (Exp, [String])
-extract (App n invs args) vs = (App n invs' args', vs'')
+extract (App n invs args) vs = (App n' invs' args', vs''')
     where
-    (invs', vs')  = foldr extractExp ([], vs) invs
-    (args', vs'') = foldr extractExp ([], vs') args
+    (n', vs')      = extract n vs
+    (invs', vs'')  = foldr extractExp ([], vs') invs
+    (args', vs''') = foldr extractExp ([], vs'') args
 extract (Stmts exp1 exp2) vs = (Stmts exp1' exp2', vs'')
     where
     (exp1', vs')  = extract exp1 vs
@@ -718,9 +845,11 @@ extract (Cxt cxt ex) vs = ((Cxt cxt ex'), vs')
 extract exp vs = (exp, vs)
 
 -- can be factored
--- |Return the context implied by a particular primary sigil
--- (\$, \@, \% or \&). E.g. used to find what context to impose on
--- the RHS of a binding (based on the sigil of the LHS).
+{-|
+Return the context implied by a particular primary sigil
+(\$, \@, \% or \&). E.g. used to find what context to impose on
+the RHS of a binding (based on the sigil of the LHS).
+-}
 cxtOfSigil :: Char -> Cxt
 cxtOfSigil '$'  = cxtItemAny
 cxtOfSigil '@'  = cxtSlurpyAny
@@ -730,8 +859,10 @@ cxtOfSigil '<'  = CxtItem $ mkType "Rule"
 cxtOfSigil ':'  = CxtItem $ mkType "Type"
 cxtOfSigil x    = internalError $ "cxtOfSigil: unexpected character: " ++ show x
 
--- |Return the type of variable implied by a name beginning with the specified
--- sigil.
+{-|
+Return the type of variable implied by a name beginning with the specified
+sigil.
+-}
 typeOfSigil :: Char -> Type
 typeOfSigil '$'  = mkType "Scalar"
 typeOfSigil '@'  = mkType "Array"
@@ -772,9 +903,13 @@ defaultScalarParam  = buildParam "" "" "$_" (Val VUndef)
 
 type DebugInfo = Maybe (TVar (Map String String))
 
--- | Evaluation environment. The current environment is stored in the
--- @Reader@ monad inside the current 'Eval' monad, and can be retrieved using
--- @ask@ for the whole 'Env', or @asks@ if you just want a single field.
+{-|
+Evaluation environment.
+
+The current environment is stored in the @Reader@ monad inside the current 
+'Eval' monad, and can be retrieved using @ask@ for the whole 'Env', or @asks@ 
+if you just want a single field.
+-}
 data Env = MkEnv
     { envContext :: !Cxt                 -- ^ Current context
                                          -- ('CxtVoid', 'CxtItem' or 'CxtSlurpy')
@@ -785,6 +920,7 @@ data Env = MkEnv
     , envClasses :: !ClassTree           -- ^ Current class tree
     , envEval    :: !(Exp -> Eval Val)   -- ^ Active evaluator
     , envCaller  :: !(Maybe Env)         -- ^ Caller's env
+    , envOuter   :: !(Maybe Env)         -- ^ Outer block's env
     , envBody    :: !Exp                 -- ^ Current AST expression
     , envDepth   :: !Int                 -- ^ Recursion depth
     , envID      :: !Unique              -- ^ Unique ID of Env
@@ -801,13 +937,14 @@ envWant env =
     showCxt (CxtItem typ)   = "Scalar (" ++ showType typ ++ ")"
     showCxt (CxtSlurpy typ) = "List (" ++ showType typ ++ ")"
 
-{- |A 'Pad' keeps track of the names of all currently-bound symbols, and
+{-|
+A 'Pad' keeps track of the names of all currently-bound symbols, and
 associates them with the things they actually represent.
 
 It is represented as a mapping from names to /lists/ of bound items.
 This is to allow for multi subs, because we will need to keep
 /multiple/ subs associated with one symbol. In other cases, the list
-should just contain a single value. See 'genSym' and 'genMultiSym' for
+should just contain a single value. See 'Pugs.AST.genSym' and 'Pugs.AST.genMultiSym' for
 more details.
 
 @TVar@ indicates that the mapped-to items are STM transactional variables.
@@ -818,6 +955,13 @@ are re-generated each time we enter their scope; see the
 
 The current global and lexical pads are stored in the current 'Env', which
 is stored in the @Reader@-monad component of the current 'Eval' monad.
+
+>[11:56] <autrijus> scook0: I'm been thinking to split a Pad entry into single and multiple variants
+>[11:57] <autrijus> MkPad !(Map Var ([(TVar Bool, TVar VRef)]))
+>[11:57] <autrijus> becomes
+>[11:58] <autrijus> data Pad = MkPad !(Map Var PadEntry)
+>[11:58] <autrijus> data PadEntry = MkEntry (TVar Bool, TVar VRef) | MkEntryMulti [(TVar Bool, TVar VRef)]
+>[11:58] <autrijus> yeah. but it's not critical, so is low priority
 -}
 data Pad = MkPad !(Map Var ([(TVar Bool, TVar VRef)]))
     deriving (Eq, Ord, Typeable)
@@ -835,26 +979,39 @@ instance Show Pad where
             dump <- runEvalIO undefined $ dumpRef ref
             return $ "(unsafePerformIO . atomically $ do { bool <- newTVar True; ref <- (newTVar " ++ vCast dump ++ "); return (bool, ref) })"
 
--- |Produce a 'Pad' from a list of bindings. The inverse of 'padToList'.
--- Not to be confused with the actual 'Pad' constructor @MkPad@.
+{-|
+Produce a 'Pad' from a list of bindings. The inverse of 'padToList'.
+
+Not to be confused with the actual 'Pad' constructor @MkPad@.
+-}
 mkPad :: [(Var, [(TVar Bool, TVar VRef)])] -> Pad
 mkPad = MkPad . Map.fromList
 
--- |Look up a symbol in a 'Pad'.
+-- | Look up a symbol in a 'Pad', returning the ref it is bound to.
 lookupPad :: Var -- ^ Symbol to look for
           -> Pad -- ^ Pad to look in
           -> Maybe [TVar VRef] -- ^ Might return 'Nothing' if var is not found
-lookupPad key (MkPad map) = case Map.lookup key map of
-    Just xs -> Just [tvar | (_, tvar) <- xs]
-    Nothing -> Nothing
 
--- |Transform a pad into a flat list of bindings. The inverse of 'mkPad'.
--- Note that @Data.Map.assocs@ returns a list of mappings in ascending key
--- order.
+{-
+    We (may) have to fix the name, as the user can write things like
+        &::("infix:<+>")(2, 3)
+    which, without fixName, wouldn't work, as all operators are currently
+    stored as &infix:+, i.e. without the brackets.
+-}
+
+lookupPad key (MkPad map) = case Map.lookup (possiblyFixOperatorName key) map of
+	Just xs -> Just [tvar | (_, tvar) <- xs]
+	Nothing -> Nothing
+
+{-|
+Transform a pad into a flat list of bindings. The inverse of 'mkPad'.
+
+Note that @Data.Map.assocs@ returns a list of mappings in ascending key order.
+-}
 padToList :: Pad -> [(Var, [(TVar Bool, TVar VRef)])]
 padToList (MkPad map) = Map.assocs map
 
--- |Return the difference between two pads.
+-- | Return the difference between two pads.
 diffPads :: Pad -- ^ Pad a
          -> Pad -- ^ Pad b
          -> Pad -- ^ a - b
@@ -862,6 +1019,14 @@ diffPads (MkPad map1) (MkPad map2) = MkPad $ Map.difference map1 map2
 
 unionPads :: Pad -> Pad -> Pad
 unionPads (MkPad map1) (MkPad map2) = MkPad $ Map.union map1 map2
+
+updateSubPad :: VCode -> (Pad -> Pad) -> VCode
+updateSubPad sub f = sub
+    { subEnv = fmap (\e -> e{ envLexical = f (subPad sub) }) (subEnv sub) 
+    }
+
+subPad :: VCode -> Pad
+subPad sub = maybe (mkPad []) envLexical (subEnv sub)
 
 type Eval x = EvalT (ContT Val (ReaderT Env SIO)) x
 type EvalMonad = EvalT (ContT Val (ReaderT Env SIO))
@@ -888,7 +1053,7 @@ instance Monad EvalMonad where
         runEvalT (k a)
     fail str = do
         pos <- asks envPos
-        shiftT . const . return $ VError str (NonTerm pos)
+        shiftT . const . return $ VError str [pos]
 
 instance MonadTrans EvalT where
     lift x = EvalT x
@@ -928,6 +1093,13 @@ instance MonadCont EvalMonad where
 class (MonadReader Env m, MonadCont m, MonadIO m, MonadSTM m) => MonadEval m where
 --     askGlobal :: m Pad
 
+{-|
+Retrieve the global 'Pad' from the current evaluation environment.
+
+'Env' stores the global 'Pad' in an STM variable, so we have to @asks@
+'Eval'\'s @ReaderT@ for the variable, then extract the pad itself from the
+STM var.
+-}
 askGlobal :: Eval Pad
 askGlobal = do
     glob <- asks envGlobal
@@ -972,7 +1144,7 @@ retError str a = fail $ str ++ ": " ++ show a
 defined :: VScalar -> Bool
 defined VUndef  = False
 defined _       = True
--- |Return an undefined value (i.e. 'VUndef').
+-- | Produce an undefined Perl6 value (i.e. 'VUndef').
 undef :: VScalar
 undef = VUndef
 
@@ -1150,6 +1322,7 @@ data VObject = MkObject
     }
     deriving (Show, Eq, Ord, Typeable)
 
+-- | A $/ object, the return of a rx match operation.
 data VMatch = MkMatch
     { matchOk           :: !VBool   -- success?
     , matchFrom         :: !Int     -- .from
@@ -1160,7 +1333,12 @@ data VMatch = MkMatch
     }
     deriving (Show, Eq, Ord, Typeable)
 
+-- | An empty failed match
+mkMatchFail :: VMatch
 mkMatchFail = MkMatch False 0 0 "" [] Map.empty
+
+-- | Makes a successful match
+mkMatchOk :: Int -> Int -> VStr -> VList -> VHash -> VMatch
 mkMatchOk   = MkMatch True
 
 instance Eq VOpaque where

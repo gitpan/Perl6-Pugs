@@ -7,7 +7,7 @@ import System.Cmd
 import System.Process
 import System.Directory
 import System.IO
-import System.Exit
+import System.IO.Unsafe
 import Data.Maybe
 import Control.Monad
 
@@ -21,7 +21,7 @@ findParrot = do
 evalParrotFile :: FilePath -> IO ()
 evalParrotFile file = do
     cmd <- findParrot
-    rawSystem cmd [file]
+    rawSystem cmd ["-j", file]
     return ()
 
 evalParrot :: String -> IO ()
@@ -34,17 +34,62 @@ evalParrot str = do
     removeFile file
 
 evalPGE :: FilePath -> String -> String -> [(String, String)] -> IO String
-evalPGE path str pattern subrules = do
-    cmd <- findParrot
-    (_, out, err, pid) <- runInteractiveProcess cmd
-        (["run_pge.pir", str, pattern] ++ concatMap (\(n, r) -> [n, r]) subrules)
-        (Just path) Nothing 
-    rv      <- waitForProcess pid
-    errMsg  <- hGetContents err
-    case (errMsg, rv) of
-        ("", ExitSuccess) -> hGetContents out
-        ("", _) -> fail $ "*** Running external 'parrot' failed:\n" ++ show rv
-        _       -> fail $ "*** Running external 'parrot' failed:\n" ++ errMsg
+evalPGE path match rule subrules = do
+    (inp, out, err, pid) <- initPGE path
+    (`mapM` subrules) $ \(name, rule) -> do
+        let nameStr = escape name
+            ruleStr = escape rule
+	hPutStrLn inp $ unwords
+            ["add_rule", show (length nameStr), show (length ruleStr)]
+	hPutStrLn inp nameStr
+	hPutStrLn inp ruleStr
+    let matchStr = escape match
+        ruleStr  = escape rule
+    hPutStrLn inp $ unwords
+        ["match", show (length matchStr), show (length ruleStr)]
+    hPutStrLn inp $ matchStr
+    hPutStrLn inp $ ruleStr
+    hFlush inp
+    rv <- hGetLine out
+    case rv of
+	('O':'K':' ':sizeStr) -> do
+	    size <- readIO sizeStr
+	    rv	 <- sequence (replicate size (hGetChar out))
+	    ln	 <- hGetLine out
+	    return $ rv ++ ln
+	_ -> do
+	    errMsg  <- hGetContents err
+	    rv      <- waitForProcess pid
+	    writeIORef _ParrotInterp Nothing
+	    let msg | null errMsg = show rv
+		    | otherwise   = errMsg
+	    fail $ "*** Running external 'parrot' failed:\n" ++ msg
+    where
+    escape "" = ""
+    escape ('\\':xs) = "\\\\" ++ escape xs
+    escape ('\n':xs) = "\\n" ++ escape xs
+    escape (x:xs) = (x:escape xs)
+
+initPGE :: FilePath -> IO ParrotInterp
+initPGE path = do
+    rv <- readIORef _ParrotInterp
+    case rv of
+	Just interp@(_, _, _, pid) -> do
+	    gone <- getProcessExitCode pid
+	    if isNothing gone then return interp else do
+	    writeIORef _ParrotInterp Nothing
+	    initPGE path
+	Nothing -> do
+	    cmd <- findParrot
+	    interp <- runInteractiveProcess cmd ["run_pge.pir"] (Just path) Nothing 
+	    writeIORef _ParrotInterp (Just interp)
+	    return interp
+
+type ParrotInterp = (Handle, Handle, Handle, ProcessHandle)
+
+{-# NOINLINE _ParrotInterp #-}
+_ParrotInterp :: IORef (Maybe ParrotInterp)
+_ParrotInterp = unsafePerformIO $ newIORef Nothing
 
 _DoCompile :: Maybe (IORef (String -> FilePath -> String -> IO String))
 _DoCompile = Nothing
@@ -134,7 +179,7 @@ evalPGE path str pattern subrules = do
     s2  <- withCString pattern $ const_string interp
     s5  <- withCString "SSS" $ \sig -> do
         parrot_call_sub_SSS interp match sig s1 s2
-    peekCString =<< #{peek STRING, strstart} s5
+    peekCString =<< parrot_string_to_cstring interp s5
 
 evalParrotFile :: FilePath -> IO ()
 evalParrotFile file = do
@@ -209,6 +254,9 @@ foreign import ccall "Parrot_find_global"
 
 foreign import ccall "Parrot_get_strreg"
     parrot_get_strreg :: ParrotInterp -> CInt -> IO ParrotString
+
+foreign import ccall "string_to_cstring"
+    parrot_string_to_cstring :: ParrotInterp -> ParrotString -> IO CString
 
 foreign import ccall "imcc_init"
     parrot_imcc_init :: ParrotInterp -> IO ()

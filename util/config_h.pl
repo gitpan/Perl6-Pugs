@@ -53,7 +53,7 @@ else {
     print OUT "#undef PUGS_EMBED_PERL5\n";
     warn << '.';
 
-*** Perl5 embedding disabled.  If you want Perl5 support, please set the
+*** Perl 5 embedding disabled.  If you want Perl 5 support, please set the
     PUGS_EMBED environment variable to contain "perl5".
 
 .
@@ -69,12 +69,14 @@ else {
 
 my $has_readline = try_compile(<< '.');
 import System.Console.Readline
+main :: IO ()
 main = readline "" >> return ()
 .
 
 
 my $has_th = try_compile(<< '.');
 {-# OPTIONS_GHC -fth #-}
+main :: (Monad m) => m ()
 main = $([| return () |])
 .
 

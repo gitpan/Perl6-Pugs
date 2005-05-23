@@ -9,7 +9,7 @@ Hyper operators L<S03/"Hyper operators">
 
 =cut
 
-plan 32;
+plan 35;
 
 { # binary infix
         my @r;
@@ -17,9 +17,17 @@ plan 32;
         my @e = (3, 6, 9);
         is(~@r, ~@e, "hyper-sum two arrays");
 
+        eval '@r = (1, 2, 3) »-« (2, 4, 6)';
+        @e = (-1, -2, -3);
+        is(~@r, ~@e, "hyper-subtract two arrays");
+
         eval '@r = (1, 2, 3) >>+<< (2, 4, 6)';
         @e = (3, 6, 9);
         is(~@r, ~@e, "hyper-sum two arrays ASCII notation");
+
+        eval '@r = (1, 2, 3) >>-<< (2, 4, 6)';
+        @e = (-1, -2, -3);
+        is(~@r, ~@e, "hyper-subtract two arrays");
 
         @r = (1, 2, 3) »*« (2, 4, 6);
         @e = (2, 8, 18);
@@ -78,11 +86,11 @@ plan 32;
         my @r;
         eval '@r = -« (3, 2, 1)';
         my @e = (-3, -2, -1);
-        is(~@r, ~@e, "hyper op on assignment/pipeline", :todo);
+        is(~@r, ~@e, "hyper op on assignment/pipeline");
 
         eval '@r = -<< (3, 2, 1)';
         @e = (-3, -2, -1);
-        is(~@r, ~@e, "hyper op on assignment/pipeline ASCII notation", :todo);
+        is(~@r, ~@e, "hyper op on assignment/pipeline ASCII notation");
 };
 
 { # dimension upgrade
@@ -159,3 +167,9 @@ plan 32;
         is(~@r2, ~@e2, "hyper op and correctly promotes scalars");
 };
 
+
+{ # mixed hyper and reduce metaops
+    is ~([+]<< ([1,2,3], [4,5,6])), "6 15", "mixed hyper and reduce metaop [+]<< works";
+
+    # XXX: Test for [+]<<<<
+}

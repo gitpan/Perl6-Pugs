@@ -55,7 +55,8 @@ sub set_url_encoding(Str $encoding) is export {
 sub header (
     +$status = '200 OK', 
     +$content_type = 'text/html', 
-    +$charset, 
+    +$charset,
+    +$cookies,
     +$location
 ) returns Str is export {
     # construct our header
@@ -65,7 +66,16 @@ sub header (
     # Need to add support for -
     #    Expires:
     #    Pragma: (caching)
-    #    Set-Cookie: (multiple cookies)
+    if ($cookies) {
+        my @cookies = ($cookies !~ Array) ?? ($cookies) :: @{$cookies};
+        
+        for @cookies -> $cookie {
+            #$cookie = ($cookie ~~ CGI::Cookie) ?? $cookie.as_string :: $cookie;
+            
+            $header ~= "Set-Cookie: " ~ $cookie ~ "\n"
+                unless $cookie eq "";
+        }
+    }
     if ($location.defined) {
         $header ~= "Location: " ~ $location;
     }
@@ -175,7 +185,7 @@ sub load_params {
         else {
             die "Invalid Content Type" if $REQUEST_METHOD; # only die if we are running under CGI
         }
-    }
+    };
     if ($!) {
         print header;
         say "There was an error getting the params:\n\t" ~ $!;
@@ -292,6 +302,8 @@ Autrijus Tang, E<lt>autrijus@autrijus.comE<gt>
 Curtis "Ovid" Poe
  
 Andras Barthazi, E<lt>andras@barthazi.huE<gt>
+
+"Aankhen``"
 
 =head1 COPYRIGHT
 

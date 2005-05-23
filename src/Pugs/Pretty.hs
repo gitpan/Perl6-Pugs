@@ -28,12 +28,11 @@ class (Show a) => Pretty a where
 instance Pretty VStr
 
 instance Pretty Exp where
-    format (Val (VError msg (NonTerm pos))) = text "Syntax error at" <+> (format pos) <+> format msg
-    format (NonTerm pos) = format pos
+    format (NonTerm pos) = text "Syntax error at" <+> format pos
     format (Val v) = format v
     format (Syn x vs) = text "Syn" <+> format x <+> (braces $ vcat (punctuate (text ";") (map format vs)))
     format (Stmts exp1 exp2) = (vcat $ punctuate (text ";") $ (map format) [exp1, exp2])
-    format (App (Var name) invs args) = text "App" <+> text name <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
+    format (App (Var name) invs args) = text "App" <+> text name <+> parens (nest defaultIndent $ vcat [ cat (punctuate (text ", ") (map format x)) | x <- [invs, args] ])
     format (App sub invs args) = text "App" <+> parens (format sub) <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
     format (Sym scope name exp) = text "Sym" <+> text (show scope) <+> format name $+$ format exp
     format (Pad scope pad exp) = text "Pad" <+> text (show scope) <+> format pad $+$ format exp
@@ -60,6 +59,9 @@ instance Pretty Pos where
             (True, True)  -> fmt bln bcl
             (True, False) -> fmt bln (bcl ++ "-" ++ ecl)
             (False, _)    -> fmt bln bcl <+> (text "-" <+> fmt eln ecl)
+
+instance Pretty SubType where
+    format = text . map toLower . drop 3 . show
 
 instance Pretty Env where
     format x = doubleBraces $ nest defaultIndent (format $ envBody x) 
@@ -94,6 +96,7 @@ instance Pretty Val where
     format (VStr x) = text $ "'" ++ encodeUTF8 (concatMap quoted x) ++ "'"
     format v@(VRat _) = text $ vCast v
     format (VComplex x) = text $ show x
+    format (VControl (ControlEnv _)) = text "<env>"
     format (VControl x) = text $ show x
     format (VProcess x) = text $ show x
     format (VMatch x) = text $ show x
@@ -111,9 +114,11 @@ instance Pretty Val where
         | otherwise = parens $ (joinList $ text ", ") (map format x)
     format (VCode _) = text "sub {...}"
     format (VBlock _) = text "{...}"
-    format (VError x y@(NonTerm _)) =
-        text "*** Error:" <+> (text x <+> (text "at" <+> format y))
-    format (VError x _) = text "*** Error:" <+> text x
+    format (VError x posList)
+	-- Is this correct? Does this work on win32, too?
+	| last x == '\n' = text . init $ x
+	| otherwise      = text "***" <+>
+            (text x $+$ (text "at" <+> vcat (map format posList)))
 --  format (VArray x) = format (VList $ Array.elems x)
 --  format (VHash h) = braces $ (joinList $ text ", ") $
 --      [ format (VStr k, v) | (k, v) <- Map.toList h ]

@@ -25,6 +25,8 @@ license         ('perl');
 install_script  ($pugs);
 install_script  (glob('script/*'));
 recommends      ('Perl6::Bible');
+recommends      ('Inline');
+recommends      ('Filter::Simple');
 build_requires  ('ExtUtils::MakeMaker' => 6.15);
 include         ('Module::Install::Makefile::Name');
 include         ('Module::Install::Makefile::Version');
@@ -68,8 +70,14 @@ sub set_postamble {
     push @srcfiles, map { map { substr($_, 0, -1) } glob("$_/*.*hsc") } @srcdirs;
 
     my ($ghc, $ghc_version, $ghc_flags) = assert_ghc();
-    my $hsc2hs = $ghc;
-    $hsc2hs =~ s{(.*)ghc}{$1hsc2hs};
+    my $hsc2hs;
+    if ($ENV{HSC2HS}) {
+        $hsc2hs = $ENV{HSC2HS};
+    }
+    else {
+        $hsc2hs = $ghc;
+        $hsc2hs =~ s{(.*)ghc}{$1hsc2hs};
+    }
 
     # $ghc_flags .= ' -dcore-lint';
     $ghc_flags .= " -keep-tmp-files";
@@ -114,7 +122,12 @@ sub set_postamble {
 
     my $embed_flags = "";
     my $hsc2hs_flags = "";
-    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bparrot\b/i) {
+    
+    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bparrot\b/i and $Config{cc} eq 'cl') {
+        warn "*** Parrot linking not supported with MSVC.  Parrot linking will be disabled.\n\n";
+        $ENV{PUGS_EMBED} =~ s/\bparrot\b//g;
+    }
+	if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bparrot\b/i) {
         my $base = $ENV{PARROT_PATH};
         if (!$base and -d "../parrot") {
             $base = abs_path('../parrot/');
@@ -142,7 +155,8 @@ sub set_postamble {
     warn << '.';
 
 *** Parrot linking disabled; external 'parrot' executable will be used for
-    Rules support.  If you want to link against Parrot, set the PUGS_EMBED
+    Rules support -- please make sure that the executable is available in
+    your PATH.  If you want to link against Parrot, set the PUGS_EMBED
     environment variable to 'parrot', the PARROT_PATH environment variable
     to the path of a built parrot source tree, then run Makefile.PL again.
 
@@ -198,7 +212,8 @@ ${() = '%.hpp : %.hs @prereqs $version_h
 
 haddock : $version_h $config_h @hppfiles docs/haddock
 	haddock -t Pugs-$version -h -o docs/haddock/ @hppfiles
-	\@\$(PERL) -le "print q-*** API Documentation generated in @{[File::Spec->catdir('docs', 'haddock').File::Spec->catdir('')]}.-"
+	\@\$(RM_F) @{[map "$_.pre", @hppfiles]} @hppfiles
+	\@\$(PERL) -le "print and print q-*** API Documentation generated in @{[File::Spec->catfile('docs', 'haddock', 'index.html')]}-"
 
 docs/haddock :
 	\@\$(PERL) -e "mkdir q-docs/haddock-"
