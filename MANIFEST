@@ -315,7 +315,7 @@ ext/Set/lib/Set/Hash.pm
 ext/Set/Makefile.PL
 ext/Set/README
 ext/Set/t/basic.t
-ext/Set/t/junction.t
+ext/Set/t/hash.t
 ext/Set/t/operations.t
 ext/Set/t/overload.t
 ext/Set/t/unicodeoverload.t
