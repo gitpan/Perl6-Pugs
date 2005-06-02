@@ -35,7 +35,7 @@ $Test::Harness::Verbose  = 1;
 $Config{"output-file"} ||= "tests.yml";
 $Config{"recurse"} = 1 if not defined $Config{"recurse"};
 push @{$Config{"exclude"}}, 'Disabled' if not $Config{"exclude"} or not @{$Config{"exclude"}};
-@ARGV = "t/" if !@ARGV;
+@ARGV = glob "t/ ext/*/t/" if !@ARGV;
 
 _build_ext_re();
 _build_exclude_re();
@@ -113,6 +113,7 @@ sub emit {
 sub set_build_info {
     my($self) = @_;
     my $executable = $ENV{HARNESS_PERL} || "pugs";
+    $ENV{PERL6LIB} = 'blib6/lib';
     $self->{_build_info} = join '', qx{$executable -V};
 }
 

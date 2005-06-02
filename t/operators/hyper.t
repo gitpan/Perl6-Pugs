@@ -5,11 +5,11 @@ use Test;
 
 =pod
 
-Hyper operators L<S03/"Hyper operators">
+ Hyper operators L<S03/"Hyper operators">
 
 =cut
 
-plan 35;
+plan 39;
 
 { # binary infix
         my @r;
@@ -169,7 +169,26 @@ plan 35;
 
 
 { # mixed hyper and reduce metaops
-    is ~([+]<< ([1,2,3], [4,5,6])), "6 15", "mixed hyper and reduce metaop [+]<< works";
+    is ~([+]<< ([1,2,3], [4,5,6])), "6 15", "mixed hyper and reduce metaop ([+]<<) works";
 
     # XXX: Test for [+]<<<<
+    is ~([+]<<<< ([[1,2],[3,4]],[[5,6],[7,8]])), "3 7 11 15",
+      "mixed double hyper and reduce metaop ([+]<<<<) works";
+
+    is eval('~[+]« [1,2,3], [4,5,6]'), "6 15",
+      "mixed Unicode hyper and reduce metaop ([+]«) works";
+}
+
+{ # hyper dereferencing
+    my @array = (
+        { key => 'val' },
+        { key => 'val' },
+        { key => 'val' }
+    );
+
+    my $full = join '', eval '@array>>.<key>';
+    is($full, 'valvalval', 'hyper-dereference an array',:todo);
+
+    my $part = join '', eval '@array[0,1]>>.<key>';
+    is($part, 'valval', 'hyper-dereference an array slice',:todo);
 }

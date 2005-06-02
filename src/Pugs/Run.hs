@@ -9,15 +9,24 @@
 >   The king of friend and kin has need...
 -}
 
-module Pugs.Run where
+module Pugs.Run (
+    runWithArgs,
+    prepareEnv, runEnv,
+    runAST, runComp,
+    getLibs,
+) where
 import Pugs.Run.Args
+import Pugs.Run.Perl5 ()
 import Pugs.Internals
 import Pugs.Config
+import Pugs.Context
 import Pugs.AST
 import Pugs.Types
 import Pugs.Eval
 import Pugs.Prim
+import Pugs.Prim.Eval
 import Pugs.Embed
+import Pugs.Prelude
 import qualified Data.Map as Map
 
 {-|
@@ -32,9 +41,8 @@ runWithArgs f = do
 
 runEvalMain :: Env -> Eval Val -> IO Val
 runEvalMain env eval = withSocketsDo $ do
-    my_perl <- initPerl5 ""
     val     <- runEvalIO env eval
-    freePerl5 my_perl
+    -- freePerl5 my_perl
     return val
 
 runEnv :: Env -> IO Val
@@ -91,6 +99,8 @@ prepareEnv name args = do
     argsGV  <- newScalar undef
     errSV   <- newScalar (VStr "")
     defSV   <- newScalar undef
+    autoSV  <- newScalar undef
+    classes <- initClassObjects [] initTree
 #if defined(PUGS_HAVE_HSPLUGINS)
     hspluginsSV <- newScalar (VInt 1)
 #else
@@ -99,41 +109,65 @@ prepareEnv name args = do
     let subExit = \x -> case x of
             [x] -> op1Exit x     -- needs refactoring (out of Prim)
             _   -> op1Exit undef
-    emptyEnv name $
-        [ genSym "@*ARGS"       $ MkRef argsAV
-        , genSym "@*INC"        $ MkRef incAV
-        , genSym "$*PUGS_HAS_HSPLUGINS" $ MkRef hspluginsSV
-        , genSym "$*EXECUTABLE_NAME"    $ MkRef execSV
-        , genSym "$*PROGRAM_NAME"       $ MkRef progSV
-        , genSym "$*PID"        $ MkRef pidSV
+    env <- emptyEnv name $
+        [ genSym "@*ARGS"       $ hideInSafemode $ MkRef argsAV
+        , genSym "@*INC"        $ hideInSafemode $ MkRef incAV
+        , genSym "$*PUGS_HAS_HSPLUGINS" $ hideInSafemode $ MkRef hspluginsSV
+        , genSym "$*EXECUTABLE_NAME"    $ hideInSafemode $ MkRef execSV
+        , genSym "$*PROGRAM_NAME"       $ hideInSafemode $ MkRef progSV
+        , genSym "$*PID"        $ hideInSafemode $ MkRef pidSV
         -- XXX these four need a proper `set' magic
-        , genSym "$*UID"        $ MkRef uidSV
-        , genSym "$*EUID"       $ MkRef euidSV
-        , genSym "$*GID"        $ MkRef gidSV
-        , genSym "$*EGID"       $ MkRef egidSV
+        , genSym "$*UID"        $ hideInSafemode $ MkRef uidSV
+        , genSym "$*EUID"       $ hideInSafemode $ MkRef euidSV
+        , genSym "$*GID"        $ hideInSafemode $ MkRef gidSV
+        , genSym "$*EGID"       $ hideInSafemode $ MkRef egidSV
         , genSym "@?CHECK"      $ MkRef checkAV
         , genSym "@?INIT"       $ MkRef initAV
         , genSym "@*END"        $ MkRef endAV
-        , genSym "$*IN"         $ MkRef inGV
-        , genSym "$*OUT"        $ MkRef outGV
-        , genSym "$*ERR"        $ MkRef errGV
-        , genSym "$*ARGS"       $ MkRef argsGV
+        , genSym "$*IN"         $ hideInSafemode $ MkRef inGV
+        , genSym "$*OUT"        $ hideInSafemode $ MkRef outGV
+        , genSym "$*ERR"        $ hideInSafemode $ MkRef errGV
+        , genSym "$*ARGS"       $ hideInSafemode $ MkRef argsGV
         , genSym "$!"           $ MkRef errSV
         , genSym "$/"           $ MkRef matchAV
-        , genSym "%*ENV"        $ hashRef MkHashEnv
-        , genSym "$*CWD"        $ scalarRef MkScalarCwd
+        , genSym "%*ENV"        $ hideInSafemode $ hashRef MkHashEnv
+        , genSym "$*CWD"        $ hideInSafemode $ scalarRef MkScalarCwd
         -- XXX What would this even do?
         -- , genSym "%=POD"        (Val . VHash $ emptyHV)
         , genSym "@=POD"        $ MkRef $ constArray []
         , genSym "$=POD"        $ MkRef $ constScalar (VStr "")
-        , genSym "$*OS"         $ MkRef $ constScalar (VStr $ getConfig "osname")
+        -- To answer the question "what revision does evalbot run on?"
+        , genSym "$?PUGS_VERSION" $ MkRef $ constScalar (VStr $ getConfig "pugs_version")
+        , genSym "$*OS"         $ hideInSafemode $ MkRef $ constScalar (VStr $ getConfig "osname")
         , genSym "&?BLOCK_EXIT" $ codeRef $ mkPrim
             { subName = "&?BLOCK_EXIT"
             , subBody = Prim subExit
             }
-        , genSym "%?CONFIG" $ hashRef confHV
+        , genSym "%?CONFIG" $ hideInSafemode $ hashRef confHV
         , genSym "$*_" $ MkRef defSV
+        , genSym "$*AUTOLOAD" $ MkRef autoSV
+        ] ++ classes
+    unless safeMode $ do
+        initPerl5 "" (Just . VControl $ ControlEnv env{ envDebug = Nothing })
+        initPrelude env
+        return ()
+    return env
+    where
+    hideInSafemode x = if safeMode then MkRef $ constScalar undef else x
+
+initPrelude :: Env -> IO Val
+initPrelude env = runEvalIO env{ envDebug = Nothing} $ opEval Nothing "<prelude>" preludeStr
+
+initClassObjects :: [Type] -> ClassTree -> IO [STM (Pad -> Pad)]
+initClassObjects parent (Node typ children) = do
+    obj     <- createObject (mkType "Class") $
+        [ ("name",   castV $ showType typ)
+        , ("traits", castV $ map showType parent)
         ]
+    objSV   <- newScalar (VObject obj)
+    rest    <- mapM (initClassObjects [typ]) children
+    let sym = genSym (':':'*':showType typ) $ MkRef objSV
+    return (sym:concat rest)
 
 {-|
 Combine @%*ENV\<PERL6LIB\>@, -I, 'Pugs.Config.config' values and \".\" into

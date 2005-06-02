@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 59;
+plan 60;
 
 # tests various assignment styles
 
@@ -17,6 +17,11 @@ plan 59;
     is($bar, "FOO", "... and second");
 };
 
+{
+    my $x = 1;
+    eval '&infix:<=>.($x, 0)';
+    is($x, 0, 'assignment operator called as function');
+}
 
 {
     # swap two elements in the same array 
@@ -202,8 +207,8 @@ plan 59;
 
 {
     my $x = 0;
-    $x ^^= 42;
-    is($x, 42, '^^= operator');
+    eval '$x ^^= 42';
+    is($x, 42, '^^= operator', :todo<bug>);
 }
 
 {
@@ -214,7 +219,7 @@ plan 59;
 
 {
     my $x = 42;
-    # $x ?&= 24;   # XXX: compiler blows up
+    eval '$x ?&= 24';   # XXX: compiler blows up
     is($x, 1, '?&= operator', :todo);
 }
 

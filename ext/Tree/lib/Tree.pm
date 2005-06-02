@@ -234,6 +234,12 @@ method post_order_traverse ($self: Code $func) returns Void {
     }
 }
 
+method traverse_iter($self: Str ?$traversal_order) returns Code {
+    return coro {
+	$self.traverse(sub { yield $^node }, $traversal_order);
+    };
+}
+
 ## ----------------------------------------------------------------------------
 ## utility methods
 

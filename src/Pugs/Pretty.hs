@@ -32,8 +32,8 @@ instance Pretty Exp where
     format (Val v) = format v
     format (Syn x vs) = text "Syn" <+> format x <+> (braces $ vcat (punctuate (text ";") (map format vs)))
     format (Stmts exp1 exp2) = (vcat $ punctuate (text ";") $ (map format) [exp1, exp2])
-    format (App (Var name) invs args) = text "App" <+> text name <+> parens (nest defaultIndent $ vcat [ cat (punctuate (text ", ") (map format x)) | x <- [invs, args] ])
-    format (App sub invs args) = text "App" <+> parens (format sub) <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ invs ++ args)))
+    format (App (Var name) invs args) = text "App" <+> text name <+> parens (nest defaultIndent $ cat (punctuate (text ": ") [ cat (punctuate (text ", ") (map format x)) | x <- [maybeToList invs, args] ]))
+    format (App sub invs args) = text "App" <+> parens (format sub) <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ maybeToList invs ++ args)))
     format (Sym scope name exp) = text "Sym" <+> text (show scope) <+> format name $+$ format exp
     format (Pad scope pad exp) = text "Pad" <+> text (show scope) <+> format pad $+$ format exp
     format (Pos _ exp) = format exp
@@ -118,7 +118,8 @@ instance Pretty Val where
 	-- Is this correct? Does this work on win32, too?
 	| last x == '\n' = text . init $ x
 	| otherwise      = text "***" <+>
-            (text x $+$ (text "at" <+> vcat (map format posList)))
+            (vcat (map text $ split "\n" x) $+$ (text "at" <+> vcat (map format $ reverse posList)))
+        where
 --  format (VArray x) = format (VList $ Array.elems x)
 --  format (VHash h) = braces $ (joinList $ text ", ") $
 --      [ format (VStr k, v) | (k, v) <- Map.toList h ]
@@ -132,6 +133,7 @@ instance Pretty Val where
     format (VSubst _) = text $ "{subst}"
     format (VType t) = text $ "::" ++ showType t
     format (VObject o) = text $ "{obj:" ++ showType (objType o) ++ "}"
+    format (PerlSV _) = text $ "{obj-perl5}"
     format VUndef = text $ "undef"
 
 quoted :: Char -> String

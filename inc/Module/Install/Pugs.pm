@@ -107,7 +107,7 @@ sub pugs_fix_makefile {
     $full_pugs =~ s{'}{\\'}g;
     $full_blib =~ s{\\}{\\\\}g;
     $full_blib =~ s{'}{\\'}g;
-    $makefile =~ s/\b(runtests \@ARGV|test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = q{$full_pugs}; \@ARGV = grep !\/[A-Z]\/, map glob, \@ARGV; ENV->{PERL6LIB} = q{$full_blib}; $1/;
+    $makefile =~ s/\b(runtests \@ARGV|test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = q{$full_pugs}; \@ARGV = map glob, \@ARGV; ENV->{PERL6LIB} = q{$full_blib}; $1/;
     $makefile =~ s!("-MExtUtils::Command::MM")!"-I../../inc" "-I../inc" "-Iinc" $1!g;
     $makefile =~ s/\$\(UNINST\)/0/g;
     close MAKEFILE;
@@ -169,9 +169,12 @@ sub assert_ghc {
     $ghc_flags .= " -fno-warn-name-shadowing ";
     $ghc_flags .= " -I../../src -i../../src "
       if $self->is_extension_build;
-    $ghc_flags .= " -I$Config{archlib}/CORE -L$Config{archlib}/CORE -i$Config{archlib}/CORE -lperl"
-      if $ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /perl5/i;
-    #$ghc_flags .= " -fno-warn-deprecations -fno-warn-orphans";
+    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /perl5/i) {
+        $ghc_flags .= " -isrc/perl5 -Isrc/perl5 ";
+        $ghc_flags .= join(' ', grep { m{^/} or m{^-[DILl]} or m{^-Wl,-R} }
+                        split (' ', `$^X -MExtUtils::Embed -e ccopts,ldopts`));
+    }
+    chomp $ghc_flags;
     return ($ghc, $ghc_version, $ghc_flags);
 }
 

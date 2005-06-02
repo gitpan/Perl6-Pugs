@@ -1,19 +1,8 @@
 
 class Class;
 
-has $.name;
+method new(Type $base, Str ?$name) returns Class {
 
-method new(Str $name) returns Class {
-    $.name = $name;
-    return $?SELF;
-}
-
-method addMethod(Method $meth) {
-    ...
-}
-
-method apply() {
-    ...
 }
 
 =head1 NAME
@@ -22,11 +11,16 @@ Class - Entities in a program's model (M1)
 
 =head1 SYNOPSIS
 
+ # class SomeClass { method ... { ... } }
  my $class = Class.new("SomeClass");
-
  $class.addMethod(Method.new(...))
-
  $class.apply;
+
+ # my SomeClass $foo does Foo;
+ my $role = Role.new("Foo");
+ my $newclass = Class.new($class);
+ $newclass.does($role);
+ $newclass.apply;
 
 =head1 DESCRIPTION
 

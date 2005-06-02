@@ -13,7 +13,7 @@ module Pugs.Context where
 import Pugs.Internals
 import Pugs.Types
 
-countTree :: Tree Type -> Int
+countTree :: ClassTree -> Int
 countTree (Node _ []) = 0
 countTree (Node _ cs) = 1 + sum (map countTree cs)
 
@@ -24,9 +24,13 @@ deltaType = junctivate min max $ \tree base target ->
         then countTree tree - distance
         else distance
 
-junctivate :: (t -> t -> t) -> (t -> t -> t)
-              -> (ClassTree -> Type -> Type -> t)
-              -> ClassTree -> Type -> Type -> t
+junctivate :: (t -> t -> t) 
+           -> (t -> t -> t)
+           -> (ClassTree -> Type -> Type -> t)
+           -> ClassTree 
+           -> Type 
+           -> Type 
+           -> t
 junctivate or and f tree base target
     | TypeOr t1 t2 <- target
     = redo base t1 `or` redo base t2
@@ -62,14 +66,14 @@ castOk :: a -> b -> Bool
 castOk _ _ = True
 
 compareList :: [Type] -> [Type] -> Int
-compareList [] _ = 0
-compareList _ [] = 0
+compareList [] _ = -999
+compareList _ [] = -999
 compareList l1 l2
     | last l1 `elem` l2 =   length(l2 \\ l1) + 1
     | last l2 `elem` l1 = - length(l1 \\ l2) - 1
     | otherwise = compareList l1 (init l2)
 
-findList :: Type -> Tree Type -> [Type]
+findList :: Type -> ClassTree -> [Type]
 findList base (Node l cs)
     | base == l                             = [l]
     | Just ls <- find (not . null) found    = l:ls
@@ -80,12 +84,12 @@ findList base (Node l cs)
 prettyTypes :: String
 prettyTypes = drawTree $ fmap show initTree
 
-addNode :: Tree Type -> Type -> Tree Type
+addNode :: ClassTree -> Type -> ClassTree
 addNode (Node any [Node void (Node obj ns:rest)]) typ =
     Node any [Node void (Node obj ((Node typ []):ns):rest)]
 addNode _ _ = error "malformed tree"
 
-initTree :: Tree Type
+initTree :: ClassTree
 initTree = fmap MkType $ Node "Any" [ Node "Void"
     [ Node "Object"
         [ Node "List"
@@ -111,7 +115,9 @@ initTree = fmap MkType $ Node "Any" [ Node "Void"
             , Node "Bool" []
             , Node "Str" []
             , Node "Ref" []
-            , Node "IO" []
+            , Node "IO"
+                [ Node "IO::Dir" []
+                ]
             , Node "Socket" []
             , Node "Thread" []
             , Node "Code"
@@ -131,6 +137,7 @@ initTree = fmap MkType $ Node "Any" [ Node "Void"
             , Node "Scalar::Const" []
             , Node "Scalar::Proxy" []
             , Node "Scalar::Lazy" []
+            , Node "Scalar::Perl5" []
             ]
         ]
     , Node "Grammar" []

@@ -11,11 +11,8 @@
 -}
 
 module Pugs.Lexer (
-    RuleParser,
-    ParensOption(..),
-
     wordAlpha, wordAny, isWordAlpha, isWordAny,
-    parens, whiteSpace, lexeme, identifier,
+    maybeParens, parens, whiteSpace, lexeme, identifier,
     braces, brackets, angles, balanced, balancedDelim, decimal,
 
     ruleQualifiedIdentifier, ruleWhiteSpaceLine,
@@ -26,7 +23,7 @@ module Pugs.Lexer (
     tryRule, tryVerbatimRule,
     tryChoice,
 
-    ruleScope, ruleTrait, ruleTraitName, ruleBareTrait, ruleContext,
+    ruleScope, ruleTrait, ruleTraitName, ruleBareTrait, ruleType,
     verbatimParens,
 ) where
 import Pugs.Internals
@@ -34,11 +31,8 @@ import Pugs.AST
 import Pugs.Rule
 import Pugs.Rule.Language
 import Pugs.Types
+import Pugs.Parser.Types
 import qualified Pugs.Rule.Token as P
-
-type RuleParser a = GenParser Char Env a
-data ParensOption = ParensMandatory | ParensOptional
-    deriving (Show, Eq)
 
 perl6Def  :: LanguageDef st
 perl6Def  = javaStyle
@@ -63,6 +57,9 @@ isWordAlpha x = (isAlpha x || x == '_')
 
 perl6Lexer :: P.TokenParser st
 perl6Lexer = P.makeTokenParser perl6Def
+
+maybeParens :: CharParser st a -> CharParser st a
+maybeParens p = choice [ parens p, p ]
 
 parens     :: CharParser st a -> CharParser st a
 parens     = P.parens     perl6Lexer
@@ -127,6 +124,7 @@ symbol s
     aheadSym '?' y   = not (y `elem` "&|^?")
     aheadSym '+' y   = not (y `elem` "&|^<>+")
     aheadSym '~' y   = not (y `elem` "&|^<>~")
+    aheadSym '^' y   = not (y `elem` ".")
     aheadSym x   y   = y `elem` ";!" || x /= y
 
 interpolatingStringLiteral :: RuleParser x      -- ^ Closing delimiter 
@@ -143,7 +141,7 @@ interpolatingStringLiteral endrule interpolator = do
     homogenConcat (Val (VStr x):Val (VStr y):xs)
         = homogenConcat (Val (VStr (x ++ y)) : xs)
     homogenConcat (x:xs)
-        = App (Var "&infix:~") [x, homogenConcat xs] []
+        = App (Var "&infix:~") Nothing [x, homogenConcat xs]
     
     stringList = do
         lookAhead endrule
@@ -275,10 +273,10 @@ ruleBareTrait trait = rule "bare trait" $ do
                 return str
            ]
 
-ruleContext :: GenParser Char st String
-ruleContext = literalRule "context" $ do
+ruleType :: GenParser Char st String
+ruleType = literalRule "context" $ do
     lead    <- upper
-    rest    <- many1 (wordAny <|> oneOf ":&|")
+    rest    <- many (wordAny <|> oneOf ":&|")
     return (lead:rest)
 
 tryChoice :: [GenParser tok st a] -> GenParser tok st a

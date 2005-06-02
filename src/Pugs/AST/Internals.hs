@@ -53,15 +53,17 @@ module Pugs.AST.Internals (
     proxyScalar, constScalar, lazyScalar, lazyUndef, constArray,
     retError, retControl, retEmpty, retIVar, readIVar, writeIVar,
     fromVals, refType,
-    mkPad, lookupPad, padToList, diffPads, unionPads, subPad, updateSubPad,
+    lookupPad, padToList,
     mkPrim, mkSub,
     cxtOfSigil, typeOfSigil,
     buildParam, defaultArrayParam, defaultHashParam, defaultScalarParam,
     emptyExp,
     isSlurpy, envWant,
-    extract,
+    extract, fromObject, createObject,
     doPair, doHash, doArray,
     unwrap, -- Unwrap(..) -- not used in this file, suitable for factoring out
+    
+    expToEvalVal, -- Hack, should be removed once it's figured out how
 ) where
 import Pugs.Internals
 import Pugs.Context
@@ -76,6 +78,7 @@ import Pugs.Parser.Number
 import Pugs.AST.Pos
 import Pugs.AST.Scope
 import Pugs.AST.SIO
+import Pugs.Embed.Perl5
 
 #include "../Types/Array.hs"
 #include "../Types/Handle.hs"
@@ -185,14 +188,12 @@ fromVal' (VRef r) = do
 fromVal' (VList vs) | not $ null [ undefined | VRef _ <- vs ] = do
     vs <- forM vs $ \v -> case v of { VRef r -> readRef r; _ -> return v }
     fromVal $ VList vs
+fromVal' (PerlSV sv) = do
+    v <- liftIO $ svToVal sv
+    case v of
+        PerlSV sv'  -> fromSV sv'   -- it was a SV
+        val         -> fromVal val  -- it was a Val
 fromVal' v = return $ vCast v
-{-do
-    rv <- liftIO $ catchJust errorCalls (return . Right $ vCast v) $
-        \str -> return (Left str)
-    case rv of
-        Right v -> return v
-        Left e  -> retError e v -- XXX: not working yet
--}
 
 {-|
 Typeclass indicating types that can be converted to\/from 'Val's.
@@ -202,6 +203,10 @@ Not to be confused with 'Val' itself, or the 'Exp' constructor @Val@.
 class (Typeable n, Show n, Ord n) => Value n where
     fromVal :: Val -> Eval n
     fromVal = fromVal'
+    fromSV :: PerlSV -> Eval n
+    fromSV sv = do
+        str <- liftIO $ svToVStr sv
+        fail $ "cannot cast from SV (" ++ str ++ ") to " ++ errType (undefined :: n)
     vCast :: Val -> n
     vCast v@(VRef _)    = castFail v
     vCast v             = doCast v
@@ -212,18 +217,32 @@ class (Typeable n, Show n, Ord n) => Value n where
     fmapVal :: (n -> n) -> Val -> Val
     fmapVal f = castV . f . vCast
 
+errType :: (Typeable a) => a -> String
+errType x = show (typeOf x)
 
-castFailM :: (Show a, Typeable b) => a -> Eval b
-castFailM v = err
-    where
-    err = fail $ "cannot cast from " ++ show v ++ " to " ++ typ
-    typ = tail . dropWhile (not . isSpace) . show $ typeOf err
+createObject :: (MonadIO m) => VType -> [(VStr, Val)] -> m VObject
+createObject typ attrList = liftIO $ do
+    attrs   <- liftSTM . newTVar . Map.map lazyScalar $ Map.fromList attrList
+    uniq    <- newUnique
+    return $ MkObject
+        { objType   = typ
+        , objId     = uniq
+        , objAttrs  = attrs
+        , objOpaque = Nothing
+        }
 
-castFail :: (Show a, Typeable b) => a -> b
-castFail v = err
-    where
-    err = error $ "cannot cast from " ++ show v ++ " to " ++ typ
-    typ = show $ typeOf err
+fromObject :: forall a. (Typeable a) => VObject -> a
+fromObject obj = case objOpaque obj of
+    Nothing     -> castFail obj
+    Just dyn    -> case fromDynamic dyn of
+        Nothing -> castFail obj
+        Just x  -> x
+
+castFailM :: forall a b. (Show a, Typeable b) => a -> Eval b
+castFailM v = fail $ "cannot cast from " ++ show v ++ " to " ++ errType (undefined :: b)
+
+castFail :: forall a b. (Show a, Typeable b) => a -> b
+castFail v = error $ "cannot cast from " ++ show v ++ " to " ++ errType (undefined :: b)
 
 instance Value (IVar VScalar) where
     fromVal (VRef (MkRef v@(IScalar _))) = return v
@@ -232,6 +251,11 @@ instance Value (IVar VScalar) where
 
 instance Value VType where
     fromVal (VType t)   = return t
+    fromVal v@(VObject obj) | objType obj == (mkType "Class") = do
+        meta    <- readRef =<< fromVal v
+        fetch   <- doHash meta hash_fetchVal
+        str     <- fromVal =<< fetch "name"
+        return $ mkType str
     fromVal v           = return $ valType v
 
 instance Value VMatch where
@@ -253,6 +277,7 @@ instance Value [Int] where
         mapM fromVal vlist
 
 instance Value [VStr] where
+    castV = VList . map VStr
     fromVal v = do
         vlist <- fromVal v
         mapM fromVal vlist
@@ -272,7 +297,8 @@ instance Value [(VStr, Val)] where
 instance Value VObject where
     fromVal (VObject o) = return o
     fromVal v@(VRef _) = fromVal' v
-    fromVal _ = fail "auto-boxing not yet implemented"
+    fromVal v = do
+        fail $ "cannot cast from " ++ show v ++ " to Object"
 
 instance Value VHash where
     fromVal (VObject o) = do
@@ -302,12 +328,27 @@ instance Value [VPair] where
 
 instance Value VCode where
     castV = VCode
+    fromSV sv = return $ mkPrim
+        { subName     = "<anon>"
+        , subParams   = [defaultArrayParam]
+        , subReturns  = mkType "Scalar::Perl5"
+        , subBody     = Prim $ \(args:_) -> do
+            svs     <- fromVals args
+            env     <- ask
+            rv      <- liftIO $ do
+                envSV   <- mkVal (VControl $ ControlEnv env)
+                invokePerl5 sv nullSV svs envSV (enumCxt $ envContext env)
+            return $ case rv of
+                [sv]    -> PerlSV sv
+                _       -> VList (map PerlSV rv)
+        }
     doCast (VCode b) = b
     doCast (VList [VCode b]) = b -- XXX Wrong
     doCast v = castFail v
 
 instance Value VBool where
     castV = VBool
+    fromSV sv = liftIO $ svToVBool sv
     doCast (VJunc j)   = juncToBool j
     doCast (VMatch m)  = matchOk m
     doCast (VBool b)   = b
@@ -338,11 +379,13 @@ juncToBool (MkJunc JOne  ds vs)
 
 instance Value VInt where
     castV = VInt
+    fromSV sv = liftIO $ svToVInt sv
     doCast (VInt i)     = i
     doCast x            = truncate (vCast x :: VRat)
 
 instance Value VRat where
     castV = VRat
+    fromSV sv = liftIO $ svToVNum sv
     doCast (VInt i)     = i % 1
     doCast (VRat r)     = r
     doCast (VBool b)    = if b then 1 % 1 else 0 % 1
@@ -359,6 +402,7 @@ instance Value VRat where
 
 instance Value VNum where
     castV = VNum
+    fromSV sv = liftIO $ svToVNum sv
     doCast VUndef       = 0
     doCast (VBool b)    = if b then 1 else 0
     doCast (VInt i)     = fromIntegral i
@@ -385,7 +429,9 @@ instance Value VComplex where
 
 instance Value VStr where
     castV = VStr
+    fromSV sv = liftIO $ svToVStr sv
     fromVal (VList l)   = return . unwords =<< mapM fromVal l
+    fromVal v@(PerlSV _) = fromVal' v
     fromVal v = do
         vt  <- evalValType v
         if vt /= mkType "Hash" then fromVal' v else do
@@ -420,7 +466,18 @@ instance Value VStr where
     vCast (VMatch m)    = matchStr m
     vCast (VType typ)   = showType typ -- "::" ++ showType typ
     vCast (VObject o)   = "<obj:" ++ showType (objType o) ++ ">"
-    vCast x             = castFail x
+    vCast x             = "<" ++ showType (valType x) ++ ">"
+
+instance Value [PerlSV] where
+    fromVal = fromVals
+
+instance Value PerlSV where
+    fromVal (PerlSV sv) = return sv
+    fromVal (VStr str) = liftIO $ vstrToSV str
+    fromVal (VInt int) = liftIO $ vintToSV int
+    fromVal (VRat int) = liftIO $ vnumToSV int
+    fromVal (VNum int) = liftIO $ vnumToSV int
+    fromVal v = liftIO $ mkValRef v
 
 showNum :: Show a => a -> String
 showNum x
@@ -443,6 +500,7 @@ instance Value VList where
             (VList vs) -> return vs
             _          -> return [v]
     fromVal v = fromVal' v
+    fromSV sv = return [PerlSV sv]
     castV = VList
     vCast (VList l)     = l
     vCast (VUndef)      = [VUndef]
@@ -468,7 +526,8 @@ instance Value VProcess where
     doCast (VProcess x)  = x
     doCast x            = castFail x
 
-instance Value Int   where
+instance Value Int where
+    fromSV sv = liftIO $ svToVInt sv
     doCast = intCast
     castV = VInt . fromIntegral
 instance Value Word  where doCast = intCast
@@ -478,6 +537,7 @@ instance Value [Word8] where doCast = map (toEnum . ord) . vCast
 type VScalar = Val
 
 instance Value VScalar where
+    fromSV sv = return $ PerlSV sv
     fromVal (VRef r) = fromVal =<< readRef r
     fromVal v = return v
     vCast = id
@@ -513,7 +573,7 @@ data Val
     | VNum      !VNum        -- ^ Number (i.e. a double)
     | VComplex  !VComplex    -- ^ Complex number value
     | VStr      !VStr        -- ^ String value
-    | VList     VList        -- ^ List value (lists are lazy, so no '!')
+    | VList     !VList       -- ^ List value
     | VRef      !VRef        -- ^ Reference value
     | VCode     !VCode       -- ^ A code object
     | VBlock    !VBlock
@@ -523,13 +583,14 @@ data Val
     | VSocket   !VSocket     -- ^ Socket handle
     | VThread   !(VThread Val)
     | VProcess  !VProcess    -- ^ PID value
-    | VRule     !VRule
+    | VRule     !VRule       -- ^ Rule\/regex value
     | VSubst    !VSubst      -- ^ Substitution value (correct?)
     | VControl  !VControl
-    | VMatch    !VMatch
-    | VType     !VType
-    | VObject   !VObject
+    | VMatch    !VMatch      -- ^ Match value
+    | VType     !VType       -- ^ Type value (e.g. @Int@ or @Type@)
+    | VObject   !VObject     -- ^ Object
     | VOpaque   !VOpaque
+    | PerlSV    !PerlSV
     deriving (Show, Eq, Ord, Typeable)
 
 {-|
@@ -562,6 +623,7 @@ valType (VMatch   _)    = mkType "Match"
 valType (VType    _)    = mkType "Type"
 valType (VObject  o)    = objType o
 valType (VOpaque  _)    = mkType "Object"
+valType (PerlSV   _)    = mkType "Scalar::Perl5"
 
 type VBlock = Exp
 data VControl
@@ -621,7 +683,8 @@ subtyping.
 data SubType = SubMethod    -- ^ Method
              | SubCoroutine -- ^ Coroutine
              | SubRoutine   -- ^ Regular subroutine
-             | SubBlock     -- ^ Pointy sub or bare block
+             | SubBlock     -- ^ Bare block
+             | SubPointy    -- ^ Pointy sub
              | SubPrim      -- ^ Built-in primitive operator (see "Pugs.Prim")
     deriving (Show, Eq, Ord)
 
@@ -756,7 +819,7 @@ instance (Typeable a) => Show (TVar a) where
 -- | Represents an expression tree.
 data Exp
     = Noop                              -- ^ No-op
-    | App !Exp ![Exp] ![Exp]            -- ^ Function application
+    | App !Exp !(Maybe Exp) ![Exp]      -- ^ Function application
                                         --     e.g. myfun($invocant: $arg)
     | Syn !String ![Exp]                -- ^ Syntactic construct that cannot
                                         --     be represented by 'App'.
@@ -770,6 +833,20 @@ data Exp
     | Var !Var                          -- ^ Variable
     | NonTerm !Pos                      -- ^ Parse error
      deriving (Show, Eq, Ord, Typeable)
+
+instance Value Exp where
+    {- Val -> Exp -}
+    doCast val = fromObject (doCast val)
+    {- Exp -> Val -}
+    {- castV exp = VObject (createObject (mkType "Code::Exp") [("theexp", exp)]) -}
+
+{- FIXME: Figure out how to get this working without a monad, and make it castV -}
+expToEvalVal :: Exp -> Eval Val
+expToEvalVal exp = do
+    obj <- createObject (mkType "Code::Exp") []
+    return $ VObject obj{ objOpaque = Just $ toDyn exp }
+
+
 
 class Unwrap a where
     {-|
@@ -815,7 +892,7 @@ extract :: Exp -> [String] -> (Exp, [String])
 extract (App n invs args) vs = (App n' invs' args', vs''')
     where
     (n', vs')      = extract n vs
-    (invs', vs'')  = foldr extractExp ([], vs') invs
+    (invs', vs'')  = maybe (invs, vs') (\inv -> let (x, y) = extract inv vs' in (Just x, y)) invs
     (args', vs''') = foldr extractExp ([], vs'') args
 extract (Stmts exp1 exp2) vs = (Stmts exp1' exp2', vs'')
     where
@@ -899,7 +976,7 @@ defaultScalarParam :: Param
 
 defaultArrayParam   = buildParam "" "*" "@_" (Val VUndef)
 defaultHashParam    = buildParam "" "*" "%_" (Val VUndef)
-defaultScalarParam  = buildParam "" "" "$_" (Val VUndef)
+defaultScalarParam  = buildParam "" "?" "$_" (Var "$_")
 
 type DebugInfo = Maybe (TVar (Map String String))
 
@@ -937,6 +1014,7 @@ envWant env =
     showCxt (CxtItem typ)   = "Scalar (" ++ showType typ ++ ")"
     showCxt (CxtSlurpy typ) = "List (" ++ showType typ ++ ")"
 
+{- Pad -}
 {-|
 A 'Pad' keeps track of the names of all currently-bound symbols, and
 associates them with the things they actually represent.
@@ -964,28 +1042,7 @@ is stored in the @Reader@-monad component of the current 'Eval' monad.
 >[11:58] <autrijus> yeah. but it's not critical, so is low priority
 -}
 data Pad = MkPad !(Map Var ([(TVar Bool, TVar VRef)]))
-    deriving (Eq, Ord, Typeable)
-
-instance Show Pad where
-    show pad = "(mkPad [" ++
-                concat (intersperse ", " $ map dump $ padToList pad) ++
-                "])"
-        where
-        dump (n, tvars) = "(" ++ show n ++ ", [" ++
-                            concat (intersperse ", " $ map dumpTVar tvars) ++
-                            "])"
-        dumpTVar (_, tvar) = unsafePerformIO $ do
-            ref  <- liftSTM $ readTVar tvar
-            dump <- runEvalIO undefined $ dumpRef ref
-            return $ "(unsafePerformIO . atomically $ do { bool <- newTVar True; ref <- (newTVar " ++ vCast dump ++ "); return (bool, ref) })"
-
-{-|
-Produce a 'Pad' from a list of bindings. The inverse of 'padToList'.
-
-Not to be confused with the actual 'Pad' constructor @MkPad@.
--}
-mkPad :: [(Var, [(TVar Bool, TVar VRef)])] -> Pad
-mkPad = MkPad . Map.fromList
+    deriving (Show, Eq, Ord, Typeable)
 
 -- | Look up a symbol in a 'Pad', returning the ref it is bound to.
 lookupPad :: Var -- ^ Symbol to look for
@@ -1011,23 +1068,7 @@ Note that @Data.Map.assocs@ returns a list of mappings in ascending key order.
 padToList :: Pad -> [(Var, [(TVar Bool, TVar VRef)])]
 padToList (MkPad map) = Map.assocs map
 
--- | Return the difference between two pads.
-diffPads :: Pad -- ^ Pad a
-         -> Pad -- ^ Pad b
-         -> Pad -- ^ a - b
-diffPads (MkPad map1) (MkPad map2) = MkPad $ Map.difference map1 map2
-
-unionPads :: Pad -> Pad -> Pad
-unionPads (MkPad map1) (MkPad map2) = MkPad $ Map.union map1 map2
-
-updateSubPad :: VCode -> (Pad -> Pad) -> VCode
-updateSubPad sub f = sub
-    { subEnv = fmap (\e -> e{ envLexical = f (subPad sub) }) (subEnv sub) 
-    }
-
-subPad :: VCode -> Pad
-subPad sub = maybe (mkPad []) envLexical (subEnv sub)
-
+{- Eval Monad -}
 type Eval x = EvalT (ContT Val (ReaderT Env SIO)) x
 type EvalMonad = EvalT (ContT Val (ReaderT Env SIO))
 newtype EvalT m a = EvalT { runEvalT :: m a }
@@ -1036,7 +1077,7 @@ runEvalSTM :: Env -> Eval Val -> STM Val
 runEvalSTM env = runSTM . (`runReaderT` env) . (`runContT` return) . runEvalT
 
 runEvalIO :: Env -> Eval Val -> IO Val
-runEvalIO env = runIO . (`runReaderT` env) . (`runContT` return) . runEvalT
+runEvalIO env action = runIO . (`runReaderT` env) . (`runContT` return) . runEvalT $ action
 
 shiftT :: ((a -> Eval Val) -> Eval Val) -> Eval a
 shiftT e = EvalT . ContT $ \k ->
@@ -1090,7 +1131,7 @@ instance MonadCont EvalMonad where
     -- callCC :: ((a -> Eval b) -> Eval a) -> Eval a
     callCC f = EvalT . callCCT $ \c -> runEvalT . f $ \a -> EvalT $ c a
 
-class (MonadReader Env m, MonadCont m, MonadIO m, MonadSTM m) => MonadEval m where
+class (MonadReader Env m, MonadCont m, MonadIO m, MonadSTM m) => MonadEval m
 --     askGlobal :: m Pad
 
 {-|
@@ -1239,6 +1280,7 @@ doPair val f = do
 
 -- XXX: Refactor doHash and doArray into one -- also see Eval's [] and {}
 doHash :: Val -> (forall a. HashClass a => a -> b) -> Eval b
+doHash (PerlSV sv) f = return $ f sv
 doHash (VRef (MkRef (IHash hv))) f = return $ f hv
 doHash (VRef (MkRef (IScalar sv))) f = do
     val <- scalar_fetch sv
@@ -1271,6 +1313,7 @@ doHash val f = do
 
 -- can be factored out
 doArray :: Val -> (forall a. ArrayClass a => a -> b) -> Eval b
+doArray (PerlSV sv) f = return $ f sv
 doArray (VRef (MkRef (IArray hv))) f = return $ f hv
 doArray (VRef (MkRef (IScalar sv))) f = do
     val <- scalar_fetch sv
@@ -1318,6 +1361,7 @@ data VOpaque where
 data VObject = MkObject
     { objType   :: !VType
     , objAttrs  :: !IHash
+    , objOpaque :: !(Maybe Dynamic)
     , objId     :: !Unique
     }
     deriving (Show, Eq, Ord, Typeable)

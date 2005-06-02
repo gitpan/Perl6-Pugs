@@ -9,25 +9,26 @@ class Test::Builder::Test-0.1.1
         ?$description = '',
     )
     {
-        return Test::Builder::Test::TODO.new(
+        return ::Test::Builder::Test::TODO.new(
             description => $description, passed => $passed, reason => $reason
         ) if $todo;
 
-        return Test::Builder::Test::Skip.new(
+        return ::Test::Builder::Test::Skip.new(
             description => $description, passed =>       1, reason => $reason
         ) if $skip;
 
-        return Test::Builder::Test::Pass.new(
+        return ::Test::Builder::Test::Pass.new(
             description => $description, passed =>       1,
-		) if $passed;
+        ) if $passed;
 
-        return Test::Builder::Test::Fail.new(
+        return ::Test::Builder::Test::Fail.new(
             description => $description, passed =>       0,
         );
     }
 }
 
-role Test::Builder::Test::Base {
+role Test::Builder::Test::Base
+{
     has Bool $.passed;
     has Int  $.number;
     has Str  $.diagnostic;
@@ -69,8 +70,8 @@ role Test::Builder::Test::WithReason does Test::Builder::Test::Base
 
     method status returns Hash ( $self: )
     {
-        my $status        = $self.*WALK[:super];
-        $status{"skip"}   = 1;
+        # XXX - This wants to be $self.SUPER::status();
+        my $status        = $self.Test::Builder::Test::Base::status();
         $status{"reason"} = $.reason;
         return $status;
     }
@@ -83,9 +84,10 @@ class Test::Builder::Test::Skip does Test::Builder::Test::WithReason
         return "not ok $.number #skip $.reason";
     }
 
-    method status returns Hash ($self: ) 
+    method status returns Hash ( $self: ) 
     {
-        my $status      = $self.*WALK[:super];
+        # XXX - This wants to be $self.SUPER::status();
+        my $status      = $self.Test::Builder::Test::WithReason::status();
         $status{"skip"} = 1;
         return $status;
     }
@@ -103,7 +105,8 @@ class Test::Builder::Test::TODO does Test::Builder::Test::WithReason
 
     method status returns Hash ( $self: ) 
     {
-        my $status               = $self.*WALK[:super];
+        # XXX - This wants to be $self.SUPER::status();
+        my $status               = $self.Test::Builder::Test::WithReason::status();
         $status{"TODO"}          = 1;
         $status{"passed"}        = 1;
         $status{"really_passed"} = $.passed;

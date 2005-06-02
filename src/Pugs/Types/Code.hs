@@ -1,6 +1,6 @@
 
 class (Typeable a) => CodeClass a where
-    code_iType :: a -> Type
+    code_iType    :: a -> Type
     code_iType = const $ mkType "Code"
     code_fetch    :: a -> Eval VCode
     code_fetch a = code_assuming a [] []
@@ -25,11 +25,12 @@ instance CodeClass ICode where
 instance CodeClass VCode where
     -- XXX - subType should really just be a mkType itself
     code_iType c  = case subType c of
-        SubBlock    -> mkType "Block"
+        SubBlock    -> mkType "Bare"
+        SubPointy   -> mkType "Block"
         SubMethod   -> mkType "Method"
         _           -> mkType "Sub"
     code_fetch    = return
-    code_store _ _= retConstError undef
+    code_store c _= retConstError $ VStr $ show c
     code_assuming c [] [] = return c
     code_assuming _ _ _   = error "assuming"
     code_apply    = error "apply"

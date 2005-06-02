@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 13;
+plan 12;
 
 use Test::Builder::Test;
 
@@ -40,23 +40,13 @@ is( $todo_test.diagnostic(), 'some test diagnostic',
 is( $todo_test.reason(), 'reason for TODO-ing',
     'reason() should return the test reason' );
 
-my %status;
-lives_ok { %status = $todo_diag.status() }, 'status() parses',
-    :todo<feature>;
+my %status = $todo_diag.status();
 
-is( +( keys %status ),      5, 'status() should return a hash',
-    :todo<feature> );
-
-is( %status<passed>,        1, '... with a passed key set to true',
-    :todo<feature> );
-
-is( %status<TODO>,          1, '... a TODO key set to true',
-    :todo<feature> );
+is( +( keys %status ),      5, 'status() should return a hash'     );
+is( %status<passed>,        1, '... with a passed key set to true' );
+is( %status<TODO>,          1, '... a TODO key set to true'        );
 
 is( %status<really_passed>, 0,
-    '... the really_passed key set to the passed value',
-    :todo<feature> );
-
+    '... the really_passed key set to the passed value' );
 is( %status<description>, 'first test description',
-    '... and the correct test description',
-    :todo<feature> );
+    '... and the correct test description'              );

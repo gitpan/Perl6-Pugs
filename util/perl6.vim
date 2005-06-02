@@ -1,8 +1,8 @@
 " Vim syntax file
 " Language: 	Perl 6
 " Maintainer:	Luke Palmer <fibonaci@babylonia.flatirons.org>
-" Last Change:	2002 Jun 12
-"
+" Last Change:  ???? ?? ??	
+" 
 " This is a big undertaking. Perl 6 is the sort of language that only Perl
 " can parse. But I'll do my best to get vim to.
 
@@ -12,50 +12,61 @@ if exists("b:current_syntax")
 endif
 
 " Billions of keywords
-syn keyword p6Attn		ACHTUNG ATTN ATTENTION FIXME NB todo Todo TODO WTF XXX contained
-syn keyword p6Module		module class use require
-syn keyword p6KeyDecl		coro sub submethod method is but multi returns
-syn keyword p6KeyScopeDecl	let local my our state temp 
-syn keyword p6KeyFlow		else elsif for foreach loop while until if unless when
-syn keyword p6KeyFlow		given next last redo or and err xor return not
-syn keyword p6KeyException	die fail try CATCH
-syn keyword p6KeyIO			print open read write readline say seek
-syn keyword p6KeyProperty	constant prec key value kv irs ofs ors pos int export
-syn keyword p6KeyProperty	float str true false rw
-syn keyword p6KeyProperty	Int Str Num Hash Array Code Rule Class NumRange
-syn keyword p6KeyProperty	StrRange Role Bool Rat
-syn keyword p6KeyFunc		grep map sort join split reduce reverse truncate zip
-syn keyword p6KeyFunc		keys values pairs defined delete exists  
-syn keyword p6KeyFunc		gather take any pick all none
-syn keyword p6KeyFunc		pop push shift splice unshift  
-syn keyword p6KeyFunc	    abs exp log log10 rand sign sqrt  	
-syn keyword p6KeySpecial	operator undef
-syn keyword p6KeyCompare	eq ne lt le gt ge
+syn keyword p6Attn          ACHTUNG ATTN ATTENTION FIXME NB contained 
+syn keyword p6Attn          todo Todo TODO WTF XXX contained
+syn keyword p6Module        module class role use require package
+syn keyword p6KeyDecl       coro sub submethod method is but does trusts multi returns
+syn keyword p6KeyScopeDecl  let my our state temp has
+syn keyword p6KeyFlow       if else elsif unless  
+syn keyword p6KeyFlow       for foreach loop while until when next last redo
+syn keyword p6KeyFlow       given not or and err xor return 
+syn keyword p6ClosureTrait  BEGIN CHECK INIT FIRST ENTER LEAVE KEEP UNDO NEXT LAST
+syn keyword p6ClosureTrait  PRE POST END
+syn keyword p6KeyException  die fail try CATCH CONTROL
+syn keyword p6KeyIO         print open read write readline say seek
+syn keyword p6KeyProperty   constant prec key value kv irs ofs ors pos export
+syn keyword p6KeyProperty   float int str true false rw
+syn keyword p6KeyProperty   Int Str Num Hash Array Code Rule Class NumRange
+syn keyword p6KeyProperty   StrRange Role Bool Rat
+syn match   p6KeyProperty   "::\w\+"
+syn keyword p6KeyFunc       grep map sort join split reduce reverse truncate zip
+syn keyword p6KeyFunc       keys values pairs defined delete exists  
+syn keyword p6KeyFunc       gather take any pick all none
+syn keyword p6KeyFunc       pop push shift splice unshift  
+syn keyword p6KeyFunc       abs exp log log10 rand sign sqrt      
+syn keyword p6KeySpecial    operator undef
+syn keyword p6KeyCompare    eq ne lt le gt ge == != < <= > >=
 
 syn match p6KeyIO "-[rwxoRWXOezsfdlpSbctugkTBMAC]"
 
 " Comments
-syn match p6Comment "#.*" contains=p6Attn
+syn match  p6Comment "#.*" contains=p6Attn
+syn region p6CommentMline start="^=begin [a-zA-Z]\+$" end="^=end [a-zA-Z]\+$" contains=p6Attn 
+syn region p6CommentPara start="^=for [a-zA-Z]\+$" end="^$" contains=p6Attn
+syn match  p6Shebang "^#!.*"
 
 " POD
-syn region p6POD start="^=[a-z]\+$" end="^=cut" contains=p6Attn 
-syn region p6MultComment start="^=begin [A-Z]\+$" end="^=end [A-Z]\+$" contains=p6Attn 
-syn region p6ParaComment start="^=for [A-Z]\+$" end="^$" contains=p6Attn
+syn region p6POD start="^=\w\+.\+$" end="^=cut" contains=p6Attn,p6PODVerbatim,p6PODHead,p6PODHeadKwid,p6PODSec,p6PODSecKwid
+
+syn match p6PODVerbatim  "^\s.*"      contained 
+syn match p6PODHeadKwid  "^=\{1,2\} " nextgroup=p6PODTitle contained 
+syn match p6PODHead      "^=head[12]" nextgroup=p6PODTitle contained 
+syn match p6PODTitle     ".*$"        contained 
+syn match p6PODSec       "^=head[34]" nextgroup=p6PODSecTitle contained
+syn match p6PODSecKwid   "^=\{3,4\} " nextgroup=p6PODSecTitle contained 
+syn match p6PODSecTitle  ".*$"        contained 
 
 " Variables, arrays, and hashes with ordinary \w+ names
-syn match p6VarPlain "[$@%][a-zA-Z_]\w*"
-syn match p6VarPlain "[$@%][:.][a-zA-Z_]\w*"
-syn match p6VarPlain "\$\^\w\+"
+syn match p6VarPlain     "\(::?\|[$@%][:\.*^?]\?\)[a-zA-Z_]\w*"
 syn match p6VarException "\$!"
-syn match p6VarPunct	"\$\d\+"
-
-syn match p6Invocant "./\w\+"
-syn match p6Invocant ":/\w\+"
+syn match p6VarCapt      "\$[0-9\/]"
+syn match p6VarPunct     "\$\d\+"
+syn match p6Invoke       "\(&\|[.:]/\)[a-zA-Z_]\w*"
 
 syn cluster p6Interp contains=p6VarPlain,p6InterpExpression,p6VarPunct,p6VarException,p6InterpClosure
 
-" $( ... ) construct
-syn region p6InterpExpression contained matchgroup=p6Variable start=+\$(+ skip=+\\)+ end=+)+ contains=TOP
+" { ... } construct
+syn region p6InterpExpression contained matchgroup=p6Variable start=+{+ skip=+\\}+ end=+}+ contains=TOP
 
 " FIXME: This ugly hack will show up later on. Once again, don't try to fix it.
 syn region p6ParenExpression start="\(<\s*\)\@<!(" end=")" matchgroup=p6Error end="[\]}]" transparent
@@ -64,25 +75,28 @@ syn region p6BracketExpression start="\[" end="]" matchgroup=p6Error end="[})]" 
 " Double-quoted, qq, qw, qx, `` strings
 syn region p6InterpString start=+"+ skip=+\\"+ end=+"+ contains=@p6Interp
 syn region p6InterpString start=+`+ skip=+\\`+ end=+`+ contains=@p6Interp
+syn region p6InterpString start=+«+ end=+»+ contains=@p6Interp
+syn region p6InterpString start=+<<+ end=+>>+ contains=@p6Interp
 " \w-delimited strings
-syn region p6InterpString start="q[qwx]\s\+\z([a-zA-Z0-9_]\)" skip="\\\z1" end="\z1" contains=@p6Interp
+syn region p6InterpString start="\<q[qwx]\s\+\z([a-zA-Z0-9_]\)" skip="\\\z1" end="\z1" contains=@p6Interp
 " Punctuation-delimited strings
-syn region p6InterpString start="q[qwx]\s*\z([^a-zA-Z0-9_ ]\)" skip="\\\z1" end="\z1" contains=@p6Interp
-syn region p6InterpString start="q[qwx]\s*{" skip="\\}" end="}" contains=@p6Interp
-syn region p6InterpString start="q[qwx]\s*(" skip="\\)" end=")" contains=@p6Interp
-syn region p6InterpString start="q[qwx]\s*\[" skip="\\]" end="]" contains=@p6Interp
-syn region p6InterpString start="q[qwx]\s*<" skip="\\>" end=">" contains=@p6Interp
+syn region p6InterpString start="\<q[qwx]\s*\z([^a-zA-Z0-9_ ]\)" skip="\\\z1" end="\z1" contains=@p6Interp
+syn region p6InterpString start="\<q[qwx]\s*{" skip="\\}" end="}" contains=@p6Interp
+syn region p6InterpString start="\<q[qwx]\s*(" skip="\\)" end=")" contains=@p6Interp
+syn region p6InterpString start="\<q[qwx]\s*\[" skip="\\]" end="]" contains=@p6Interp
+syn region p6InterpString start="\<q[qwx]\s*<" skip="\\>" end=">" contains=@p6Interp
 
 " Single-quoted, q, '' strings
 syn region p6LiteralString start=+'+ skip=+\\'+ end=+'+
+syn region p6LiteralString start=+<<\@!\(.*>\)\@=+ end=+>\@<!>+
 " \w-delimited strings
-syn region p6LiteralString start="q\s\+\z([a-zA-Z0-9_]\)" skip="\\\z1" end="\z1"
+syn region p6LiteralString start="\<q\s\+\z([a-zA-Z0-9_]\)" skip="\\\z1" end="\z1"
 " Punctuation-delimited strings
-syn region p6LiteralString start="q\s*\z([^a-zA-Z0-9_ ]\)" skip="\\\z1" end="\z1"
-syn region p6LiteralString start="q\s*\[" skip="\\]" end="]"
-syn region p6LiteralString start="q\s*(" skip="\\)" end=")"
-syn region p6LiteralString start="q\s*{" skip="\\}" end="}"
-syn region p6LiteralString start="q\s*<" skip="\\>" end=">"
+syn region p6LiteralString start="\<q\s*\z([^a-zA-Z0-9_ ]\)" skip="\\\z1" end="\z1"
+syn region p6LiteralString start="\<q\s*\[" skip="\\]" end="]"
+syn region p6LiteralString start="\<q\s*(" skip="\\)" end=")"
+syn region p6LiteralString start="\<q\s*{" skip="\\}" end="}"
+syn region p6LiteralString start="\<q\s*<" skip="\\>" end=">"
 
 " Numbers
 syn match  p6Number "\<\(\d*\.\d\+\|\d\+\.\d*\|\d\+\)\(e\d\+\)\{0,1}"
@@ -139,18 +153,18 @@ syn region p6SubBracket matchgroup=p6Keyword contained start="<" skip="\\>" end=
 syn region p6TransNonBracket matchgroup=p6Keyword contained start="\z(\W\)" skip="\\\z1" end="\z1"
 
 
-syn match p6RuleCall contained "<\s*!\{0,1}\s*\w\+"hs=s+1
+syn match p6RuleCall  contained "<\s*!\{0,1}\s*\w\+"hs=s+1
 syn match p6CharClass contained "<\s*!\{0,1}\s*\[\]\{0,1}[^]]*\]\s*>"
 syn match p6CharClass contained "<\s*!\{0,1}\s*-\{0,1}\(alpha\|digit\|sp\|ws\|null\)\s*>"
 syn match p6CharClass contained "\\[HhVvNnTtEeRrFfWwSs]"
 syn match p6CharClass contained "\\[xX]\(\[[0-9a-f;]\+\]\|\x\+\)"
 syn match p6CharClass contained "\\0\(\[[0-7;]\+\]\|\o\+\)"
-syn region p6CharClass contained start="\\[QqCc]\[" end="]" skip="\\]"
+syn region p6CharClass   contained start="\\[QqCc]\[" end="]" skip="\\]"
 syn match p6RegexSpecial contained "\\\@<!:\{1,3\}"
 syn match p6RegexSpecial contained "<\s*\(cut\|commit\)\s*>"
 "syn match p6RegexSpecial contained "\\\@<![+*|]"
 syn match p6RegexSpecial contained ":="
-syn region p6CharClass contained start=+<\s*!\{0,1}\s*\z(['"]\)+ skip=+\\\z1+ end=+\z1\s*>+
+syn region p6CharClass   contained start=+<\s*!\{0,1}\s*\z(['"]\)+ skip=+\\\z1+ end=+\z1\s*>+
 syn region p6TestExpr contained start="<\s*!\{0,1}\s*(" end=")\s*>" contains=TOP
 
 
@@ -159,6 +173,7 @@ syn region p6TestExpr contained start="<\s*!\{0,1}\s*(" end=")\s*>" contains=TOP
 
 syn match p6Normal "//"
 
+hi link p6Shebang       PreProc
 hi link p6Attn          Todo
 hi link p6Normal        Normal
 hi link p6Regex         String
@@ -175,6 +190,7 @@ hi link p6KeyCompare    p6Keyword
 hi link p6KeyDecl       p6Keyword
 hi link p6KeyScopeDecl  p6Keyword
 hi link p6KeyFlow       p6Keyword
+hi link p6ClosureTrait  PreProc
 hi link p6KeyException  Special
 hi link p6KeyIO         p6Keyword
 hi link p6KeyProperty   Type
@@ -185,18 +201,26 @@ hi link p6KeyType       Type
 hi link p6Pattern       p6Keyword
 hi link p6VarPlain      p6Variable
 hi link p6VarPunct      p6Variable
-hi link p6Invocant   Identifier
+hi link p6VarCapt       p6Variable
+hi link p6Invoke        Type
 hi link p6InterpString  p6String
 hi link p6LiteralString p6String
 
-hi link p6Keyword  Statement
-hi link p6Number   Number
-hi link p6Comment  Comment
-hi link p6MultComment	Comment
-hi link p6ParaComment	Special
-hi link p6POD      Comment
-hi link p6Variable Identifier
-hi link p6VarException Special
-hi link p6String   String
+hi link p6Keyword       Statement
+hi link p6Number        Number
+hi link p6Comment       Comment
+hi link p6CommentMline  Comment
+hi link p6CommentPara   Comment
+hi link p6POD           Comment 
+hi link p6PODHead       Comment
+hi link p6PODHeadKwid   Comment 
+hi link p6PODTitle      Title 
+hi link p6PODSec        Comment
+hi link p6PODSecKwid    Comment 
+hi link p6PODSecTitle   String 
+hi link p6PODVerbatim   Special
+hi link p6Variable      Identifier
+hi link p6VarException  Special
+hi link p6String        String
 
 let b:current_syntax = "perl6"

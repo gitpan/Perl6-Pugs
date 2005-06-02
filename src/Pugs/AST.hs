@@ -16,19 +16,24 @@ module Pugs.AST (
     evalExp,
     genMultiSym, genSym,
     strRangeInf, strRange, strInc, charInc,
+    mergeStmts, isEmptyParams,
+    newClass,
 
     module Pugs.AST.Internals,
     module Pugs.AST.Pos,
     module Pugs.AST.Scope,
     module Pugs.AST.SIO,
+    module Pugs.AST.Pad,
 ) where
 import Pugs.Internals
+import Pugs.Types
 import qualified Data.Map as Map
 
 import Pugs.AST.Internals
 import Pugs.AST.Pos
 import Pugs.AST.Scope
 import Pugs.AST.SIO
+import Pugs.AST.Pad
 
 {-|
 Return an infinite (lazy) Haskell list of the given string and its
@@ -110,3 +115,47 @@ genSym name ref = do
     tvar    <- liftSTM $ newTVar ref
     fresh   <- liftSTM $ newTVar True
     return $ \(MkPad map) -> MkPad $ Map.insert name [(fresh, tvar)] map
+
+-- Stmt is essentially a cons cell
+-- Stmt (Stmt ...) is illegal
+mergeStmts :: Exp -> Exp -> Exp
+mergeStmts (Stmts x1 x2) y = mergeStmts x1 (mergeStmts x2 y)
+mergeStmts Noop y@(Stmts _ _) = y
+mergeStmts (Sym scope name x) y = Sym scope name (mergeStmts x y)
+mergeStmts (Pad scope lex x) y = Pad scope lex (mergeStmts x y)
+mergeStmts x@(Pos pos (Syn syn _)) y | (syn ==) `any` words "subst match //"  =
+    mergeStmts (Pos pos (App (Var "&infix:~~") Nothing [Var "$_", x])) y
+mergeStmts x y@(Pos pos (Syn syn _)) | (syn ==) `any` words "subst match //"  =
+    mergeStmts x (Pos pos (App (Var "&infix:~~") Nothing [Var "$_", y]))
+mergeStmts (Pos pos (Syn "sub" [Val (VCode sub)])) y
+    | subType sub >= SubBlock, isEmptyParams (subParams sub) =
+    -- bare Block in statement level; annul all its parameters and run it!
+    mergeStmts (Pos pos $ App (Val $ VCode sub{ subParams = [] }) Nothing []) y
+mergeStmts x (Pos pos (Syn "sub" [Val (VCode sub)]))
+    | subType sub >= SubBlock, isEmptyParams (subParams sub) =
+    -- bare Block in statement level; annul all its parameters and run it!
+    mergeStmts x (Pos pos $ App (Val $ VCode sub{ subParams = [] }) Nothing [])
+mergeStmts x (Stmts y Noop) = mergeStmts x y
+mergeStmts x (Stmts Noop y) = mergeStmts x y
+mergeStmts x y = Stmts x y
+
+isEmptyParams :: [Param] -> Bool
+isEmptyParams [] = True
+isEmptyParams [x] | [_, '_'] <- paramName x = True
+isEmptyParams _ = False
+
+newClass :: String -> [String] -> Exp
+newClass name traits = Sym SGlobal (':':'*':name) $ Syn ":="
+    [ Var (':':'*':name)
+    , App (Var "&Any::new")
+        (Just $ Val (VType $ mkType "Class"))
+        [ App (Var "&infix:=>") Nothing
+            [ Val (VStr "traits")
+            , Val (VList $ map VStr traits)
+            ]
+        , App (Var "&infix:=>") Nothing
+            [ Val (VStr "name")
+            , Val (VStr name)
+            ]
+        ]
+    ]

@@ -1,13 +1,13 @@
 module Pugs.Prim.Eval (
     -- used by Pugs.Prim
     op1EvalHaskell,
-    opEval,
+    opEval, opEvalfile,
     opRequire,
     -- used by Pugs.Eval -- needs factored somewhere bettwen
     retEvalResult, 
 ) where
 import Pugs.AST
-import Pugs.Parser
+import Pugs.Parser.Program
 import Pugs.Embed
 import Pugs.Internals
 
@@ -28,6 +28,15 @@ opRequire dumpEnv v = do
                 str <- liftIO $ readFile pathName
                 opEval (Just dumpEnv) pathName (decodeUTF8 str)
 
+opEvalfile :: String -> Eval Val
+opEvalfile filename = do
+    ok <- liftIO $ doesFileExist filename
+    if (not ok)
+        then fail $ "Can't locate " ++ filename ++ "."
+        else do
+            contents <- liftIO $ readFile filename
+            opEval Nothing filename $ decodeUTF8 contents
+
 op1EvalHaskell :: Val -> Eval Val
 op1EvalHaskell cv = do
     str     <- fromVal cv
@@ -37,7 +46,7 @@ op1EvalHaskell cv = do
 opEval :: Maybe Bool -> String -> String -> Eval Val
 opEval flag name str = do
     env <- ask
-    let env' = runRule env id ruleProgram name str
+    let env' = parseProgram env name str
         trans | flag == Just True = (`mergeStmts` Syn "env" [])
               | otherwise         = id
     val <- resetT $ local (const env') $ do

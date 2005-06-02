@@ -34,7 +34,7 @@ I<inline> in a Perl 5 script or module.
 =head1 CAVEATS
 
 Currently, only the Perl 5 side can invoke subroutines defined from the
-Perl 6 size, but not vise versa.  This whole thing is just a proof of
+Perl 6 side, but not vise versa.  This whole thing is just a proof of
 concept -- use it at your own risk. :-)
 
 =cut
@@ -112,11 +112,11 @@ sub quote_pugs {
 
 =head1 AUTHORS
 
-Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>
+Autrijus Tang C<E<lt>autrijus@autrijus.orgE<gt>>
 
 =head1 COPYRIGHT
 
-Copyright 2005 by Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>.
+Copyright 2005 by Autrijus Tang C<E<lt>autrijus@autrijus.orgE<gt>>.
 
 This code is free software; you can redistribute it and/or modify it under
 the terms of either:

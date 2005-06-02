@@ -4,6 +4,7 @@ use v6;
 use Test;
 
 plan 8;
+force_todo 1..3, 5, 7;
 
 =pod
 
@@ -30,7 +31,7 @@ ok($foo_bar ~~ Foo::Bar, '... smartmatch our $foo_bar to the Foo::Bar class');
 
 class Bar is Foo {};
 
-ok(Bar ~~ Foo, '... smartmatch our Bar to the Foo class', :todo<feature>);
+ok(Bar ~~ Foo, '... smartmatch our Bar to the Foo class');
 
 my $bar = Bar.new();
 ok($bar ~~ Bar, '... smartmatch our $bar to the Bar class');
