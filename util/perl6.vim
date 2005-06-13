@@ -34,7 +34,7 @@ syn keyword p6KeyFunc       keys values pairs defined delete exists
 syn keyword p6KeyFunc       gather take any pick all none
 syn keyword p6KeyFunc       pop push shift splice unshift  
 syn keyword p6KeyFunc       abs exp log log10 rand sign sqrt      
-syn keyword p6KeySpecial    operator undef
+syn keyword p6KeySpecial    operator undef undefine
 syn keyword p6KeyCompare    eq ne lt le gt ge == != < <= > >=
 
 syn match p6KeyIO "-[rwxoRWXOezsfdlpSbctugkTBMAC]"
@@ -92,11 +92,11 @@ syn region p6LiteralString start=+<<\@!\(.*>\)\@=+ end=+>\@<!>+
 " \w-delimited strings
 syn region p6LiteralString start="\<q\s\+\z([a-zA-Z0-9_]\)" skip="\\\z1" end="\z1"
 " Punctuation-delimited strings
-syn region p6LiteralString start="\<q\s*\z([^a-zA-Z0-9_ ]\)" skip="\\\z1" end="\z1"
-syn region p6LiteralString start="\<q\s*\[" skip="\\]" end="]"
-syn region p6LiteralString start="\<q\s*(" skip="\\)" end=")"
-syn region p6LiteralString start="\<q\s*{" skip="\\}" end="}"
-syn region p6LiteralString start="\<q\s*<" skip="\\>" end=">"
+syn region p6LiteralString start="\<q\(\s*:[012]\)*\s*\z([^a-zA-Z0-9_ ]\)" skip="\\\z1" end="\z1"
+syn region p6LiteralString start="\<q\(\s*:[012]\)*\s*\[" skip="\\]" end="]"
+syn region p6LiteralString start="\<q\(\s*:[012]\)*\s*(" skip="\\)" end=")"
+syn region p6LiteralString start="\<q\(\s*:[012]\)*\s*{" skip="\\}" end="}"
+syn region p6LiteralString start="\<q\(\s*:[012]\)*\s*<" skip="\\>" end=">"
 
 " Numbers
 syn match  p6Number "\<\(\d*\.\d\+\|\d\+\.\d*\|\d\+\)\(e\d\+\)\{0,1}"

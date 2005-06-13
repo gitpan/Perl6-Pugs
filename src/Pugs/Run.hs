@@ -149,14 +149,25 @@ prepareEnv name args = do
         ] ++ classes
     unless safeMode $ do
         initPerl5 "" (Just . VControl $ ControlEnv env{ envDebug = Nothing })
-        initPrelude env
         return ()
+    initPrelude env
     return env
     where
     hideInSafemode x = if safeMode then MkRef $ constScalar undef else x
 
+{-# NOINLINE initPrelude #-}
 initPrelude :: Env -> IO Val
-initPrelude env = runEvalIO env{ envDebug = Nothing} $ opEval Nothing "<prelude>" preludeStr
+initPrelude env = do
+    if bypass then return VUndef else
+        runEvalIO env{envDebug = Nothing} $ opEval style "<prelude>" preludeStr
+    where
+    style = MkEvalStyle{evalResult=EvalResultModule
+                       ,evalError =EvalErrorFatal}
+    bypass = case (unsafePerformIO $ getEnv "PUGS_BYPASS_PRELUDE") of
+        Nothing     -> False
+        Just ""     -> False
+        Just "0"    -> False
+        _           -> True
 
 initClassObjects :: [Type] -> ClassTree -> IO [STM (Pad -> Pad)]
 initClassObjects parent (Node typ children) = do
@@ -170,21 +181,23 @@ initClassObjects parent (Node typ children) = do
     return (sym:concat rest)
 
 {-|
-Combine @%*ENV\<PERL6LIB\>@, -I, 'Pugs.Config.config' values and \".\" into
-the @\@*INC@ list for 'Main.printConfigInfo'
+Combine @%*ENV\<PERL6LIB\>@, -I, 'Pugs.Config.config' values and \".\" into the
+@\@*INC@ list for 'Main.printConfigInfo'. If @%*ENV\<PERL6LIB\>@ is not set,
+@%*ENV\<PERLLIB\>@ is used instead.
 -}
 getLibs :: IO [String]
 getLibs = do
     args    <- getArgs
     p6lib   <- (getEnv "PERL6LIB") >>= (return . (fromMaybe ""))
-    return $ filter (not . null) (libs p6lib $ canonicalArgs args)
+    plib    <- (getEnv "PERLLIB")  >>= (return . (fromMaybe ""))
+    let lib = if (p6lib == "") then plib else p6lib
+    return $ filter (not . null) (libs lib $ canonicalArgs args)
     where
     -- broken, need real parser
     inclibs ("-I":dir:rest) = [dir] ++ inclibs(rest)
     inclibs (_:rest)        = inclibs(rest)
     inclibs ([])            = []
-
-    libs p6lib args =  (inclibs args)
+    libs p6lib args = (inclibs args)
               ++ (split (getConfig "path_sep") p6lib)
               ++ [ getConfig "archlib"
                  , getConfig "privlib"

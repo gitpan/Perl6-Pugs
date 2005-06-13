@@ -31,7 +31,8 @@ $ENV{PUGS_SAFEMODE} eq  "true" or die "Couldn't set \$ENV{PUGS_SAFEMODE}!\n";
 
 # Escape the code.
 # (Wow! My first use of quotemeta, me thinks!)
-$code = quotemeta $code;
+# $code = quotemeta $code;
+$code =~ s/([^A-Za-z_0-9\^])/\\$1/g;
 
 # Run the code.
 # We use an anonymous sub instead the more clear "my $ret = eval(...)" so we

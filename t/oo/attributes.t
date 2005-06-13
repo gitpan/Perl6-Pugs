@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 56;
+plan 70;
 force_todo 2, 11, 19, 23, 34, 38;
 
 =pod
@@ -143,9 +143,9 @@ class Foo6 {
     my $foo = Foo6.new(bar => 1, baz => 2, hidden => 3);
     ok($foo ~~ Foo6, '... our Foo6 instance was created');
         
-    is($foo.bar,        1, "getting a public rw attribute (1)");
-    is($foo.baz,        2, "getting a public rw attribute (2)");
-    is($foo.get_hidden, 3, "getting a private ro attribute (3)");
+    is($foo.bar,        1, "getting a public rw attribute (1)", :todo<bug>);
+    is($foo.baz,        2, "getting a public rw attribute (2)", :todo<bug>);
+    is($foo.get_hidden, 3, "getting a private ro attribute (3)", :todo<bug>);
 }
 
 # check that doing something in submethod BUILD works
@@ -164,9 +164,9 @@ class Foo6a {
     my $foo = Foo6a.new(bar => 1, hidden => 3);
     ok($foo ~~ Foo6a, '... our Foo6a instance was created');
         
-    is($foo.bar,        1, "getting a public rw attribute (1)");
+    is($foo.bar,        1, "getting a public rw attribute (1)", :todo<bug>);
     is($foo.baz,        5, "getting a public rw attribute (2)");
-    is($foo.get_hidden, 3, "getting a private ro attribute (3)");
+    is($foo.get_hidden, 3, "getting a private ro attribute (3)", :todo<bug>);
 }
 
 # L<A12/"Default Values">
@@ -184,26 +184,109 @@ eval_ok 'class Foo9 { has $.attr will build(42) }',
 eval_is 'Foo9.new.attr', 42, "default attribute value (3)", :todo<feature>;
 
 my $was_in_supplier = 0;
-sub fourty_two_supplier() { $was_in_supplier++; 42 }
+sub forty_two_supplier() { $was_in_supplier++; 42 }
 # XXX: Currently hard parsefail!
-#todo_eval_ok 'class Foo10 { has $.attr = { fourty_two_supplier() } }',
+#todo_eval_ok 'class Foo10 { has $.attr = { forty_two_supplier() } }',
 #  "class definition using '= {...}' worked";
 fail "hard parsefail", :todo<feature>;
 eval_is 'Foo10.new.attr', 42, "default attribute value (4)", :todo<feature>;
-is      $was_in_supplier, 1,  "fourty_two_supplier() was actually executed (1)", :todo<feature>;
+is      $was_in_supplier, 1,  "forty_two_supplier() was actually executed (1)", :todo<feature>;
 
 # The same, but using 'is build {...}'
 # XXX: Currently hard parsefail!
-#todo_eval_ok 'class Foo11 { has $.attr is build { fourty_two_supplier() } }',
+#todo_eval_ok 'class Foo11 { has $.attr is build { forty_two_supplier() } }',
 #  "class definition using 'is build {...}' worked";
 fail "hard parsefail", :todo<feature>;
 eval_is 'Foo11.new.attr', 42, "default attribute value (5)", :todo<feature>;
-is      $was_in_supplier, 2,  "fourty_two_supplier() was actually executed (2)", :todo<feature>;
+is      $was_in_supplier, 2,  "forty_two_supplier() was actually executed (2)", :todo<feature>;
 
 # The same, but using 'will build {...}'
 # XXX: Currently hard parsefail!
-#todo_eval_ok 'class Foo12 { has $.attr will build { fourty_two_supplier() } }',
+#todo_eval_ok 'class Foo12 { has $.attr will build { forty_two_supplier() } }',
 #  "class definition using 'will build {...}' worked";
 fail "hard parsefail", :todo<feature>;
 eval_is 'Foo11.new.attr', 42, "default attribute value (6)", :todo<feature>;
-is      $was_in_supplier, 3,  "fourty_two_supplier() was actually executed (3)", :todo<feature>;
+is      $was_in_supplier, 3,  "forty_two_supplier() was actually executed (3)", :todo<feature>;
+
+# check that doing something in submethod BUILD works
+class Foo7 {
+  has $.bar;
+  has $.baz;
+
+  submethod BUILD (?$.bar = 5, ?$baz = 10 ) {
+    $.baz = 2 * $baz;
+  }
+}
+
+my $foo7 = Foo7.new();
+is( $foo7.bar, 5,
+    'optional attribute should take default value without passed-in value' );
+is( $foo7.baz, 20,
+    '... optional non-attribute should too' );
+$foo7    = Foo7.new( :bar(4), :baz(5) );
+is( $foo7.bar, 4,
+    'optional attribute should take passed-in value over default', :todo<bug> );
+is( $foo7.baz, 10,
+    '... optional non-attribute should too' );
+
+
+# check that args are passed to BUILD
+class Foo8 {
+  has $.a;
+  has $.b;
+  
+  submethod BUILD(+$foo, +$bar) {
+    $.a = $foo;
+    $.b = $bar;
+  }
+}
+
+{
+    my $foo = Foo8.new(foo => 'c', bar => 'd');
+    ok($foo.isa(Foo8), '... our Foo8 instance was created');
+        
+    is($foo.a, 'c', 'BUILD received $foo');
+    is($foo.b, 'd', 'BUILD received $bar');
+}
+
+# check mixture of positional/named args to BUILD
+
+class Foo9 {
+  has $.a;
+  has $.b;
+  
+  submethod BUILD($foo, +$bar) {
+    $.a = $foo;
+    $.b = $bar;
+  }
+}
+
+{
+    my $foo = Foo9.new('pos', bar => 'd');
+    ok($foo.isa(Foo9), '... our Foo9 instance was created');
+        
+    is($foo.a, 'pos', "BUILD received 'pos'", :todo<feature>);
+    is($foo.b, 'd',   'BUILD received $bar');
+}
+
+# check $self is passed to BUILD
+class Foo10 {
+  has $.a;
+  has $.b;
+  has $.c;
+  
+  submethod BUILD(Class $self: +$foo, +$bar) {
+    $.a = $foo;
+    $.b = $bar;
+    $.c = 'y' if $self.isa(Foo10);
+  }
+}
+
+{
+    my $foo = Foo10.new(foo => 'c', bar => 'd');
+    ok($foo.isa(Foo10), '... our Foo10 instance was created');
+    
+    is($foo.a, 'c', 'BUILD received $foo');
+    is($foo.b, 'd', 'BUILD received $bar');
+    is($foo.c, 'y', 'BUILD received $self');
+}

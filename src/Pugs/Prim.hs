@@ -43,6 +43,7 @@ import Pugs.Prim.Numeric
 import Pugs.Prim.Lifts
 import Pugs.Prim.Eval
 import Pugs.Prim.Code
+import Pugs.Prim.Param
 
 -- |Implementation of 0-ary and variadic primitive operators and functions
 -- (including list ops).
@@ -130,7 +131,8 @@ op1 "capitalize" = op1Cast $ VStr . (mapEachWord capitalizeWord)
           where (word,rest) = break isSpace str
     capitalizeWord []     = []
     capitalizeWord (c:cs) = toUpper c:(map toLower cs)
-op1 "undef" = \x -> do
+op1 "undef" = const $ return undef
+op1 "undefine" = \x -> do
     when (defined x) $ do
         ref <- fromVal x
         clearRef ref
@@ -245,7 +247,9 @@ op1 "use" = opRequire True
 op1 "require" = opRequire False
 op1 "eval" = \v -> do
     str <- fromVal v
-    opEval Nothing "<eval>" str
+    opEval quiet "<eval>" str
+    where quiet = MkEvalStyle{evalResult=EvalResultLastValue
+                             ,evalError=EvalErrorUndef}
 op1 "evalfile" = \v -> do
     filename <- fromVal v
     opEvalfile filename
@@ -261,7 +265,9 @@ op1 "eval_yaml" = evalYaml
 op1 "try" = \v -> do
     sub <- fromVal v
     val <- resetT $ evalExp (App (Val $ VCode sub) Nothing [])
-    retEvalResult False val
+    retEvalResult quiet val
+    where quiet = MkEvalStyle{evalResult=EvalResultLastValue
+                             ,evalError=EvalErrorUndef}
 -- Tentative implementation of nothingsmuch's lazy proposal.
 op1 "lazy" = \v -> do
     sub <- fromVal v
@@ -370,19 +376,6 @@ op1 "slurp" = \v -> do
     slurpScalar file = tryIO VUndef $ do
         content <- readFile file
         return $ VStr content
-op1 "open" = \v -> do
-    str <- fromVal v
-    let (mode, filename) = span (`elem` "+<> ") str
-    tryIO undef $ do
-        fh <- openFile filename (modeOf $ takeWhile (not . isSpace) mode)
-        return $ VHandle fh
-    where
-    modeOf ""   = ReadMode
-    modeOf "<"  = ReadMode
-    modeOf ">"  = WriteMode
-    modeOf ">>" = AppendMode
-    modeOf "+>" = ReadWriteMode
-    modeOf m    = error $ "unknown mode: " ++ m
 op1 "opendir" = \v -> do
     str <- fromVal v
     rv  <- tryIO Nothing . fmap Just $ openDirStream str
@@ -538,15 +531,18 @@ op1 "gather" = \v -> do
 op1 "Thread::yield" = const $ do
     ok <- tryIO False $ do { yield ; return True }
     return $ VBool ok
-op1 "BUILDALL" = op1WalkAll id "BUILD"
-op1 "DESTROYALL" = op1WalkAll reverse "DESTROY"
+op1 "DESTROYALL" = op1WalkAll reverse "DESTROY" $
+    (VRef . hashRef) (Map.empty :: VHash)
 -- [,] is a noop -- It simply returns the input list
 op1 "prefix:[,]" = return
 op1 "Code::assoc" = op1CodeAssoc
 op1 "Code::name"  = op1CodeName
 op1 "Code::arity" = op1CodeArity
 op1 "Code::body"  = op1CodeBody
+op1 "Code::pos"   = op1CodePos
 op1 other   = \_ -> fail ("Unimplemented unaryOp: " ++ other)
+
+
 
 returnList :: [Val] -> Eval Val
 returnList vals = ifListContext
@@ -563,13 +559,16 @@ pkgParents pkg = do
     pkgs    <- mapM pkgParents attrs
     return $ nub (pkg:concat pkgs)
 
-op1WalkAll :: ([VStr] -> [VStr]) -> VStr -> Val -> Eval Val
-op1WalkAll f meth v = do
+op1WalkAll :: ([VStr] -> [VStr]) -> VStr -> Val -> Val -> Eval Val
+op1WalkAll f meth v hashval = do
     pkgs    <- pkgParents =<< fmap showType (evalValType v)
+    named   <- join $ doHash hashval hash_fetch
     forM_ (f pkgs) $ \pkg -> do
         maybeM (fmap (findSym $ ('&':pkg) ++ "::" ++ meth) askGlobal) $ \tvar -> do
             ref <- liftSTM $ readTVar tvar
-            enterEvalContext CxtVoid (App (Val $ VRef ref) (Just $ Val v) [])
+            enterEvalContext CxtVoid (App (Val $ VRef ref) (Just $ Val v)
+                [ App (Var "&infix:=>") Nothing [Val (VStr key), Val val]
+                | (key, val) <- Map.assocs named ])
     return undef
 
 op1Return :: Eval Val -> Eval Val
@@ -578,6 +577,9 @@ op1Return action = do
     if depth == 0 then fail "cannot return() outside a subroutine" else do
     sub   <- fromVal =<< readVar "&?SUB"
     case subCont sub of
+        {- shiftT :: ((a -> Eval Val) -> Eval Val) -> Eval a -}
+        {- const :: a -> b -> a -}
+        {- FIXME: This should involve shiftT somehow, I think, but I'm not clear how. -}
         Nothing -> action
         _       -> fail $ "cannot return() from a " ++ pretty (subType sub)
 
@@ -798,6 +800,10 @@ op2 "unshift" = op2Array array_unshift
 op2 "push" = op2Array array_push
 op2 "split" = op2Split
 op2 "Scalar::split" = flip op2Split
+op2 "Scalar::as" = \x y -> do
+    str <- fromVal x :: Eval VStr
+    fmt <- fromVal y
+    return $ VStr (printf fmt str)
 op2 "connect" = \x y -> do
     host <- fromVal x
     port <- fromVal y
@@ -832,6 +838,7 @@ op2 "sprintf" = \x y -> do
         [x]         -> printf str x
         [x, y]      -> printf str x y
         [x, y, z]   -> printf str x y z
+        [x, y, z, w]-> printf str x y z w
         _           -> printf str
 op2 "exec" = \x y -> do
     prog  <- fromVal x
@@ -867,6 +874,7 @@ op2 "sort" = \x y -> do
     op1 "sort" . VList $ xs ++ ys
 op2 "IO::say" = op2Print hPutStrLn
 op2 "IO::print" = op2Print hPutStr
+op2 "BUILDALL" = op1WalkAll id "BUILD"
 op2 other = \_ _ -> fail ("Unimplemented binaryOp: " ++ other)
 
 op2Print :: (Handle -> String -> IO ()) -> Val -> Val -> Eval Val
@@ -898,6 +906,16 @@ op2Split x y = do
 
 -- |Implementation of 3-arity primitive operators and functions
 op3 :: String -> Val -> Val -> Val -> Eval Val
+op3 "Pugs::Internals::caller" = \x y z -> do
+    --kind <- fromVal =<< op1 "ref" x
+    kind <- case x of
+        VStr str -> return $ mkType str
+        _        -> fromVal x
+    skip <- fromVal y
+    when (skip < 0) $ do
+        liftIO $ fail "Pugs::Internals::caller called with negative skip"
+    label <- fromVal z
+    op3Caller kind skip label
 op3 "index" = \x y z -> do
     str <- fromVal x
     sub <- fromVal y
@@ -942,7 +960,7 @@ op3 "Any::new" = \t n _ -> do
             , objOpaque = Nothing
             }
     -- Now start calling BUILD for each of parent classes (if defined)
-    op1 "BUILDALL" obj
+    op2 "BUILDALL" obj $ (VRef . hashRef) named
     liftIO $ addFinalizer obj (objectFinalizer env obj)
     return obj
 op3 other = \_ _ _ -> fail ("Unimplemented 3-ary op: " ++ other)
@@ -957,11 +975,14 @@ op4 "substr" = \x y z w -> do
     let len | defined z = lenP
             | otherwise = length str
         (pre, result, post) = doSubstr str pos len
-    when (defined w && result /= VUndef) $ do
+    let change = \new -> do
         var <- fromVal x
-        rep <- fromVal w
+        rep <- fromVal new
         writeRef var (VStr $ concat [pre, rep, post])
-    return result
+    -- If the replacement is given in w, change the str.
+    when (defined w && result /= VUndef) $ change w
+    -- Return a proxy which will modify the str if assigned to.
+    return $ VRef . MkRef $ proxyScalar (return result) change
     where
     doSubstr :: VStr -> Int -> Int -> (VStr, Val, VStr)
     doSubstr str pos len
@@ -982,56 +1003,6 @@ op4 "splice" = \x y z w -> do
         (return $ last (undef:vals'))
 
 op4 other = \_ _ _ _ -> fail ("Unimplemented 4-ary op: " ++ other)
-
-op1HyperPrefix :: VCode -> Val -> Eval Val
-op1HyperPrefix sub (VRef ref) = do
-    x <- readRef ref
-    op1HyperPrefix sub x
-op1HyperPrefix sub x
-    | VList x' <- x
-    = fmap VList $ hyperList x'
-    | otherwise
-    = fail "Hyper OP only works on lists"
-    where
-    doHyper x
-        | VRef x' <- x
-        = doHyper =<< readRef x'
-        | otherwise
-        = enterEvalContext cxtItemAny $ App (Val $ VCode sub) Nothing [Val x]
-    hyperList []     = return []
-    hyperList (x:xs) = do
-        val  <- doHyper x
-        rest <- hyperList xs
-        return (val:rest)
-
-op1HyperPostfix :: VCode -> Val -> Eval Val
-op1HyperPostfix = op1HyperPrefix
-
-op2Hyper :: VCode -> Val -> Val -> Eval Val
-op2Hyper sub (VRef ref) y = do
-    x <- readRef ref
-    op2Hyper sub x y
-op2Hyper sub x (VRef ref) = do
-    y <- readRef ref
-    op2Hyper sub x y
-op2Hyper sub x y
-    | VList x' <- x, VList y' <- y
-    = fmap VList $ hyperLists x' y'
-    | VList x' <- x
-    = fmap VList $ mapM ((flip doHyper) y) x'
-    | VList y' <- y
-    = fmap VList $ mapM (doHyper x) y'
-    | otherwise
-    = fail "Hyper OP only works on lists"
-    where
-    doHyper x y = enterEvalContext cxtItemAny $ App (Val $ VCode sub) Nothing [Val x, Val y]
-    hyperLists [] [] = return []
-    hyperLists xs [] = return xs
-    hyperLists [] ys = return ys
-    hyperLists (x:xs) (y:ys) = do
-        val  <- doHyper x y
-        rest <- hyperLists xs ys
-        return (val:rest)
 
 op1Range :: Val -> Val
 op1Range (VStr s)    = VList $ map VStr $ strRangeInf s
@@ -1097,6 +1068,48 @@ op2Ord f x y = do
         LT -> -1
         EQ -> 0
         GT -> 1
+
+op3Caller :: Type -> Int -> Val -> Eval Val
+--op3Caller kind skip label = do
+op3Caller kind skip _ = do                                 -- figure out label
+    chain <- callChain =<< ask
+    formatFrame $ filter labelFilter $ drop skip $ filter kindFilter chain
+    where
+    formatFrame :: [(Env, VCode)] -> Eval Val
+    formatFrame [] = retEmpty
+    formatFrame l  =
+        let (env,sub)  = head l in
+        returnList
+            [ VStr $ envPackage env                        -- .package
+            , VStr $ posName $ envPos env                  -- .file
+            , VInt $ toInteger $ posBeginLine $ envPos env -- .line
+            , VStr $ subName sub                           -- .subname
+            , VStr $ show $ subType sub                    -- .subtype
+            , VCode $ sub                                  -- .sub
+            -- TODO: add more things as they are specced.
+            ]
+    kindFilter :: (Env, VCode) -> Bool
+    kindFilter (_, sub) =
+        case (kind, subType sub) of
+            (MkType "Any",    _)          -> True  -- I hope this is optimized
+            (MkType "Method", SubMethod)  -> True
+            (MkType "Bare",   SubBlock)   -> True
+            (MkType "Sub",    SubRoutine) -> True
+            (MkType "Pointy", SubPointy)  -> True  -- XXX: specme
+            (_,               _)          -> False
+    labelFilter _ = True                           -- TODO: figure out how
+    callChain :: Env -> Eval [(Env, VCode)]
+    callChain cur = 
+        case envCaller cur of
+            Just caller -> do
+                val <- local (const caller) (readVar "&?SUB")
+                if (val == undef) then return [] else do
+                --if (val == undef) then do fail "&?SUB not found for caller" else do
+                sub <- fromVal val
+                rest <- callChain caller
+                return ((caller, sub) : rest)
+            _           -> return []
+
 
 -- |Returns a transaction to install a primitive operator using
 -- 'Pugs.AST.genMultiSym'.
@@ -1165,36 +1178,6 @@ primDecl str = primOp sym assoc params ret (safe == "safe")
     prms'' = foldr foldParam [] prms'
     params = map (\p -> p{ isWritable = isLValue p }) prms''
 
-doFoldParam :: String -> String -> [Param] -> [Param]
-doFoldParam cxt [] []       = [(buildParam cxt "" "$?1" (Val VUndef)) { isLValue = False }]
-doFoldParam cxt [] (p:ps)   = ((buildParam cxt "" (strInc $ paramName p) (Val VUndef)) { isLValue = False }:p:ps)
-doFoldParam cxt (s:name) ps = ((buildParam cxt [s] name (Val VUndef)) { isLValue = False } : ps)
-
-foldParam :: String -> Params -> Params
-foldParam "Named" = \ps -> (
-    (buildParam "Hash" "*" "@?0" (Val VUndef)):
-    (buildParam "Hash" "*" "%?0" (Val VUndef)):ps)
-foldParam "List"    = doFoldParam "List" "*@?1"
-foldParam ('r':'w':'!':"List") = \ps -> ((buildParam "List" "" "@?0" (Val VUndef)) { isLValue = True }:ps)
-foldParam ('r':'w':'!':str) = \ps -> ((buildParam str "" "$?1" (Val VUndef)) { isLValue = True }:ps)
-foldParam ""        = id
-foldParam ('?':str)
-    | ('r':'w':'!':typ) <- str
-    = \ps -> ((buildParam typ "?" "$?1" (Val VUndef)) { isLValue = True }:ps)
-    | (('r':'w':'!':typ), "=$_") <- break (== '=') str
-    = \ps -> ((buildParam typ "?" "$?1" (Var "$_")) { isLValue = True }:ps)
-    | (typ, "=$_") <- break (== '=') str
-    = \ps -> ((buildParam typ "?" "$?1" (Var "$_")) { isLValue = False }:ps)
-    | (typ, ('=':def)) <- break (== '=') str
-    = let readVal "Num" = Val . VNum . read
-          readVal "Int" = Val . VInt . read
-          readVal "Str" = Val . VStr . read
-          readVal x     = error $ "Unknown type: " ++ x
-      in \ps -> ((buildParam typ "?" "$?1" (readVal typ def)) { isLValue = False }:ps)
-    | otherwise
-    = \ps -> (buildParam str "?" "$?1" (Val VUndef):ps)
-foldParam ('~':str) = \ps -> (((buildParam str "" "$?1" (Val VUndef)) { isLValue = False }) { isLazy = True }:ps)
-foldParam x         = doFoldParam x []
 
 -- op1 "perl"
 prettyVal :: Int -> Val -> Eval VStr
@@ -1281,7 +1264,8 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Ref       spre    \\      safe   (rw!Any)\
 \\n   List      post    ...     safe   (Str)\
 \\n   List      post    ...     safe   (Scalar)\
-\\n   Any       pre     undef   safe   (?rw!Any)\
+\\n   Any       pre     undef     safe   ()\
+\\n   Any       pre     undefine  safe   (?rw!Any)\
 \\n   Str       pre     chop    safe   (?rw!Str=$_)\
 \\n   Str       pre     chomp   safe   (?rw!Str=$_)\
 \\n   Any       right   =       safe   (rw!Any, Any)\
@@ -1381,7 +1365,6 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     die     safe   (List)\
 \\n   Bool      pre     warn    safe   (List)\
 \\n   Bool      pre     fail_   safe   (List)\
-\\n   IO        pre     open    unsafe (Str)\
 \\n   Socket    pre     listen  unsafe (Int)\
 \\n   Socket    pre     connect unsafe (Str, Int)\
 \\n   Any       pre     accept  unsafe (Any)\
@@ -1519,6 +1502,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     Pugs::Internals::runInteractiveCommand  unsafe (Str)\
 \\n   Bool      pre     Pugs::Internals::hSetBinaryMode         unsafe (IO, Str)\
 \\n   IO        pre     Pugs::Internals::openFile               unsafe (Str, Str)\
+\\n   List      pre     Pugs::Internals::caller                 safe (Any, Int, Str)\
 \\n   Bool      pre     bool::true  safe   ()\
 \\n   Bool      pre     bool::false safe   ()\
 \\n   List      spre    prefix:[,]  safe   (List)\
@@ -1526,6 +1510,8 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Int       pre     Code::arity   safe   (Code:)\
 \\n   Str       pre     Code::assoc   safe   (Code:)\
 \\n   Code::Exp pre     Code::body    safe   (Code:)\
+\\n   Str       pre     Code::pos     safe   (Code:)\
+\\n   Str       pre     Scalar::as    safe   (Scalar: Str)\
 \\n   IO::Dir   pre     opendir    unsafe (Str)\
 \\n   Str       pre     IO::Dir::readdir    unsafe (IO::Dir)\
 \\n   List      pre     IO::Dir::readdir    unsafe (IO::Dir)\

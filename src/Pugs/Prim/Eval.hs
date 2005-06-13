@@ -3,6 +3,7 @@ module Pugs.Prim.Eval (
     op1EvalHaskell,
     opEval, opEvalfile,
     opRequire,
+    EvalError(..), EvalResult(..), EvalStyle(..),
     -- used by Pugs.Eval -- needs factored somewhere bettwen
     retEvalResult, 
 ) where
@@ -10,6 +11,19 @@ import Pugs.AST
 import Pugs.Parser.Program
 import Pugs.Embed
 import Pugs.Internals
+import Pugs.Pretty
+
+data EvalError = EvalErrorFatal
+               | EvalErrorUndef
+               deriving Eq
+data EvalResult = EvalResultLastValue
+                | EvalResultModule
+                | EvalResultEnv
+                deriving Eq
+data EvalStyle = MkEvalStyle
+               { evalError  :: EvalError
+               , evalResult :: EvalResult
+               }
 
 opRequire :: Bool -> Val -> Eval Val
 opRequire dumpEnv v = do
@@ -17,7 +31,11 @@ opRequire dumpEnv v = do
     incs    <- fromVal =<< readVar "@*INC"
     requireInc incs file (errMsg file incs)
     where
-    errMsg file incs = "Can't locate " ++ file ++ " in @INC (@INC contains: " ++ unwords incs ++ ")."
+    style = MkEvalStyle
+        { evalError  = EvalErrorFatal
+        , evalResult = (if dumpEnv == True then EvalResultEnv
+                                           else EvalResultLastValue)}
+    errMsg file incs = "Can't locate " ++ file ++ " in @*INC (@*INC contains: " ++ unwords incs ++ ")."
     requireInc [] _ msg = fail msg
     requireInc (p:ps) file msg = do
         let pathName = p ++ "/" ++ file
@@ -26,7 +44,7 @@ opRequire dumpEnv v = do
             then requireInc ps file msg
             else do
                 str <- liftIO $ readFile pathName
-                opEval (Just dumpEnv) pathName (decodeUTF8 str)
+                opEval style pathName (decodeUTF8 str)
 
 opEvalfile :: String -> Eval Val
 opEvalfile filename = do
@@ -35,32 +53,41 @@ opEvalfile filename = do
         then fail $ "Can't locate " ++ filename ++ "."
         else do
             contents <- liftIO $ readFile filename
-            opEval Nothing filename $ decodeUTF8 contents
+            opEval style filename $ decodeUTF8 contents
+    where
+    style = MkEvalStyle{ evalError=EvalErrorUndef
+                       , evalResult=EvalResultLastValue}
 
 op1EvalHaskell :: Val -> Eval Val
 op1EvalHaskell cv = do
     str     <- fromVal cv
     val     <- resetT $ evalHaskell str
-    retEvalResult False val
+    retEvalResult style val
+    where
+    style = MkEvalStyle{ evalError=EvalErrorUndef
+                       , evalResult=EvalResultLastValue}
 
-opEval :: Maybe Bool -> String -> String -> Eval Val
-opEval flag name str = do
+opEval :: EvalStyle -> FilePath -> String -> Eval Val
+opEval style path str = do
     env <- ask
-    let env' = parseProgram env name str
-        trans | flag == Just True = (`mergeStmts` Syn "env" [])
-              | otherwise         = id
+    let env' = parseProgram env path str
+        trans = case evalResult style of
+            EvalResultEnv -> (`mergeStmts` Syn "env" [])
+            _             -> id
     val <- resetT $ local (const env') $ do
         evl <- asks envEval
         evl (trans $ envBody env')
-    retEvalResult (maybe False id flag) val
+    retEvalResult style val
 
-retEvalResult :: Bool -> Val -> Eval Val
-retEvalResult external val = do
+retEvalResult :: EvalStyle -> Val -> Eval Val
+retEvalResult style val = do
     glob <- askGlobal
     errSV <- findSymRef "$!" glob
     case val of
-        VError str _ | not external  -> do
+        err@(VError str _) -> do
             writeRef errSV (VStr str)
+            when (evalError style == EvalErrorFatal) $ do
+                liftIO $ fail $ pretty err
             retEmpty
         _ -> do
             writeRef errSV VUndef

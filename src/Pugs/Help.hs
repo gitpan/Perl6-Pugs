@@ -43,12 +43,13 @@ printCommandLineHelp
         putStrLn "-Bbackend        execute using the compiler backend"
         putStrLn "-Cbackend        compile using the compiler backend"
         putStrLn "                 (valid backends are: Pugs, Parrot, Haskell)"
-        putStrLn "-M module        execute 'use module' before executing the program"
+        putStrLn "-Mmodule         execute 'use module' before executing the program"
         putStrLn "-h or --help     give this message"
         putStrLn "-V               long configuration information & version"
         putStrLn "-V:item          short configuration information for item"
         putStrLn "-v or --version  version"
         putStrLn "-l -d and -w are ignored for compatability with Perl 5"
+        putStrLn "See documentation of pugs::run for more help."
 
 name :: String
 name       = "Perl6 User's Golfing System"

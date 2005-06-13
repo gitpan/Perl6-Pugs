@@ -4,7 +4,7 @@ use v6;
 
 use Test;
 
-plan 37;
+plan 39;
 
 =kwid
 
@@ -43,15 +43,15 @@ is(simple_pos_params( 'x' => 4 ), 4, "simple named param");
 sub foo (+$x = 3) { $x }
 
 is(foo(), 3, "not specifying named params that aren't mandatory works");
-is(foo(4), 4, "using a named as a positional works");
+dies_ok({foo(4)}, "using a named as a positional fails", :todo<bug>);
 
 is(foo( 'x' => 5), 5, "naming named param also works");
 
 sub foo2 (+$x = 3, +$y = 5) { $x + $y }
 
 is(foo2(), 8, "not specifying named params that aren't mandatory works (foo2)");
-is(foo2(4), 9, "using a named as a positional works (foo2)");
-is(foo2(4, 10), 14, "using a named as a positional works (foo2)");
+dies_ok({foo2(4)}, "using a named as a positional fails (foo2)", :todo<bug>);
+dies_ok({foo2(4, 10)}, "using a named as a positional fails (foo2)", :todo<bug>);
 is(foo2( 'x' => 5), 10, "naming named param x also works (foo2)");
 is(foo2( 'y' => 3), 6, "naming named param y also works (foo2)");
 is(foo2( 'x' => 10, 'y' => 10), 20, "naming named param x & y also works (foo2)");
@@ -71,10 +71,17 @@ sub mandatory (++$param) {
     return $param;
 }
 
-
 is(mandatory('param' => 5) , 5, "named mandatory parameter is returned");
-
 is(eval 'mandatory()', undef, "not specifying a mandatory parameter fails");
+
+sub mandatory_by_trait (+$param is required) {
+    return $param;
+}
+
+is(mandatory_by_trait('param' => 5) , 5, "named mandatory parameter is returned");
+is(eval 'mandatory_by_trait()', undef, "not specifying a mandatory parameter fails");
+
+
 
 
 # From L<S06/"Named parameters" /sub formalize/>

@@ -30,7 +30,7 @@ is( $foo.ref,      'Foo', 'basic instantiation of declared class' );
 ok( ! $in_destructor,    'destructor should not fire while object is active' );
 
 my $child = Child.new();
-undef $child;
+undefine $child;
 
 # no guaranteed timely destruction, so replace $a and try to force some GC here
 for 1 .. 100
@@ -38,7 +38,7 @@ for 1 .. 100
     $foo = Foo.new();
 }
 
-ok( $in_destructor, '... only when object goes away everywhere' );
+ok( $in_destructor, '... only when object goes away everywhere', :todo<bug>);
 is(  @destructor_order[0], 'Child',  'Child DESTROY should fire first', :todo<feature>  );
 is(  @destructor_order[1], 'Parent', '... then parent', :todo<feature> );
 is( +@destructor_order, 2, '... only as many as available DESTROY submethods');

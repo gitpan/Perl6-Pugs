@@ -2,6 +2,9 @@
 module Pugs.Prim.Code where
 import Pugs.AST
 import Pugs.Internals
+import Pugs.Pretty
+
+{- On Code -}
 
 op1CodeAssoc :: Val -> Eval Val
 op1CodeAssoc v = do
@@ -22,3 +25,15 @@ op1CodeBody :: Val -> Eval Val
 op1CodeBody v = do
     code <- fromVal v
     expToEvalVal $ subBody code
+
+op1CodePos :: Val -> Eval Val
+op1CodePos v = do
+    code <- fromVal v
+    let env = subEnv code
+    case env of
+        Nothing  -> return VUndef
+        Just env -> return $ castV $ pretty $ envPos env
+
+{- On Code::Exp -}
+
+    

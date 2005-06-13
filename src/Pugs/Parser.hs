@@ -71,7 +71,7 @@ ruleBlockBody = do
     post    <- many ruleEmptyExp
     let body' = foldl mergeStmts (foldl (flip mergeStmts) body pre) post
     env'    <- getRuleEnv
-    setRuleEnv env'{ envLexical = envLexical env }
+    putRuleEnv env'{ envLexical = envLexical env }
     return $ case unwrap body' of
         (Syn "sub" _)   -> mergeStmts emptyExp body'
         _               -> body'
@@ -111,10 +111,11 @@ ruleStatementList = rule "statements" $ choice
         whiteSpace
         -- pos     <- getPosition
         exp     <- rule
-        rest    <- option return $ try $ do
+        rest    <- option return $ do
             count (symbol ";")
-            stmts <- ruleStatementList
-            return $ \exp -> return $ mergeStmts exp stmts
+            option (\exp -> return $ mergeStmts exp Noop) $ do
+                stmts <- ruleStatementList
+                return $ \exp -> return $ mergeStmts exp stmts
         rest exp
 
 ruleBeginOfLine :: RuleParser ()
@@ -173,6 +174,7 @@ ruleBlockDeclaration = rule "block declaration" $ choice
     , ruleClosureTrait False
     , ruleRuleDeclaration
     , ruleClassDeclaration
+    , ruleModuleDeclaration
     ]
 
 ruleDeclaration :: RuleParser Exp
@@ -195,6 +197,8 @@ ruleSubHead = rule "subroutine head" $ do
              return SubCoroutine
         , do (symbol "submethod" <|> symbol "method")
              return SubMethod
+        , do symbol "macro"
+             return SubMacro
         ]
     name    <- ruleSubName
     return (isMulti, styp, name)
@@ -242,7 +246,7 @@ ruleRuleDeclaration = rule "rule declaration" $ try $ do
     name    <- identifier
     adverbs <- ruleAdverbHash
     ch      <- char '{'
-    expr    <- rxLiteralAny adverbs $ balancedDelim ch
+    expr    <- rxLiteralAny adverbs ch (balancedDelim ch)
     let exp = Syn ":=" [Var ('<':'*':name), Syn "rx" [expr, adverbs]]
     unsafeEvalExp (Sym SGlobal ('<':'*':name) exp)
     return emptyExp
@@ -252,10 +256,10 @@ ruleClassDeclaration = rule "class declaration" $ try $ do
     _       <- choice $ map symbol (words "class role grammar")
     (name, _, _) <- rulePackageHead
     env     <- getRuleEnv
-    setRuleEnv env{ envPackage = name, envClasses = envClasses env `addNode` mkType name }
+    putRuleEnv env{ envPackage = name, envClasses = envClasses env `addNode` mkType name }
     body    <- between (symbol "{") (char '}') ruleBlockBody
     env'    <- getRuleEnv
-    setRuleEnv env'{ envPackage = envPackage env }
+    putRuleEnv env'{ envPackage = envPackage env }
     return body
 
 rulePackageHead :: RuleParser (String, String, String)
@@ -313,18 +317,21 @@ ruleSubDeclaration = rule "subroutine declaration" $ do
         exp  = Syn ":=" [Var name, Syn "sub" [subExp]]
         exp' = Syn ":=" [Var name', Syn "sub" [subExp]]
         isExported = (pkg == "main" || "export" `elem` traits)
-    case scope of
-        -- XXX FIXME - the "main" here is a horrible hack
-        SGlobal | name' /= name && isExported -> do
-            unsafeEvalExp (Sym scope name exp)
-            unsafeEvalExp (Sym scope name' exp')
-            return emptyExp
-        SGlobal -> do
-            unsafeEvalExp (Sym scope name' exp')
-            return emptyExp
-        _ -> do
-            lexDiff <- unsafeEvalLexDiff (Sym scope name' emptyExp)
-            return $ Pad scope lexDiff exp
+    -- Don't add the sub if it's unsafe and we're in safemode.
+    if "unsafe" `elem` traits && safeMode
+        then return emptyExp
+        else case scope of
+            -- XXX FIXME - the "main" here is a horrible hack
+            SGlobal | name' /= name && isExported -> do
+                unsafeEvalExp (Sym scope name exp)
+                unsafeEvalExp (Sym scope name' exp')
+                return emptyExp
+            SGlobal -> do
+                unsafeEvalExp (Sym scope name' exp')
+                return emptyExp
+            _ -> do
+                lexDiff <- unsafeEvalLexDiff (Sym scope name' emptyExp)
+                return $ Pad scope lexDiff exp
 
 -- | A Param representing the default (unnamed) invocant of a method on the given type.
 selfParam :: String -> Param
@@ -351,7 +358,7 @@ ruleSubName = verbatimRule "subroutine name" $ do
                 <|> between (char '\171') (char '\187') (many1 $ satisfy (/= '\187'))
     return $ "&" ++ twigil ++ fixity ++ name
     where
-    fixities = words " prefix: postfix: infix: circumfix: "
+    fixities = words " prefix: postfix: infix: circumfix: coerce: self: term: postcircumfix: rule_modifier: trait_verb: trait_auxiliary: scope_declarator: statement_control: infix_postfix_meta_operator: postfix_prefix_meta_operator: prefix_postfix_meta_operator: infix_circumfix_meta_operator: "
 
 ruleSubParameters :: ParensOption -> RuleParser (Maybe [Param])
 ruleSubParameters wantParens = rule "subroutine parameters" $ do
@@ -382,9 +389,13 @@ ruleFormalParam = rule "formal parameter" $ do
     sigil   <- option "" $ choice . map symbol $ words " ? * + ++ "
     name    <- ruleParamName -- XXX support *[...]
     traits  <- many ruleTrait
-    let required = (sigil /=) `all` ["?", "+"]
+    let sigil' | not ("required" `elem` traits) = sigil
+               | (sigil == "+") = "++"  -- promote "+$x is required" to "++$x"
+               | (sigil == "?") = ""    -- well, heh, confused?
+               | otherwise      = sigil -- required anyway
+    let required = (sigil' /=) `all` ["?", "+"]
     exp     <- ruleParamDefault required
-    return $ foldr appTrait (buildParam typ sigil name exp) traits
+    return $ foldr appTrait (buildParam typ sigil' name exp) traits
     where
     appTrait "rw"   x = x { isWritable = True }
     appTrait "copy" x = x { isLValue = False, isWritable = True }
@@ -492,7 +503,7 @@ ruleUsePackage = rule "use package" $ do
         unsafeEvalExp $ App (Var $ ('&':pkg) ++ "::import") (Just val) [imp]
         return ()
     case val of
-        Val (VControl (ControlEnv env')) -> setRuleEnv env'
+        Val (VControl (ControlEnv env')) -> putRuleEnv env'
             { envClasses = envClasses env' `addNode` mkType pkg }
         _  -> error $ pretty val
     return ()
@@ -535,8 +546,15 @@ ruleModuleDeclaration = rule "module declaration" $ do
     _       <- choice $ map symbol (words "package module class grammar")
     (name, v, a)    <- rulePackageHead
     env     <- getRuleEnv
-    setRuleEnv env{ envPackage = name, envClasses = envClasses env `addNode` mkType name }
-    return $ Syn "module" [Val . VStr $ name ++ v ++ a] -- XXX
+    putRuleEnv env{ envPackage = name, envClasses = envClasses env `addNode` mkType name }
+    body    <- option emptyExp $ between (symbol "{") (char '}') ruleBlockBody
+    let moduleDef = Syn "module" [Val . VStr $ name ++ v ++ a] -- XXX
+    case body of
+        Noop -> return moduleDef
+        _    -> do
+            env' <- getRuleEnv
+            putRuleEnv env'{ envPackage = envPackage env }
+            return $ Stmts moduleDef body
 
 ruleDoBlock :: RuleParser Exp
 ruleDoBlock = rule "do block" $ try $ do
@@ -937,18 +955,6 @@ currentFunctions = do
 -- read just the current state
 currentTightFunctions :: RuleParser [String]
 currentTightFunctions = do
-    env     <- getRuleEnv
-    case envStash env of
-        "" -> do
-            funs <- currentTightFunctions'
-            setRuleEnv env{ envStash = unlines funs }
-            return funs
-        lns -> do
-            return $ lines lns
-
--- read just the current state
-currentTightFunctions' :: RuleParser [String]
-currentTightFunctions' = do
     funs    <- currentFunctions
     let (unary, rest) = (`partition` funs) $ \x -> case x of
             (_, "pre", [param]) | not (isSlurpy param) -> True
@@ -985,20 +991,32 @@ currentTightFunctions' = do
     return $ map (encodeUTF8 . unwords . nub)
         [nullary, optionary, namedUnary, preUnary, postUnary, infixOps]
 
+parseOpWith :: (DynParsers -> RuleParser Exp) -> RuleParser Exp
+parseOpWith f = do
+    state <- getState
+    case ruleDynParsers state of
+        MkDynParsersEmpty   -> refillCache state f
+        p                   -> f p
+    where
+    refillCache state f = do
+        ops         <- operators
+        opsTight    <- tightOperators
+        opsLit      <- litOperators
+        let [parse, parseTight, parseLit] = map
+                (expRule . (\o -> buildExpressionParser o parseTerm (Syn "" [])))
+                [ops, opsTight, opsLit]
+            opParsers = MkDynParsers parse parseTight parseLit
+        setState state{ ruleDynParsers = opParsers }
+        f opParsers
+
 parseOp :: RuleParser Exp
-parseOp = expRule $ do
-    ops <- operators
-    buildExpressionParser ops parseTerm (Syn "" [])
+parseOp = parseOpWith dynParseOp
 
 parseTightOp :: RuleParser Exp
-parseTightOp = expRule $ do
-    ops <- tightOperators
-    buildExpressionParser ops parseTerm (Syn "" [])
+parseTightOp = parseOpWith dynParseTightOp
 
 parseLitOp :: RuleParser Exp
-parseLitOp = expRule $ do
-    ops <- litOperators
-    buildExpressionParser ops parseTerm (Syn "" [])
+parseLitOp = parseOpWith dynParseLitOp
 
 ops :: (String -> a) -> String -> [a]
 ops f s = [f n | n <- sortBy revLength (nub . words $ decodeUTF8 s)]
@@ -1119,9 +1137,17 @@ parseTerm = rule "term" $ do
 
 ruleTypeVar :: RuleParser Exp
 ruleTypeVar = rule "type" $ try $ do
-    string "::"
-    name <- ruleQualifiedIdentifier
-    return $ Var (':':name)
+    -- We've to allow symbolic references with type vars, too.
+    nameExps <- many1 $ do
+	string "::"
+	(parens ruleExpression) <|> (liftM (Val . VStr . concat) $ sequence [ruleTwigil, many1 wordAny])
+    -- Optimization: We don't have to construct a symbolic deref syn (":::()"),
+    -- but can use a simple Var, if nameExps consists of only one expression
+    -- and this expression is a plain string, i.e. it is not a
+    -- (...)-expression.
+    return $ case nameExps of
+        [Val (VStr name)] -> Var $ ":" ++ name
+        _                 -> Syn (":::()") nameExps
 
 ruleTypeLiteral :: RuleParser Exp
 ruleTypeLiteral = rule "type" $ do
@@ -1209,7 +1235,7 @@ ruleApply isFolded = tryVerbatimRule "apply" $ do
             then parseParenParamListMaybe
             else parseParenParamList <|> do { whiteSpace; parseNoParenParamList }
     -- XXX - warn when there's both inv and inv'
-    return $ App (Var name) (inv `mplus` inv') args
+    possiblyApplyMacro $ App (Var name) (inv `mplus` inv') args
 
 ruleFoldOp :: RuleParser String
 ruleFoldOp = verbatimRule "reduce metaoperator" $ do
@@ -1344,8 +1370,10 @@ ruleVarNameString =   try (string "$!")  -- error variable
     if sigil == '&' then ruleSubName else do
     --  ^ placeholder, * global, ? magical, . member, : private member
     twigil  <- ruleTwigil
-    names   <- many1 wordAny `sepBy1` (try $ string "::")
-    return $ (sigil:twigil) ++ concat (intersperse "::" names)
+    names   <- many wordAny `sepBy1` (try $ string "::")
+    case names of
+        [""] -> fail "Empty variable name"
+        _    -> return $ (sigil:twigil) ++ concat (intersperse "::" names)
 
 ruleTwigil :: RuleParser String
 ruleTwigil = option "" . choice . map string $ words " ^ * ? . : "
@@ -1379,9 +1407,16 @@ ruleSymbolicDeref :: RuleParser Exp
 ruleSymbolicDeref = do
     sigil    <- oneOf "$@%&"
     nameExps <- many1 $ do
-	string "::"
+        string "::"
         -- nameExp is the expression which will yield the varname.
-	(parens ruleExpression) <|> (liftM (Val . VStr) $ many1 wordAny)
+        -- We've to include ruleTwigil here to make $::?SELF parse.
+        -- XXX: This looks slightly odd to me -- is one forced to say
+        --  $::("?SELF") instead?
+        (parens ruleExpression) <|> (liftM (Val . VStr) $ do
+            choice
+                [ string "!"  --  $!
+                , string "/"  --  $/
+                , liftM concat $ sequence [ruleTwigil, many1 wordAny] ])
     return $ Syn (sigil:"::()") nameExps
 
 makeVar :: String -> Exp
@@ -1421,15 +1456,18 @@ nullaryLiteral = try $ do
     (nullary:_) <- currentTightFunctions
     name <- choice $ map symbol $ words nullary
     notFollowedBy (char '(')
-    return $ App (Var ('&':name)) Nothing []
+    possiblyApplyMacro $ App (Var ('&':name)) Nothing []
 
 undefLiteral :: RuleParser Exp
 undefLiteral = try $ do
     symbol "undef"
-    (invs,args)   <- maybeParens $ parseParamList
-    return $ if isNothing invs && null args
-        then Val VUndef
-        else App (Var "&undef") invs args
+    return $ Val VUndef
+    {-
+        (invs,args)   <- maybeParens $ parseParamList
+        return $ if isNothing invs && null args
+            then Val VUndef
+            else App (Var "&undef") invs args
+    -}
 
 numLiteral :: RuleParser Exp
 numLiteral = do
@@ -1496,11 +1534,9 @@ qInterpolateDelimiter protectedChar = do
 
 qInterpolateQuoteConstruct :: RuleParser Exp
 qInterpolateQuoteConstruct = try $ do
-    string "\\q"
-    flag <- many1 alphaNum
-    char '['
-    expr <- interpolatingStringLiteral (char ']') (qInterpolator $ getQFlags [flag] ']')
-    char ']'
+    string "\\"
+    (qStart, qEnd, flags) <- qStructure
+    expr <- interpolatingStringLiteral qStart qEnd (qInterpolator flags)
     return expr
 
 qInterpolatorPostTerm :: RuleParser (Exp -> Exp)
@@ -1562,15 +1598,21 @@ qInterpolator flags = choice [
 
 qLiteral :: RuleParser Exp
 qLiteral = do -- This should include q:anything// as well as '' "" <>
-    (qEnd, flags) <- getQDelim
-    qLiteral1 qEnd flags
+    (qStart, qEnd, flags) <- getQDelim
+    if not (qfHereDoc flags) then
+        qLiteral1 qStart qEnd flags
+      else do -- XXX an ugly kludge providing crude heredocs
+        endMarker <- (liftM (string) $ many1 wordAny)
+        qEnd; ruleWhiteSpaceLine
+        qLiteral1 (string "never match rb89fjLS") endMarker flags
 
-qLiteral1 :: RuleParser x -- Closing delimiter
+qLiteral1 :: RuleParser String    -- Opening delimiter
+	     -> RuleParser String -- Closing delimiter
              -> QFlags
              -> RuleParser Exp
-qLiteral1 qEnd flags = do
-    expr <- interpolatingStringLiteral qEnd (qInterpolator flags)
-    qEnd
+qLiteral1 qStart qEnd flags = do
+    expr <- interpolatingStringLiteral qStart qEnd (qInterpolator flags)
+    -- qEnd
     case qfSplitWords flags of
         -- expr ~~ rx:perl5:g/(\S+)/
         QS_Yes      -> return $ doSplit expr
@@ -1617,15 +1659,15 @@ angleBracketLiteral :: RuleParser Exp
 angleBracketLiteral = try $
         do
         symbol "<<"
-        qLiteral1 (symbol ">>") $ qqFlags
+        qLiteral1 (symbol "<<") (symbol ">>") $ qqFlags
             { qfSplitWords = QS_Protect, qfProtectedChar = '>' }
     <|> do
         symbol "<"
-        qLiteral1 (char '>') $ qFlags
+        qLiteral1 (symbol "<") (symbol ">") $ qFlags
             { qfSplitWords = QS_Yes, qfProtectedChar = '>' }
     <|> do
         symbol "\xab"
-        qLiteral1 (char '\xbb') $ qFlags
+        qLiteral1 (symbol "\xab") (symbol "\xbb") $ qFlags
             { qfSplitWords = QS_Yes, qfProtectedChar = '\xbb' }
 
 -- Quoting delimitor and flags
@@ -1645,6 +1687,7 @@ data QFlags = MkQFlags
     , qfInterpolateBackslash    :: !QB_Flag -- No, Single, All
     , qfProtectedChar           :: !Char
     , qfP5RegularExpression     :: !Bool
+    , qfHereDoc                 :: !Bool
     , qfFailed                  :: !Bool -- Failed parse
     }
     deriving (Show, Eq, Ord, Typeable)
@@ -1670,6 +1713,8 @@ getQFlags flagnames protectedChar =
           useflag "closure" qf    = qf { qfInterpolateClosure = True }
           useflag "b" qf          = qf { qfInterpolateBackslash = QB_All }
           useflag "backslash" qf  = qf { qfInterpolateBackslash = QB_All }
+          useflag "t" qf          = qf { qfHereDoc = True }
+          useflag "to" qf         = qf { qfHereDoc = True }
 
         -- Zeroing flags
           useflag "0" _           = rawFlags
@@ -1689,62 +1734,65 @@ closing delims from being openers (disallow q]a]) -}
 openingDelim :: RuleParser Char
 openingDelim = anyChar
 
-getQDelim :: RuleParser (RuleParser Char, QFlags)
-getQDelim = try $
-    do  string "q"
-        flags <- do
-            firstflag <- many alphaNum
-            allflags  <- many oneflag
-            case firstflag of
-                "" -> return allflags
-                _  -> return $ firstflag:allflags
+qStructure :: RuleParser (RuleParser String, RuleParser String, QFlags)
+qStructure = 
+    do string "q"
+       flags <- do
+	   firstflag <- many alphaNum
+           allflags  <- many oneflag
+           case firstflag of
+               "" -> return allflags
+               _  -> return $ firstflag:allflags
 
-        notFollowedBy alphaNum
-        whiteSpace
-        delim <- openingDelim
-        let qflags = getQFlags flags $ balancedDelim delim
-        when (qfFailed qflags) $ fail ""
-        return (char $ balancedDelim delim, qflags)
+       notFollowedBy alphaNum
+       whiteSpace
+       delim <- openingDelim
+       let qflags = getQFlags flags $ balancedDelim delim
+       when (qfFailed qflags) $ fail ""
+       return ( (string [delim]), (string [balancedDelim delim]), qflags)
+    where
+       oneflag = do string ":"
+                    many alphaNum
+
+
+getQDelim :: RuleParser (RuleParser String, RuleParser String, QFlags)
+getQDelim = try qStructure
     <|> try (do
         string "<<"
-        return (
-            string ">>" >> return 'x',
+        return (string "<<", string ">>",
             qqFlags { qfSplitWords = QS_Yes, qfProtectedChar = '>' }))
     <|> do
         delim <- oneOf "\"'<\xab"
         case delim of
-            '"'     -> return (char '"',    qqFlags)
-            '\''    -> return (char '\'',   qFlags)
-            '<'     -> return (char '>',    qFlags
+            '"'     -> return (string "\"",  string "\"",    qqFlags)
+            '\''    -> return (string "'",   string "'",   qFlags)
+            '<'     -> return (string "<",   string ">",    qFlags
                 { qfSplitWords = QS_Yes, qfProtectedChar = '>' })
-            '\xab'  -> return (char '\xbb', qqFlags
+            '\xab'  -> return (string "\xab", string "\xbb", qqFlags
                 { qfSplitWords = QS_Protect, qfProtectedChar = '\xbb' })
             _       -> fail ""
 
-    where
-          oneflag = do string ":"
-                       many alphaNum
 
 -- | Default flags
 qFlags    :: QFlags
-qFlags    = MkQFlags QS_No False False False False False QB_Single '\'' False False
+qFlags    = MkQFlags QS_No False False False False False QB_Single '\'' False False False
 -- | Default flags
 qqFlags   :: QFlags
-qqFlags   = MkQFlags QS_No True True True True True QB_All '"' False False
+qqFlags   = MkQFlags QS_No True True True True True QB_All '"' False False False
 -- | Default flags
 rawFlags  :: QFlags
-rawFlags  = MkQFlags QS_No False False False False False QB_No 'x' False False
+rawFlags  = MkQFlags QS_No False False False False False QB_No 'x' False False False
 -- | Default flags
 rxP5Flags :: QFlags
-rxP5Flags = MkQFlags QS_No True True True True False QB_No '/' True False
+rxP5Flags = MkQFlags QS_No True True True True False QB_No '/' True False False
 -- | Default flags
 rxP6Flags :: QFlags
-rxP6Flags = MkQFlags QS_No False False False False False QB_No '/' False False
+rxP6Flags = MkQFlags QS_No False False False False False QB_Single '/' False False False
 
 -- Regexps
 
 -- | A parser returning a regex, given a hashref of adverbs and a closing delimiter.
-rxLiteralAny :: Exp -> Char -> RuleParser Exp
+rxLiteralAny :: Exp -> Char -> Char -> RuleParser Exp
 rxLiteralAny adverbs
     | Syn "\\{}" [Syn "," pairs] <- adverbs
     , not (null [
@@ -1756,15 +1804,17 @@ rxLiteralAny adverbs
     | otherwise
     = rxLiteral6
 
-rxLiteral5 :: Char -- ^ Closing delimiter
+rxLiteral5 :: Char -- ^ Openingd delimiter
+	     -> Char -- ^ Closing delimiter
              -> RuleParser Exp
-rxLiteral5 delim = qLiteral1 (char delim) $
-        rxP5Flags { qfProtectedChar = delim }
+rxLiteral5 delimStart delimEnd = qLiteral1 (string [delimStart]) (string [delimEnd]) $
+        rxP5Flags { qfProtectedChar = delimEnd }
 
-rxLiteral6 :: Char -- ^ Closing delimiter
+rxLiteral6 :: Char -- ^ Opening delimiter
+	     -> Char -- ^ Closing delimiter
              -> RuleParser Exp
-rxLiteral6 delim = qLiteral1 (char delim) $
-        rxP6Flags { qfProtectedChar = delim }
+rxLiteral6 delimStart delimEnd = qLiteral1 (string [delimStart]) (string [delimEnd]) $
+        rxP6Flags { qfProtectedChar = delimEnd }
 
 ruleAdverbHash :: RuleParser Exp
 ruleAdverbHash = do
@@ -1778,10 +1828,10 @@ substLiteral = try $ do
     ch      <- openingDelim
     let endch = balancedDelim ch
     -- XXX - probe for adverbs to determine p5 vs p6
-    expr    <- rxLiteralAny adverbs endch
+    expr    <- rxLiteralAny adverbs ch endch
     ch      <- if ch == endch then return ch else do { whiteSpace ; anyChar }
     let endch = balancedDelim ch
-    subst   <- qLiteral1 (char endch) qqFlags { qfProtectedChar = endch }
+    subst   <- qLiteral1 (string [ch]) (string [endch]) qqFlags { qfProtectedChar = endch }
     return $ Syn "subst" [expr, subst, adverbs]
 
 rxLiteral :: RuleParser Exp
@@ -1792,13 +1842,13 @@ rxLiteral = try $ do
         return "rx"
     adverbs <- ruleAdverbHash
     ch      <- anyChar
-    expr    <- rxLiteralAny adverbs $ balancedDelim ch
+    expr    <- rxLiteralAny adverbs ch (balancedDelim ch)
     return $ Syn sym [expr, adverbs]
 
 rxLiteralBare :: RuleParser Exp
 rxLiteralBare = try $ do
     ch      <- char '/'
-    expr    <- rxLiteral6 $ balancedDelim ch
+    expr    <- rxLiteral6 ch (balancedDelim ch)
     return $ Syn "//" [expr, Val undef]
 
 namedLiteral :: String -> Val -> RuleParser Exp
