@@ -25,21 +25,27 @@ sub get_config {
         siteprefix=> $Config{siteprefix},
 
         installscript  => $Config{installscript},
+        sitescript     => $Config{installsitescript} || $Config{installscript},
         installbin     => $Config{installbin},
-        installsitebin => $Config{installsitebin},
+        installsitebin => $Config{installsitebin} || $Config{installsbin},
+
+        installman1dir     => $Config{installman1dir},
+        installman3dir     => $Config{installman3dir},
+        installsiteman1dir => $Config{installsiteman1dir} || $Config{installman1dir},
+        installsiteman3dir => $Config{installsiteman3dir} || $Config{installman3dir},
 
         sourcedir      => Cwd::abs_path(),
     };
 
-    add_path(archlib         => $config); 
-    add_path(privlib         => $config); 
-    add_path(sitearch        => $config); 
-    add_path(sitelib         => $config); 
+    add_path(archlib            => $config); 
+    add_path(privlib            => $config); 
+    add_path(sitearch           => $config); 
+    add_path(sitelib            => $config); 
 
-    add_path(installarchlib  => $config); 
-    add_path(installprivlib  => $config); 
-    add_path(installsitearch => $config); 
-    add_path(installsitelib  => $config); 
+    add_path(installarchlib     => $config); 
+    add_path(installprivlib     => $config); 
+    add_path(installsitearch    => $config); 
+    add_path(installsitelib     => $config); 
 
     $config->{pugspath} =
       File::Spec->catfile($config->{bin}, "pugs$config->{exe_ext}");
@@ -56,6 +62,7 @@ sub add_path {
     my $path = $Config{$name} || '';
     $path =~ s/([\/\\])[^\/\\]*(perl)[^\/\\]*([\/\\]?)/$1${2}6$3/i
       or $path =~ s/([\/\\])(lib)(?=[\/\\]|$)/$1$2${1}perl6/i
+#      or $path =~ m/\bman\d\b/
       or die <<".";
 Can't generate the correct Perl6 equivalent for:
 
@@ -128,15 +135,15 @@ module Pugs.Config (
 ) where
 
 import qualified Data.Map as Map
-import qualified Pugs.Help
+import qualified Pugs.Version
 
 config :: Map.Map String String
 config = Map.fromList
-	[#all_definitions#
-	,("pugs_versnum", Pugs.Help.versnum)
-	,("pugs_version", Pugs.Help.version)
-	,("pugs_revision", Pugs.Help.revnum)
-	]
+    [#all_definitions#
+    ,("pugs_versnum", Pugs.Version.versnum)
+    ,("pugs_version", Pugs.Version.version)
+    ,("pugs_revision", Pugs.Version.revnum)
+    ]
 
 getConfig :: String -> String
 getConfig key = Map.findWithDefault "" key config

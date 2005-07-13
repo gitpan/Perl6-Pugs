@@ -5,12 +5,12 @@ use Test;
 
 plan(13);
 
-unless eval 'eval_perl5("1")' {
+unless eval 'eval("1", :lang<perl5>)' {
     skip_rest;
     exit;
 }
 
-eval_perl5(q/
+eval(q/
 #line 16 method.t
 package FooBar;
 our $VERSION = '6.0';
@@ -61,17 +61,17 @@ sub invoke {
     $obj->me ('invoking');
 }
 
-/);
+/, :lang<perl5>);
 
 {
-    my $r = eval_perl5("FooBar->VERSION");
+    my $r = eval("FooBar->VERSION", :lang<perl5>);
     is($r, '6.0', "class method");
 }
 
 my $obj;
 
 {
-    $obj = eval_perl5("FooBar->new");
+    $obj = eval("FooBar->new", :lang<perl5>);
     isa_ok($obj, 'FooBar', "blessed");
     like($obj, rx:perl5/FooBar/, "blessed");
 }
@@ -107,7 +107,7 @@ my $obj;
 {
     my $callback = { "baz" };
     my $r = $obj.callcode($callback);
-    is($r, 'baz', 'invoke method with callback', :todo<feature>);
+    is($r, 'baz', 'invoke method with callback');
 }
 
 {
@@ -115,14 +115,16 @@ my $obj;
 	method me (Class|Foo6 $class: $arg) { 'Foo6'~$arg };
     };
     my $obj6 = Foo6.new;
-    $obj = eval_perl5("FooBar->new");
+    $obj = eval("FooBar->new", :lang<perl5>);
     is($obj.invoke($obj6), 'Foo6invoking', 'invoke pugs method from p5');
 }
+
+# XXX Core dump
+fail("modify a scalar ref", :todo<feature>); exit;
 
 {
     my @rw = (1);
     my $r = \@rw;
-    warn $r;
     $obj.modify_array($r);
     is(@rw[0], 2, 'modify a scalar ref', :todo<feature>);
 }

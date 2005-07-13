@@ -24,7 +24,7 @@ module Pugs.Lexer (
     tryChoice,
 
     ruleScope, ruleTrait, ruleTraitName, ruleBareTrait, ruleType,
-    verbatimParens,
+    verbatimParens, verbatimBrackets, verbatimBraces,
 ) where
 import Pugs.Internals
 import Pugs.AST
@@ -124,7 +124,7 @@ symbol s
     aheadSym '?' y   = not (y `elem` "&|^?")
     aheadSym '+' y   = not (y `elem` "&|^<>+")
     aheadSym '~' y   = not (y `elem` "&|^<>~")
-    aheadSym '^' y   = not (y `elem` ".")
+    aheadSym '^' y   = not (y `elem` "^.")
     aheadSym x   y   = y `elem` ";!" || x /= y
 
 interpolatingStringLiteral :: RuleParser String    -- ^ Opening delimiter
@@ -146,6 +146,10 @@ interpolatingStringLiteral startrule endrule interpolator = do
     
     stringList :: Int -> RuleParser [Exp]
     stringList i = try (do
+	       parse <- interpolator
+	       rest  <- stringList i
+	       return (parse:rest))
+	   <|> try (do
 	       ch <- endrule
 	       if i == 0 then return []
 			 else do rest <- stringList (i-1)
@@ -154,10 +158,6 @@ interpolatingStringLiteral startrule endrule interpolator = do
 	       ch <- startrule
 	       rest <- stringList (i+1)
 	       return (Val (VStr ch):rest))
-	   <|> do
-	       parse <- interpolator
-	       rest  <- stringList i
-	       return (parse:rest)
 	   <|> do
 	       char <- anyChar
 	       rest <- stringList i
@@ -239,16 +239,19 @@ tryVerbatimRule name action = (<?> name) $ try action
 
 ruleScope :: RuleParser Scope
 ruleScope = tryRule "scope" $ do
-    scope <- choice $ map symbol scopes
-    return (readScope scope)
+    scope <- ruleScopeName
+    return $ readScope scope
     where
-    scopes = map (map toLower) $ map (tail . show) $ enumFrom ((toEnum 1) :: Scope)
-    readScope s
-        | (c:cs)    <- s
-        , [(x, _)]  <- reads ('S':toUpper c:cs)
-        = x
-        | otherwise
-        = SGlobal
+    readScope "state"   = SState
+    readScope "my"      = SMy
+    readScope "our"     = SOur
+    readScope "let"     = SLet
+    readScope "temp"    = STemp
+    readScope _         = SGlobal
+
+ruleScopeName :: RuleParser String
+ruleScopeName = choice . map symbol . map (map toLower) . map (tail . show)
+    $ [SState .. STemp]
 
 postSpace :: GenParser Char st a -> GenParser Char st a
 postSpace rule = try $ do
@@ -264,7 +267,7 @@ ruleTrait = rule "trait" $ do
         optional $ string "::" -- XXX Bad Hack
         ruleQualifiedIdentifier
     -- XXX: For now, we *only* *parse* "is export(...)". The arguments are
-    -- thrown away. So module writers can give detailled export lists now,
+    -- thrown away. So module writers can give detailed export lists now,
     -- as otherwise
     -- <Aankhen``> Otherwise, it'll be a pain to go back to every module and
     --             change it all once the proper behaviour is implemented.
@@ -289,8 +292,9 @@ ruleBareTrait trait = rule "bare trait" $ do
 
 ruleType :: GenParser Char st String
 ruleType = literalRule "context" $ do
-    lead    <- upper
-    rest    <- many (wordAny <|> oneOf ":&|")
+    -- Valid type names: Foo, Bar::Baz, ::Grtz, ::?CLASS
+    lead    <- upper <|> char ':'
+    rest    <- many (wordAny <|> oneOf ":&|?")
     return (lead:rest)
 
 tryChoice :: [GenParser tok st a] -> GenParser tok st a
@@ -299,3 +303,8 @@ tryChoice = choice . map try
 verbatimParens :: GenParser Char st a -> GenParser Char st a
 verbatimParens = between (lexeme $ char '(') (char ')')
 
+verbatimBrackets :: GenParser Char st a -> GenParser Char st a
+verbatimBrackets = between (lexeme $ char '[') (char ']')
+
+verbatimBraces :: GenParser Char st a -> GenParser Char st a
+verbatimBraces = between (lexeme $ char '{') (char '}')

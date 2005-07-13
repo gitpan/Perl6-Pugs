@@ -29,8 +29,8 @@ under the terms of the GNU Lesser General Public License (LGPL) as published by
 the Free Software Foundation (http://www.fsf.org/); either version 2.1 of the
 License, or (at your option) any later version.  You should have received a copy
 of the LGPL as part of the Locale::KeyedText distribution, in the file named
-"LGPL"; if not, write to the Free Software Foundation, Inc., 59 Temple Place,
-Suite 330, Boston, MA 02111-1307 USA.
+"LGPL"; if not, write to the Free Software Foundation, Inc., 51 Franklin St,
+Fifth Floor, Boston, MA  02110-1301, USA.
 
 Any versions of Locale::KeyedText that you modify and distribute must carry
 prominent notices stating that you changed the files and the date of any
@@ -49,68 +49,51 @@ practical way of suggesting improvements to the standard version.
 ######################################################################
 ######################################################################
 
-class Locale::KeyedText-0.1.1 { # based on 5v1.04; to become 6v1.4.0 when fully functional
-	# could be a 'module' having 'sub' instead, since has no attributes
-
-######################################################################
-
-method new_message( Str $msg_key, Str ?%msg_vars ) returns Locale::KeyedText::Message {
-	return ::Locale::KeyedText::Message.new( $msg_key, %msg_vars ); # expect no leading '::'
-}
-
-method new_translator( Str @set_names, Str @member_names ) returns Locale::KeyedText::Translator {
-	return ::Locale::KeyedText::Translator.new( @set_names, @member_names ); # expect no leading '::'
-}
-
-######################################################################
-
-} # module Locale::KeyedText
-
-######################################################################
-######################################################################
-
 class Locale::KeyedText::Message {
-#	trusts Locale::KeyedText::Translator;
-	has Str $:msg_key; # str - the machine-readable key that uniquely identifies this message
-	has Str %:msg_vars; # hash (str,str) - named variables for messages, if any, go here
+	trusts Locale::KeyedText::Translator;
+	# Pugs bug: These should actually be private attrs, but those don't work right now.
+	has Str $.msg_key; # str - the machine-readable key that uniquely identifies this message
+	has Hash $.msg_vars; # hash (str,str) - named variables for messages, if any, go here
 
 ######################################################################
 
-method new( $class: Str $msg_key, Str ?%msg_vars ) returns Locale::KeyedText::Message {
+method new( $class: Str $msg_key is rw, Hash ?$msg_vars is rw ) returns Locale::KeyedText::Message {
+	# Note: the 'is rw' is a workaround, until Pugs' "transparent refs" are fixed.
 
-	$msg_key.defined and $msg_key ~~ rx:perl5/^\w+$/ or return;
-#	$msg_key.defined and $msg_key ~~ m/^\w+$/ or return;
-	for %msg_vars.keys -> $var_name {
-		$var_name ~~ rx:perl5/^\w+$/ or return; # hash key never undef (?)
-#		$var_name ~~ m/^\w+$/ or return; # hash key never undef (?)
+	$msg_key.defined or return;
+
+	my $msg_vars_copy = hash();
+	if( $msg_vars.defined ) {
+		$msg_vars.does(Hash) or return;
+		$msg_vars_copy = hash(%{$msg_vars});
 	}
+	# we are assuming that hash keys never undef, so aren't testing them
 
-	return $class.SUPER::new( msg_key => $msg_key, msg_vars => %msg_vars );
+	return $class.SUPER::new( msg_key => $msg_key, msg_vars => $msg_vars_copy );
 }
 
 ######################################################################
 
 method get_message_key( $message: ) returns Str {
-	return $message.:msg_key;
+	return $message.msg_key;
 }
 
-method get_message_variable( $message: Str $var_name ) returns Str {
+method get_message_variable( $message: Str $var_name is rw ) returns Str {
 	$var_name.defined or return;
-	return $message.:msg_vars{$var_name};
+	return $message.msg_vars{$var_name};
 }
 
 method get_message_variables( $message: ) returns Hash of Str {
-	return hash %{$message.:msg_vars}; # copy list values
+	return hash(%{$message.msg_vars});
 }
 
 ######################################################################
 
 method as_string( $message: ) returns Str {
 	# This method is intended for debugging use only.
-	return $message.:msg_key~': '~(
-            [$message.:msg_vars.pairs.sort]
-		.map:{ .key~'='~.value }.join( ', ' ) # S02 says sorting Pairs sorts keys by default.
-        );
+	my %temp = $message.msg_vars; # the use of %temp should not be necessary
+	return $message.msg_key~': '~%temp.pairs.sort
+		.map:{ .key~'='~(.value // '') }.join( ', ' ); # /S02 says sorting Pairs sorts keys by default.
 	# we expect that .map will be invoked off of the list that .sort returns
 	# I might use Hash.as() later, but don't know if it is customizable to sort or make undefs the empty str.
 }
@@ -123,64 +106,74 @@ method as_string( $message: ) returns Str {
 ######################################################################
 
 class Locale::KeyedText::Translator {
-	has Str @:tmpl_set_nms; # array of str - list of Template module Set Names to search
-	has Str @:tmpl_mem_nms; # array of str - list of Template module Member Names to search
+	# Pugs bug: These should actually be private attrs, but those don't work right now.
+	has Array $.tmpl_set_nms; # array of str - list of Template module Set Names to search
+	has Array $.tmpl_mem_nms; # array of str - list of Template module Member Names to search
 
 ######################################################################
 
-method new( $class: Str @set_names, Str @member_names ) returns Locale::KeyedText::Translator {
+method new( $class: Any $set_names is rw, Any $member_names is rw ) returns Locale::KeyedText::Translator {
 
-	for @set_names -> $set_name {
-		$set_name.defined and $set_name ~~ rx:perl5/^[a-zA-Z0-9_:]+$/ or return;
-#		$set_name.defined and $set_name ~~ m/^<[a-zA-Z0-9_:]>+$/ or return;
-	}
-	for @member_names -> $member_name {
-		$member_name.defined and $member_name ~~ rx:perl5/^[a-zA-Z0-9_:]+$/ or return;
-#		$member_name.defined and $member_name ~~ m/^<[a-zA-Z0-9_:]>+$/ or return;
+	my $set_names_copy = $set_names.does(Array) ?? [@{$set_names}] :: [$set_names];
+	+$set_names_copy > 0 or return;
+	for $set_names_copy -> $set_name {
+		$set_name.defined or return;
 	}
 
-	return $class.SUPER::new( tmpl_set_nms => @set_names, tmpl_mem_nms => @member_names );
+	my $member_names_copy = $member_names.does(Array) ?? [@{$member_names}] :: [$member_names];
+	+$member_names_copy > 0 or return;
+	for $member_names_copy -> $member_name {
+		$member_name.defined or return;
+	}
+
+	return $class.SUPER::new( tmpl_set_nms => $set_names_copy, tmpl_mem_nms => $member_names_copy );
 }
 
 ######################################################################
 
 method get_template_set_names( $translator: ) returns Array of Str {
-	return array @{$translator.:tmpl_set_nms}; # copy list values
+	return [@{$translator.tmpl_set_nms}];
 }
 
 method get_template_member_names( $translator: ) returns Array of Str {
-	return array @{$translator.:tmpl_mem_nms}; # copy list values
+	return [@{$translator.tmpl_mem_nms}];
 }
 
 ######################################################################
 
-method translate_message( $translator: Locale::KeyedText::Message $message ) returns Str {
-	$message.defined or return;
+method translate_message( $translator: Locale::KeyedText::Message $message is rw ) returns Str {
+	$message.defined and $message.does(Locale::KeyedText::Message) or return;
 	my Str $text = undef;
-#	MEMBER: for $translator.:tmpl_mem_nms -> $member_name {
-#		SET: for $translator.:tmpl_set_nms -> $set_name {
-#			my Str $template_module_name = $set_name~$member_name;
-#			unless( $template_module_name.meta.can("get_text_by_key") ) {
-#				require $template_module_name;
-#				unless( $template_module_name.meta.can("get_text_by_key") ) {
-#					next SET;
-#				}
-#			}
-#			try {
-#				$text = $template_module_name.get_text_by_key( $message.:msg_key );
-#				CATCH {
-#					next SET;
-#				}
-#			}
-#			$text or next SET;
-#			for $message.:msg_vars.kv -> $var_name, $var_value {
-#				$var_value //= '';
-#				$text ~~ rx:perl5:g/\{$var_name\}/$var_value/; # assumes msg props cleaned on input
-##				$text ~~ s:g/\{$var_name\}/$var_value/; # assumes msg props cleaned on input
-#			}
-#			last MEMBER;
-#		}
-#	}
+	for $translator.tmpl_mem_nms.map:{ $translator.tmpl_set_nms »~« $_ } -> $template_module_name {
+		try {
+			unless( 0 ) { # TODO: the class is already loaded
+				my $mod_to_req = $template_module_name;
+				$mod_to_req ~~ s:perl5:g/::/\//; # this version only needs Pugs
+#				$mod_to_req ~~ s:g/::/\//; # this version requires PGE/Parrot
+				$mod_to_req ~= '.pm';
+				require $mod_to_req; # non-bareword form requires above transformation
+				# Eg, when a plain "require Bar;" works, a "my $foo = 'Bar'; require $foo;"
+				# fails with a "Can't locate Bar.pm in @*INC" error.
+			}
+			CATCH {
+				next;
+			}
+		};
+		try {
+			$text = &::($template_module_name)::get_text_by_key( $message.msg_key );
+			CATCH {
+				next;
+			}
+		};
+		$text or next;
+		my %temp = $message.msg_vars; # the use of %temp should not be necessary
+		for %temp.kv -> $var_name, $var_value is copy {
+			$var_value //= '';
+			$text ~~ s:perl5:g/\{$var_name\}/$var_value/; # this version only needs Pugs
+#			$text ~~ s:g/\{$var_name\}/$var_value/; # this version requires PGE/Parrot
+		}
+		last;
+	}
 	return $text;
 }
 
@@ -188,13 +181,36 @@ method translate_message( $translator: Locale::KeyedText::Message $message ) ret
 
 method as_string( $translator: ) returns Str {
 	# This method is intended for debugging use only.
-	return 'SETS: '~$translator.:tmpl_set_nms.join( ', ' )~'; MEMBERS: '~$translator.:tmpl_mem_nms.join( ', ' );
+	return 'SETS: '~$translator.tmpl_set_nms.join( ', ' )~'; MEMBERS: '~$translator.tmpl_mem_nms.join( ', ' );
 	# Might use Array.as() later on.
 }
 
 ######################################################################
 
 } # class Locale::KeyedText::Translator
+
+######################################################################
+######################################################################
+
+class Locale::KeyedText-1.5.0 { # based on 5v1.05
+	# could be a 'module' having 'sub' instead, since has no attributes
+
+	# I *should* be able to declare this class above other classes, but can't for 
+	# now because my new() aren't invoked then under current Pugs; it is a Pugs bug.
+
+######################################################################
+
+method new_message( Str $msg_key is rw, Hash ?$msg_vars is rw ) returns Locale::KeyedText::Message {
+	return Locale::KeyedText::Message.new( $msg_key, $msg_vars );
+}
+
+method new_translator( Any $set_names is rw, Any $member_names is rw ) returns Locale::KeyedText::Translator {
+	return Locale::KeyedText::Translator.new( $set_names, $member_names );
+}
+
+######################################################################
+
+} # module Locale::KeyedText
 
 ######################################################################
 ######################################################################
@@ -229,7 +245,7 @@ method as_string( $translator: ) returns Str {
 
 		# This will print '<FIRST> plus <SECOND> equals <RESULT>' in the first possible language.
 		# For example, if the user inputs '3' and '4', it the output will be '3 plus 4 equals 7'.
-		print $translator->translate_message( Locale::KeyedText->new_message( 'MYLIB_RESULT', 
+		print $translator.translate_message( Locale::KeyedText.new_message( 'MYLIB_RESULT', 
 			{ 'FIRST' => $first, 'SECOND' => $second, 'RESULT' => $sum } ) );
 	}
 
@@ -432,9 +448,9 @@ value should be a scalar of some kind.
 
 =back
 
-Both a Message object's Message Key property and each of the keys in its
-Message Variables property must not be an empty string and may only contain
-Perl "word" (\w) characters.
+Both a Message object's Message Key property and each of the keys in its Message
+Variables property must be a defined value, though those values can be '' or
+'0' if you want.  Each Message Variables value is allowed to be undefined.
 
 =head1 TEMPLATE OBJECT PROPERTIES
 
@@ -481,7 +497,7 @@ that; and so on.
 
 I<For the present, Locale::KeyedText expects its Template objects to come from
 Perl modules, but in the future they may alternately be something else, such as
-XML files.>
+XML or tab-delimited plain text files.>
 
 =head1 TRANSLATOR OBJECT PROPERTIES
 
@@ -516,10 +532,9 @@ in found in the most preferred language is used.
 
 =back
 
-Each of a Translator object's Template Sets and Template Members property
-elements must not be an empty string and may only contain characters that are
-valid in a Perl package name; the code presently disallows any characters that
-are not in [a-zA-Z0-9_:].
+Each of a Translator object's Template Sets and Template Members properties must
+contain 1 or more elements each, and each element must be a defined value,
+though those values can be '' or '0' if you want.
 
 =head1 SYNTAX
 
@@ -702,7 +717,7 @@ Content of main program 'MyApp.pl':
 		show_message( $translator, Locale::KeyedText.new_message( 'MYAPP_HELLO' ) );
 		LOOP: {
 			show_message( $translator, Locale::KeyedText.new_message( 'MYAPP_PROMPT' ) );
-			my Str $user_input = $*IN; $user_input.chomp;
+			my Str $user_input = $*IN; $user_input .= chomp;
 			$user_input or last LOOP; # user chose to exit program
 			try {
 				my Num $result = MyLib.my_invert( $user_input );
@@ -887,13 +902,6 @@ Content of alternate text Template file 'MyApp/L/Homer.pm':
 		'MYLIB_MYINV_RES_INF' => 'Don\'t you give me a big donut!',
 	);
 	sub get_text_by_key( Str $msg_key ) returns Str { return %text_strings{$msg_key}; }
-
-=head1 BUGS
-
-I only have superficial memory recall of non-English languages.  I made the
-French language example in the SYNOPSIS by manually translating the English one
-with a printed on paper English to French dictionary; it probably contains
-multiple grammatical errors (not that the English was well-formed either).
 
 =head1 CAVEATS
 

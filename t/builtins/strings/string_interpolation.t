@@ -11,7 +11,7 @@ These tests derived from comments in http://use.perl.org/~autrijus/journal/23398
 
 =cut
 
-plan 18;
+plan 19;
 
 my $world = "World";
 my @list  = (1,2);
@@ -34,9 +34,10 @@ is('2 + 2 = { 2+2 }', '2 + 2 = { 2+2 }', 'single quoted closure interpolation do
 is('$world @list[] %hash{} &func()', '$world @list[] %hash{} &func()', 'single quoted string interpolation does not work (which is correct)');
 
 # Corner-cases
-is(eval '"Hello $world!"', "Hello World!", "! is not a part of var names");
+is(eval('"Hello $world!"'), "Hello World!", "! is not a part of var names");
 sub list_count (*@args) { +@args }
 is(list_count("@list[]"), 1, 'quoted interpolation gets string context');
+is(qq{a{chr 98}c}, 'abc', "curly brace delimiters don't interfere with closure interpolation");
 
 # Quoting constructs
 # The next test will always succeed, but if there's a bug it probably

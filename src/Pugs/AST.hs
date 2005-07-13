@@ -17,7 +17,7 @@ module Pugs.AST (
     genMultiSym, genSym,
     strRangeInf, strRange, strInc, charInc,
     mergeStmts, isEmptyParams,
-    newClass,
+    newPackage,
 
     module Pugs.AST.Internals,
     module Pugs.AST.Pos,
@@ -123,6 +123,8 @@ mergeStmts (Stmts x1 x2) y = mergeStmts x1 (mergeStmts x2 y)
 mergeStmts Noop y@(Stmts _ _) = y
 mergeStmts (Sym scope name x) y = Sym scope name (mergeStmts x y)
 mergeStmts (Pad scope lex x) y = Pad scope lex (mergeStmts x y)
+mergeStmts (Syn "package" [pkg@(Val (VStr _))]) y =
+    Syn "namespace" [pkg, y]
 mergeStmts x@(Pos pos (Syn syn _)) y | (syn ==) `any` words "subst match //"  =
     mergeStmts (Pos pos (App (Var "&infix:~~") Nothing [Var "$_", x])) y
 mergeStmts x y@(Pos pos (Syn syn _)) | (syn ==) `any` words "subst match //"  =
@@ -144,11 +146,11 @@ isEmptyParams [] = True
 isEmptyParams [x] | [_, '_'] <- paramName x = True
 isEmptyParams _ = False
 
-newClass :: String -> [String] -> Exp
-newClass name traits = Sym SGlobal (':':'*':name) $ Syn ":="
+newPackage :: String -> String -> [String] -> Exp
+newPackage cls name traits = Sym SGlobal (':':'*':name) $ Syn ":="
     [ Var (':':'*':name)
     , App (Var "&Any::new")
-        (Just $ Val (VType $ mkType "Class"))
+        (Just $ Val (VType $ mkType cls))
         [ App (Var "&infix:=>") Nothing
             [ Val (VStr "traits")
             , Val (VList $ map VStr traits)

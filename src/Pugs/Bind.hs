@@ -9,7 +9,9 @@
 >   In Lorien the fair...
 -}
 
-module Pugs.Bind where
+module Pugs.Bind (
+    bindParams, bindSomeParams,
+) where
 import Pugs.Internals
 import Pugs.AST
 import Pugs.Types
@@ -38,13 +40,21 @@ bindNames exps prms = (bound, exps', prms')
     prms' = prms \\ (map fst bound)
     (bound, exps') = foldr doBind ([], []) (map unPair exps)
     doBind (name, exp) (bound, exps) 
-        | Just prm <- find ((name ==) . tail . paramName) prms
+        | Just prm <- find ((matchNamedAttribute name) . paramName) prms
         = ( ((prm, exp) : bound), exps )
         | otherwise
-        = ( bound, (Syn "=>" [Val (VStr name), exp]:exps) )
+        = ( bound, (App (Var "&infix:=>") Nothing [Val (VStr name), exp]:exps) )
+
+
+matchNamedAttribute :: String -> String -> Bool
+matchNamedAttribute arg (_:'.':param) = param == arg
+matchNamedAttribute arg (_:':':param) = param == arg
+matchNamedAttribute arg     (_:param) = param == arg
+matchNamedAttribute   _             _ = False
 
 emptyHashExp :: Exp
 emptyHashExp  = Val $ VList [] -- VHash $ vCast $ VList []
+
 emptyArrayExp :: Exp
 emptyArrayExp = Val $ VList [] -- VArray $ vCast $ VList []
 
@@ -131,24 +141,12 @@ doBindArray v (xs, n)  (p, '$') = case v of
 doBindArray _ (_, _)  (_, x) = internalError $ "doBindArray: unexpected char: " ++ (show x)
 
 {-|
-(Does this even get used? It seems to be a leftover fragment of 
-'doBindArray'...)
--}
-bindEmpty :: Param -> MaybeError (Param, Exp)
-bindEmpty p = case paramName p of
-    ('@':_) -> return (p, emptyArrayExp)
-    ('$':_) -> fail $ "Unbound slurpy scalar: " ++ show p
-    (x:_)   -> internalError $ "bindEmpty: unexpected char: " ++ (show x)
-    []      -> internalError $ "bindEmpty: empty string encountered"
-
-{-|
 Return @True@ if the given expression represents a pair (i.e. it uses the
 \"=>\" pair constructor).
 -}
 isPair :: Exp -> Bool
 isPair (Pos _ exp) = isPair exp
 isPair (Cxt _ exp) = isPair exp
-isPair (Syn "=>" [(Val _), _])   = True
 isPair (App (Var "&infix:=>") Nothing [(Cxt _ (Val _)), _])   = True
 isPair (App (Var "&infix:=>") Nothing [(Val _), _])   = True
 isPair _                         = False
@@ -160,10 +158,9 @@ Decompose a pair-constructor 'Exp'ression (\"=>\") into a Haskell pair
 unPair :: Exp -> (String, Exp)
 unPair (Pos _ exp) = unPair exp
 unPair (Cxt _ exp) = unPair exp
-unPair (Syn "=>" [(Val k), exp]) = (vCast k, exp)
-unPair (App (Var "&infix:=>") Nothing [(Cxt _ (Val k)), exp]) = (vCast k, exp)
-unPair (App (Var "&infix:=>") Nothing [(Val k), exp]) = (vCast k, exp)
-unPair x                                = error ("Not a pair: " ++ show x)
+unPair (App (Var "&infix:=>") Nothing [key, exp])
+    | Val (VStr k) <- unwrap key = (k, exp)
+unPair x = error ("Not a pair: " ++ show x)
 
 {-|
 Bind parameters to a callable, then verify that the binding is complete
@@ -206,7 +203,8 @@ finalizeBindings sub = do
             act = length boundInvs
         fail $ "Wrong number of invocant parameters: "
             ++ (show $ act) ++ " actual, "
-            ++ (show $ act + cnt) ++ " expected"
+            ++ (show $ act + cnt) ++ " expected in "
+            ++ (show $ subName sub)
             
     let (boundReq, boundOpt) = partition (\x -> isRequired (fst x)) bindings -- bound params which are required
         (reqPrms, optPrms)   = span isRequired params -- all params which are required, and all params which are opt
@@ -254,12 +252,10 @@ bindSomeParams sub invExp argsExp = do
     -- Bind slurpy arrays and hashes
     let (slurpNamed, slurpPos) = partition (('%' ==) . head . paramName) slurpyPrms
         -- defaultPos      = if hasDefaultArray  then [] else [defaultArrayParam]
-        defaultNamed    = if hasDefaultHash   then [] else [defaultHashParam]
         defaultScalar   = if hasDefaultScalar then [] else [] -- XXX - fetch from *@_
-        hasDefaultHash  = isJust (find (("%_" ==) . paramName) slurpNamed)
         hasDefaultScalar= isJust (find (("$_" ==) . paramName) params)
         
-    boundHash   <- bindHash namedForSlurp (slurpNamed ++ defaultNamed) -- put leftover named args in %_
+    boundHash   <- bindHash namedForSlurp slurpNamed -- put leftover named args in %_
     (boundArray, newSlurpLimit) <- bindArray posForSlurp slurpPos slurpLimit
     boundScalar <- return $ defaultScalar `zip` (givenInvs ++ givenArgs) -- put, uh, something in $_
 

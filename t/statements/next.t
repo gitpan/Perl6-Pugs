@@ -14,7 +14,7 @@ next <label> in nested loops
 
 =cut
 
-plan 9;
+plan 12;
 
 # test for loops with next
 
@@ -31,7 +31,7 @@ plan 9;
         'my $tracker = 0; for (1..5) { next if 2 < $_ < 4; $tracker = $_;} $tracker',
         3,
         "... nothing before or after 3 (next if <cond>)",
-        :todo(1)
+        :todo<bug>
     );
 }
 
@@ -56,7 +56,7 @@ plan 9;
         'my $tracker=0; DONE: for (1..2) { next DONE; $tracker++;} $tracker',
         0,
         "tracker is 0 because next before increment",
-        :todo(1)
+        :todo<bug>
     );
 }
 
@@ -72,7 +72,7 @@ plan 9;
         'my $tracker=0; OUT: for (1..2) { IN: for (1..2) { next OUT; $tracker++; } } $tracker',
         0,
         "tracker is 0 because next before increment in nested loop",
-        :todo(1)
+        :todo<bug>
     );
 }
 
@@ -107,4 +107,39 @@ Check that C<next> works on the correct loop/block
         }
     }
 	is($bar, "ABCCBCCABCCBCC", "next works on inner loop of 3");
+}
+
+{
+	my @log;	
+	my $i;
+	while ++$i < 2 {
+		push @log, "before";
+		next;
+		push @log, "after";
+	}
+	
+	is(~@log, "before", "statements after next are not executed");
+}
+
+{
+	my $i = 0;
+	
+	for (1, 1, 0, 1, 0, 1) -> $x {
+		if ($x){ next }
+		$i++;
+	}
+	
+	is($i, 2, '$i++ executed only twice, because next ')
+}
+
+{
+	my $i = 0;
+	my $j;
+	
+	loop ($j = 0; $j < 6; $j++) {
+		if ($j % 2 == 0){ next }
+		$i++;
+	}
+	
+	is($i, 3, '$i++ was not executed when next was called before it in loop {}');
 }

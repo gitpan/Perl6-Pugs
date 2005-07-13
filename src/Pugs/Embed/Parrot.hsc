@@ -12,6 +12,7 @@ import System.IO
 import System.IO.Unsafe
 import Data.Maybe
 import Control.Monad
+import Pugs.Compat (getEnv)
 
 findExecutable' :: String -> IO (Maybe FilePath)
 findExecutable' cmd = do
@@ -36,7 +37,12 @@ findParrot = do
 evalParrotFile :: FilePath -> IO ()
 evalParrotFile file = do
     cmd <- findParrot
-    rawSystem cmd ["-j", file]
+    -- parrot -j is fatal on systems where jit is not supported,
+    -- so we use the next fastest CGP core.
+    args <- getEnv "PUGS_PARROT_OPTS"
+    let args' | isJust args && fromJust args /= "" = fromJust args
+              | otherwise                          = "-C"
+    rawSystem cmd [args', file]
     return ()
 
 evalParrot :: String -> IO ()
@@ -153,6 +159,8 @@ initParrot = do
     writeIORef _ParrotInterp interp
 #if PARROT_JIT_CAPABLE && defined(PARROT_JIT_CORE)
     parrot_set_run_core interp PARROT_JIT_CORE
+#elsif defined(PARROT_CGP_CORE)
+    parrot_set_run_core interp PARROT_CGP_CORE
 #endif
     parrot_imcc_init interp
     callback    <- mkCompileCallback compileToParrot
@@ -177,7 +185,7 @@ loadPGE interp path = do
     if match /= nullPtr then return (match, add) else do
     cwd     <- getCurrentDirectory
     setCurrentDirectory path
-    evalParrot ".sub main\nload_bytecode 'PGE/Hs.pir'\n.end\n"
+    evalParrot ".sub main\nload_bytecode 'PGE.pbc'\nload_bytecode 'PGE/Hs.pir'\n.end\n"
     setCurrentDirectory cwd
     loadPGE interp path
 

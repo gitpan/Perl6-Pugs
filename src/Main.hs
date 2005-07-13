@@ -3,14 +3,15 @@
 {-|
     The Main REPL loop.
 
->   Sie bauten ihm ein neues Schiff
->   Aus Mithril und aus Elbenglas
->   Mit stolzem Bug, doch ruderlos,
->   Mit Silbermast, doch ohne Tuch,
->   Und Elbereth kam selbst herab:
->   Sie schuf dem Schiff den Silmaril
->   Zum Banner, ein lebendiges Licht,
->   Ein heller Schein, der nie verblaßt...
+>   眾人為彼造新舟
+>   鑄以祕銀精靈璃
+>   船首閃耀何需槳
+>   銀桅未有風帆繫
+>
+>   無雙寶鑽作燈炬
+>   旗幟輝煌展生焰
+>   映照燃星雅碧綠
+>   神祇乘梭下九天...
 
 -}
 
@@ -26,8 +27,9 @@ import Pugs.Shell
 import Pugs.Parser.Program
 import Pugs.Help
 import Pugs.Pretty
-import Pugs.Compile
+import Pugs.CodeGen
 import Pugs.Embed
+import Pugs.Prim.Eval (requireInc)
 import qualified Data.Map as Map
 import Data.IORef
 
@@ -73,15 +75,21 @@ run ("-c":"-e":prog:_)          = doCheck "-e" prog
 run ("-c":file:_)               = readFile file >>= doCheck file
 
 run ("-C":backend:"-e":prog:_)           = doCompileDump backend "-e" prog
-run ("-C":backend:file:_)                = readFile file >>= doCompileDump backend file
+run ("-C":backend:file:_)                = slurpFile file >>= doCompileDump backend file
 
 run ("-B":backend:"-e":prog:_)           = doCompileRun backend "-e" prog
-run ("-B":backend:file:_)                = readFile file >>= doCompileRun backend file
+run ("-B":backend:file:_)                = slurpFile file >>= doCompileRun backend file
 
 run ("--external":mod:"-e":prog:_)    = doExternal mod "-e" prog
 run ("--external":mod:file:_)         = readFile file >>= doExternal mod file
 
 run (("-e"):prog:args)          = do doRun "-e" args prog
+-- -E is like -e, but not accessible as a normal parameter and used only
+-- internally:
+--   "-e foo bar.p6" executes "foo" with @*ARGS[0] eq "bar.p6",
+--   "-E foo bar.p6" executes "foo" and then bar.p6.
+-- XXX - Wrong -- Need to preserve environment across -E runs
+run (("-E"):prog:rest)          = run ("-e":prog:[]) >> run rest
 run ("-":args)                  = do doRun "-" args =<< readStdin
 run (file:args)                 = readFile file >>= doRun file args
 run []                          = do
@@ -118,13 +126,17 @@ dumpGlob = (doParseWith $ \env _ -> do
 userDefined :: Pad -> Pad
 userDefined (MkPad pad) = MkPad $ Map.filterWithKey doFilter pad
     where
-    doFilter (_:'*':_) _ = False
-    doFilter _ _         = True
+    doFilter key _ = not (key `elem` reserved)
+    reserved = words $
+        "@*ARGS @*INC %*INC $*PUGS_HAS_HSPLUGINS $*EXECUTABLE_NAME " ++
+        "$*PROGRAM_NAME $*PID $*UID $*EUID $*GID $*EGID @*CHECK @*INIT $*IN " ++
+        "$*OUT $*ERR $*ARGS $/ %*ENV $*CWD @=POD $=POD $?PUGS_VERSION " ++
+        "$*OS &?BLOCK_EXIT %?CONFIG $*_ $*AUTOLOAD"
 
 repLoop :: IO ()
 repLoop = do
     initializeShell
-    env <- liftSTM . newTVar . (\e -> e{ envDebug = Nothing }) =<< tabulaRasa
+    env <- liftSTM . newTVar . (\e -> e{ envDebug = Nothing }) =<< tabulaRasa "<interactive>"
     fix $ \loop -> do
         command <- getCommand
         case command of
@@ -134,7 +146,7 @@ repLoop = do
             CmdParse prog     -> doParse pretty "<interactive>" prog >> loop
             CmdParseRaw prog  -> doParse show   "<interactive>" prog >> loop
             CmdHelp           -> printInteractiveHelp >> loop
-            CmdReset          -> tabulaRasa >>= (liftSTM . writeTVar env) >> loop
+            CmdReset          -> tabulaRasa "<interactive>" >>= (liftSTM . writeTVar env) >> loop
 
 {-|
 Create a \'blank\' 'Env' for our program to execute in. Of course,
@@ -143,8 +155,8 @@ e.g. \'\@\*ARGS\', \'\$\*PID\', \'\$\*ERR\' etc.
 
 ('Tabula rasa' is Latin for 'a blank slate'.)
 -}
-tabulaRasa :: IO Env
-tabulaRasa = prepareEnv "<interactive>" []
+tabulaRasa :: String -> IO Env
+tabulaRasa name = prepareEnv name []
 
 doCheck :: FilePath -> String -> IO ()
 doCheck = doParseWith $ \_ name -> do
@@ -160,12 +172,22 @@ doCompile backend = doParseWith $ \env _ -> do
     globRef <- liftSTM $ do
         glob <- readTVar $ envGlobal env
         newTVar $ userDefined glob
-    compile backend env{ envGlobal = globRef }
+    codeGen backend env{ envGlobal = globRef }
+
+initCompile :: IO ()
+initCompile = do
+    compPrelude <- getEnv "PUGS_COMPILE_PRELUDE"
+    writeIORef _BypassPreludePC $ case compPrelude of
+        Nothing     -> True
+        Just ""     -> True
+        Just "0"    -> True
+        _           -> False
 
 doCompileDump :: String -> FilePath -> String -> IO ()
 doCompileDump backend file prog = do
+    initCompile
     str <- doCompile backend' file prog
-    writeFile "dump.ast" str
+    putStr str
     where
     backend' = capitalizeWord backend
     capitalizeWord []     = []
@@ -173,6 +195,7 @@ doCompileDump backend file prog = do
 
 doCompileRun :: String -> FilePath -> String -> IO ()
 doCompileRun backend file prog = do
+    initCompile
     str <- doCompile backend' file prog
     evalEmbedded backend' str
     where
@@ -182,7 +205,7 @@ doCompileRun backend file prog = do
 
 doParseWith :: (Env -> FilePath -> IO a) -> FilePath -> String -> IO a
 doParseWith f name prog = do
-    env <- tabulaRasa
+    env <- tabulaRasa name
     f' $ parseProgram env name $ decodeUTF8 prog
     where
     f' env | Val err@(VError _ _) <- envBody env = do
@@ -192,7 +215,7 @@ doParseWith f name prog = do
 
 doParse :: (Exp -> String) -> FilePath -> String -> IO ()
 doParse prettyFunc name prog = do
-    env <- tabulaRasa
+    env <- tabulaRasa name
     case envBody $ parseProgram env name (decodeUTF8 prog) of
         (Val err@(VError _ _)) -> putStrLn $ pretty err
         exp -> putStrLn $ prettyFunc exp
@@ -224,7 +247,7 @@ doRunSingle menv opts prog = (`catch` handler) $ do
 	  (decodeUTF8 prog)
     theEnv = do
         ref <- if runOptSeparately opts
-                then (liftSTM . newTVar) =<< tabulaRasa
+                then (liftSTM . newTVar) =<< tabulaRasa "<interactive>"
                 else return menv
         debug <- if runOptDebug opts
                 then fmap Just (liftSTM $ newTVar Map.empty)
@@ -297,3 +320,48 @@ printConfigInfo [] = do
 
 printConfigInfo (item:_) = do
 	putStrLn $ createConfigLine item
+
+compPIR :: String -> IO ()
+compPIR prog = do
+    pir <- doCompile "PIR" "-" prog
+    putStr $ (subMain ++ (last $ split subMain pir))
+    where
+    subMain = ".sub main"
+
+runPIR :: String -> IO ()
+runPIR prog = do
+    pir <- doCompile "PIR" "-" prog
+    writeFile "a.pir" pir
+    evalParrotFile "a.pir"
+
+slurpFile :: FilePath -> IO String
+slurpFile file = do
+    prog <- readFile file
+    libs <- getLibs
+    file <- expandInc libs prog
+    -- writeFile "ZZZ" file
+    return file
+    where
+    expandInc :: [FilePath] -> String -> IO String
+    expandInc incs str = case breakOnGlue "\nuse " str of
+        Nothing -> case breakOnGlue "\nrequire " str of
+            Nothing -> return str
+            Just (pre, post) -> do
+                let (mod, (_:rest)) = span (/= ';') (dropWhile isSpace post)
+                mod'    <- includeInc incs mod
+                rest'   <- expandInc incs rest
+                return $ pre ++ mod' ++ rest'
+        Just (pre, post) -> do
+            let (mod, (_:rest)) = span isAlphaNum (dropWhile isSpace post)
+            mod'    <- includeInc incs mod
+            rest'   <- expandInc incs rest
+            return $ pre ++ mod' ++ rest'
+    includeInc :: [FilePath] -> String -> IO String
+    includeInc _ ('v':_) = return []
+    includeInc incs name = do
+        let name' = concat (intersperse "/" names) ++ ".pm"
+            names = split "::" name
+        pathName    <- requireInc incs name' (errMsg name incs)
+        readFile pathName
+    errMsg file incs = "Can't locate " ++ file ++ " in @*INC (@*INC contains: " ++ unwords incs ++ ")."
+

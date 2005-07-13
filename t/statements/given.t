@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 44;
+plan 45;
 
 =kwid
 
@@ -43,7 +43,7 @@ Tests the given block, as defined in L<S04/"Switch statements">
 	my $foo;
 	eval 'given "foo" { when "bar", /foo/ { $foo = 1 } }';
 
-	ok($foo, "foo was found in OR when", :todo);
+	ok($foo, "foo was found in OR when");
 };
 
 
@@ -121,26 +121,24 @@ Tests the given block, as defined in L<S04/"Switch statements">
 
 {
     my ($foo, $bar) = (1, 0);
-    eval '
     given (1) {
         when (1) { $foo = 2; continue; $foo = 3; }
         when (2) { $foo = 4; }
         default { $bar = 1; }
         $foo = 5;
-    }';
+    };
     is($foo, 2, 'continue aborts when block');
     ok($bar, 'continue does not prevent default');
 }
 
 {
     my ($foo, $bar) = (1, 0);
-    eval '
     given (1) {
         when (1) { $foo = 2; break; $foo = 3; }
         when (2) { $foo = 4; }
         default { $bar = 1 }
         $foo = 5;
-    }';
+    };
     is($foo, 2, 'break aborts when');
     ok(!$bar, 'break prevents default');
 }
@@ -172,8 +170,8 @@ Tests the given block, as defined in L<S04/"Switch statements">
       }
     }
 
-   is ret_test("a"), "A", "given returns the correct value (1)"; 
-   is ret_test("b"), "B", "given returns the correct value (2)"; 
+   is( ret_test("a"), "A", "given returns the correct value (1)" ); 
+   is( ret_test("b"), "B", "given returns the correct value (2)" ); 
 }
 
 # given/when and junctions
@@ -199,18 +197,35 @@ Tests the given block, as defined in L<S04/"Switch statements">
 {
     class TestIt { method passit { 1; }; has %.testing is rw; };
     my $passed = 0;
-    eval_ok( 'given TestIt.new { $_.passit; };', '$_. method calls' );    
-    eval_ok( 'given TestIt.new { .passit; };'  , '. method calls'   );
-    eval_ok( 'given TestIt.new { $_.testing<a> = 1; };','$_. attribute access');
-    eval_ok( 'given TestIt.new { .testing<a> = 1; };',  '. attribute access');
+    eval_ok( 'given TestIt.new { $_.passit; };', '$_. method calls', :todo<bug> );    
+    eval_ok( 'given TestIt.new { .passit; };'  , '. method calls', :todo<bug>   );
+    eval_ok( 'given TestIt.new { $_.testing<a> = 1; };','$_. attribute access', :todo<bug>);
+    eval_ok( 'given TestIt.new { .testing<a> = 1; };',  '. attribute access', :todo<bug>);
     my $t = TestIt.new;
     given $t { when TestIt { $passed = 1;} };
-    is($passed, 1,"when Type {}", :todo<bug>);
+    is($passed, 1,"when Type {}");
     $passed = 0;
     given $t { when .isa(TestIt) { $passed = 1;}}
     is($passed, 1,"when .isa(Type) {}");
     $passed = 0;
     given $t { when (TestIt) { $passed = 1; }};
-    is($passed, 1,"when (Type) {}", :todo<feature>);
+    is($passed, 1,"when (Type) {}");
 }
 
+# given + true
+# L<S04/"Switch statements" /"is exactly equivalent to">
+eval '
+    my @input = (0, 1);
+    my @got;
+
+    for @input -> $x {
+	    given $x {
+	          when true { push @got, "true" }
+		  default { push @got, "false" }
+                  #when !true { push @got, "false" }
+	    }
+    }
+
+    is(@got.join(","), "false,true", q!given { when true { } }!);
+';
+fail("when true is parsefail", :todo<feature>) if $!;

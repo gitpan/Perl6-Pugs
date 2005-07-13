@@ -1,0 +1,17 @@
+- Ordered sets classes:
+
+  Set::Infinite - An object representing recurrences, multiple spans, etc. TODO
+
+  Set::Recurrence - An object representing a recurrence  TODO
+
+- Functional versions of some of the above classes:
+
+  Set::Recurrence::Functional  TODO
+
+- Internal classes
+
+  Set::Infinite::Functional
+
+TESTING
+
+  pugs -I../Test/lib -Ilib/Span/lib -Ilib t/test-name-here

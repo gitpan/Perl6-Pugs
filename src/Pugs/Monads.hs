@@ -49,6 +49,22 @@ enterEvalContext :: Cxt -> Exp -> Eval Val
 enterEvalContext cxt = enterContext cxt . evalExp
 
 {-|
+Perform the specified evaluation in the specified package.
+
+(Subsequent chained 'Eval's do /not/ see this package.)
+-}
+enterPackage :: String -> Eval a -> Eval a
+enterPackage pkg = local (\e -> e{ envPackage = pkg })
+
+{-|
+Enter a new environment and mark the previous one as 'Caller'.
+-}
+enterCaller :: Eval a -> Eval a
+enterCaller = local (\env -> env
+    { envCaller = Just env
+    , envDepth = envDepth env + 1 })
+
+{-|
 Bind @\$_@ to the given topic value in a new lexical scope, then perform
 the specified evaluation in that scope.
 
@@ -102,7 +118,8 @@ test to the top of the body evaluation.
 enterWhile :: Eval Val -- ^ Evaluation representing loop test & body
            -> Eval Val
 enterWhile action = genSymCC "&last" $ \symLast -> do
-    genSymPrim "&next" (const action) $ \symNext -> do
+    -- genSymPrim "&next" (const action) $ \symNext -> do
+    callCC $ \esc -> genSymPrim "&next" (const $ action >>= esc) $ \symNext -> do
         enterLex [symLast, symNext] action
 
 {-|
@@ -239,14 +256,6 @@ makeParams MkEnv{ envContext = cxt, envLValue = lv }
         , paramDefault = Val VUndef
         } ]
 
--- | (This doesn't seem to be used at the moment...)
-caller :: Int -> Eval Env
-caller n = do
-    depth <- asks envDepth
-    when (depth <= n) $
-        fail "Cannot ask for deeper depth"
-    asks $ foldl (.) id $ replicate n (fromJust . envCaller)
-
 evalVal :: Val -> Eval Val
 evalVal val = do
     lv  <- asks envLValue
@@ -264,4 +273,12 @@ evalVal val = do
 headVal :: [Val] -> Eval Val
 headVal []    = retEmpty
 headVal (v:_) = return v
+
+tempVar :: String -> Val -> Eval a -> Eval a
+tempVar var val action = do
+    old <- readVar var
+    writeVar var val
+    rv  <- action
+    writeVar var old
+    return rv
 

@@ -3,6 +3,8 @@
 use v6;
 use Test;
 
+force_todo 4;
+
 =pod
 
 Test handling of C<-Mmodule>.
@@ -17,10 +19,12 @@ my $dir = catdir( <t pugsrun> );
 
 my @tests = (
   "-I$dir -MDummy -e load_test",
-  "-e load_test -MDummy -I$dir"
+  "-e load_test -MDummy -I$dir",
+# temporarily run below
+#  "-I$dir -MDummy $dir/10-dash-uppercase-m.p6"
 );
 
-plan 1+@tests;
+plan 4;
 
 diag "Running under $*OS";
 
@@ -47,3 +51,6 @@ for @tests -> $test {
   my $output = run_pugs($test);
   is( $output, "Module Dummy.pm was loaded\n", "Module was loaded");
 };
+
+# when this works, delete this line, and uncomment this case in the list above.
+is(run_pugs("-I$dir -MDummy $dir/10-dash-uppercase-m.p6"), "Module Dummy.pm was loaded\n", "Module was loaded", :todo<bug>);

@@ -5,12 +5,12 @@
 # $Id: cpan-upload,v 2.2 2002/07/02 21:44:10 neilb Exp $
 #
 
-use AppConfig::Std--perl5;
-use Net::FTP--perl5;
-use HTTP::Request::Common--perl5;
-use LWP::UserAgent--perl5;
-use HTTP::Status--perl5;
-use File::Basename--perl5;
+use perl5:AppConfig::Std;
+use perl5:Net::FTP;
+use perl5:HTTP::Request::Common;
+use perl5:LWP::UserAgent;
+use perl5:HTTP::Status;
+use perl5:File::Basename;
 
 #-----------------------------------------------------------------------
 #       Configuration constants and globals
@@ -65,7 +65,7 @@ sub initialise () {
     #-------------------------------------------------------------------
     $HOME = %ENV<HOME>;
     $config_file = "$HOME/.pause";
-    $config = eval_perl5(q!
+    $config = eval(q!
         my $config = AppConfig::Std->new();
         $config->define('user');
         $config->define('directory', {ARGCOUNT => 1, ALIAS => 'dir'});
@@ -76,7 +76,7 @@ sub initialise () {
         $config->define('http_proxy');
         $config->define('non_interactive', { ALIAS => 'ni', ARGCOUNT => 0 });
         $config;
-    !);
+    !, :lang<perl5>);
 
     #-------------------------------------------------------------------
     # Read the user's config file, if they have one,

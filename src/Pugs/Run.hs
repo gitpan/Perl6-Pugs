@@ -13,7 +13,7 @@ module Pugs.Run (
     runWithArgs,
     prepareEnv, runEnv,
     runAST, runComp,
-    getLibs,
+    getLibs, _BypassPreludePC,
 ) where
 import Pugs.Run.Args
 import Pugs.Run.Perl5 ()
@@ -26,8 +26,10 @@ import Pugs.Eval
 import Pugs.Prim
 import Pugs.Prim.Eval
 import Pugs.Embed
-import Pugs.Prelude
+import Data.IORef
 import qualified Data.Map as Map
+
+#include "PreludePC.hs"
 
 {-|
 Run 'Main.run' with command line args. 
@@ -92,6 +94,7 @@ prepareEnv name args = do
     endAV   <- newArray []
     matchAV <- newScalar (VMatch mkMatchFail)
     incAV   <- newArray (map VStr libs)
+    incHV   <- newHash Map.empty
     argsAV  <- newArray (map VStr args)
     inGV    <- newHandle stdin
     outGV   <- newHandle stdout
@@ -112,6 +115,7 @@ prepareEnv name args = do
     env <- emptyEnv name $
         [ genSym "@*ARGS"       $ hideInSafemode $ MkRef argsAV
         , genSym "@*INC"        $ hideInSafemode $ MkRef incAV
+        , genSym "%*INC"        $ hideInSafemode $ MkRef incHV
         , genSym "$*PUGS_HAS_HSPLUGINS" $ hideInSafemode $ MkRef hspluginsSV
         , genSym "$*EXECUTABLE_NAME"    $ hideInSafemode $ MkRef execSV
         , genSym "$*PROGRAM_NAME"       $ hideInSafemode $ MkRef progSV
@@ -121,8 +125,8 @@ prepareEnv name args = do
         , genSym "$*EUID"       $ hideInSafemode $ MkRef euidSV
         , genSym "$*GID"        $ hideInSafemode $ MkRef gidSV
         , genSym "$*EGID"       $ hideInSafemode $ MkRef egidSV
-        , genSym "@?CHECK"      $ MkRef checkAV
-        , genSym "@?INIT"       $ MkRef initAV
+        , genSym "@*CHECK"      $ MkRef checkAV
+        , genSym "@*INIT"       $ MkRef initAV
         , genSym "@*END"        $ MkRef endAV
         , genSym "$*IN"         $ hideInSafemode $ MkRef inGV
         , genSym "$*OUT"        $ hideInSafemode $ MkRef outGV
@@ -150,24 +154,9 @@ prepareEnv name args = do
     unless safeMode $ do
         initPerl5 "" (Just . VControl $ ControlEnv env{ envDebug = Nothing })
         return ()
-    initPrelude env
-    return env
+    initPreludePC env              -- null in first pass
     where
     hideInSafemode x = if safeMode then MkRef $ constScalar undef else x
-
-{-# NOINLINE initPrelude #-}
-initPrelude :: Env -> IO Val
-initPrelude env = do
-    if bypass then return VUndef else
-        runEvalIO env{envDebug = Nothing} $ opEval style "<prelude>" preludeStr
-    where
-    style = MkEvalStyle{evalResult=EvalResultModule
-                       ,evalError =EvalErrorFatal}
-    bypass = case (unsafePerformIO $ getEnv "PUGS_BYPASS_PRELUDE") of
-        Nothing     -> False
-        Just ""     -> False
-        Just "0"    -> False
-        _           -> True
 
 initClassObjects :: [Type] -> ClassTree -> IO [STM (Pad -> Pad)]
 initClassObjects parent (Node typ children) = do
@@ -179,30 +168,4 @@ initClassObjects parent (Node typ children) = do
     rest    <- mapM (initClassObjects [typ]) children
     let sym = genSym (':':'*':showType typ) $ MkRef objSV
     return (sym:concat rest)
-
-{-|
-Combine @%*ENV\<PERL6LIB\>@, -I, 'Pugs.Config.config' values and \".\" into the
-@\@*INC@ list for 'Main.printConfigInfo'. If @%*ENV\<PERL6LIB\>@ is not set,
-@%*ENV\<PERLLIB\>@ is used instead.
--}
-getLibs :: IO [String]
-getLibs = do
-    args    <- getArgs
-    p6lib   <- (getEnv "PERL6LIB") >>= (return . (fromMaybe ""))
-    plib    <- (getEnv "PERLLIB")  >>= (return . (fromMaybe ""))
-    let lib = if (p6lib == "") then plib else p6lib
-    return $ filter (not . null) (libs lib $ canonicalArgs args)
-    where
-    -- broken, need real parser
-    inclibs ("-I":dir:rest) = [dir] ++ inclibs(rest)
-    inclibs (_:rest)        = inclibs(rest)
-    inclibs ([])            = []
-    libs p6lib args = (inclibs args)
-              ++ (split (getConfig "path_sep") p6lib)
-              ++ [ getConfig "archlib"
-                 , getConfig "privlib"
-                 , getConfig "sitearch"
-                 , getConfig "sitelib"
-                 ]
-              ++ [ "." ]
 

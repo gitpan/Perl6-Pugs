@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 7;
+plan 11;
 
 =pod
 
@@ -15,16 +15,22 @@ L<S06/"Lvalue subroutines">
 
 my $val1 = 1;
 my $val2 = 2;
+
 sub lastval is rw { return $val2; }
 sub prevval is rw { return lastval(); }
+
 lastval() = 3;
 is($val2, 3); # simple
+
 prevval() = 4;
 is($val2, 4); # nested
+
 # S6 says that lvalue subroutines are marked out by 'is rw'
 sub notlvalue { return $val1; } # without rw
-eval_ok('notlvalue() = 5;$val1==1;', 'non-rw subroutines should not support assignment', :todo);
-isnt($val1, 4, 'non-rw subroutines should not assign');
+
+notlvalue() = 5;
+is $val1, 1, 'non-rw subroutines should not support assignment', :todo<bug>;
+isnt $val1, 5, 'non-rw subroutines should not assign', :todo<bug>;
 
 sub check ($passwd) { return $password eq "fish"; };
 
@@ -40,13 +46,35 @@ eval 'sub checklastval ($passwd) is rw {
         );
 	return $proxy;
 };';
+
 my $errors;
 eval 'try { checklastval("octopus") = 10 }; $errors=$!;';
-is($errors, "wrong password", 'checklastval STORE can die', :todo);
+is($errors, "wrong password", 'checklastval STORE can die', :todo<feature>);
+
 # Above test may well die for the wrong reason, if the Proxy stuff didn't
 # parse OK, it will complain that it couldn't find the desired subroutine
-eval 'checklastval("fish") = 12;';
-is($val2, 12, 'proxy lvalue subroutine STORE works', :todo);
+eval_is('checklastval("fish") = 12; $val2', 12, 'proxy lvalue subroutine STORE works', :todo<feature>);
 my $resultval;
 eval '$resultval = checklastval("fish");';
-is($resultval, 12, 'proxy lvalue subroutine FETCH works', :todo);
+is($resultval, 12, 'proxy lvalue subroutine FETCH works', :todo<feature>);
+
+my $realvar = "foo";
+eval_ok 'sub proxyvar ($prefix) is rw {
+	    return new Proxy:
+		FETCH => { $prefix ~ lc($realvar) },
+		STORE => { lc($realvar = $^val) };
+        }; 1', 'defining lvalue sub using `new Proxy: ` works', :todo<feature>;
+eval_is 'proxyvar("PRE")', 'PREfoo', 'proxy lvalue subroutine FETCH works', :todo<feature>;
+# Return value of assignments of Proxy objects is decided now.
+# See thread "Assigning Proxy objects" on p6l,
+# http://www.nntp.perl.org/group/perl.perl6.language/21838.
+# Quoting Larry:
+#   The intention is that lvalue subs behave in all respects as if they
+#   were variables.  So consider what
+#   
+#       say $nonproxy = 40;
+#   
+#   should do.
+eval_is 'proxyvar("PRE") = "BAR"', 'BAR',
+    'proxy lvalue subroutine STORE works and returns the correct value', :todo<feature>;
+is $realvar, 'BAR', 'variable was modified', :todo<feature>;

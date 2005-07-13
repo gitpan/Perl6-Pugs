@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
+{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 {-|
     Pretty printing for various data structures.
@@ -94,7 +95,7 @@ instance Pretty Val where
     format (VNum x) = if x == 1/0 then text "Inf" else text $ show x
     format (VInt x) = integer x
     format (VStr x) = text $ "'" ++ encodeUTF8 (concatMap quoted x) ++ "'"
-    format v@(VRat _) = text $ vCast v
+    format (VRat x) = text $ showRat x
     format (VComplex x) = text $ show x
     format (VControl (ControlEnv _)) = text "<env>"
     format (VControl x) = text $ show x
@@ -124,7 +125,7 @@ instance Pretty Val where
 --  format (VHash h) = braces $ (joinList $ text ", ") $
 --      [ format (VStr k, v) | (k, v) <- Map.toList h ]
     format (VHandle x) = text $ show x
-    format t@(VThread _) = text $ vCast t
+    format (VThread t) = text $ takeWhile isDigit $ dropWhile (not . isDigit) $ show t
     format (VSocket x) = text $ show x
     -- format (MVal v) = text $ unsafePerformIO $ do
     --     val <- readTVar v

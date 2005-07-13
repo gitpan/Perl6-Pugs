@@ -23,7 +23,7 @@ sub Config::Tiny::new () returns Ref {
             my $cnt  = 0;
             for =$input -> $line is copy {
                 ++$cnt;
-                chomp $line;
+                $line .= chomp;
 
                 # Skip comments and empty lines
                 # Workaround for next
@@ -54,7 +54,10 @@ sub Config::Tiny::new () returns Ref {
             if ( ref $output ne 'IO' ) {
                 %self<_err_str> = "Failed to open $file for writing" and return FALSE;
             }
-            for grep {$_ ne '_err_str' } sort keys %self -> $section {
+            # for grep {$_ ne '_err_str' } sort keys %self -> $section {
+            # XXX doesn't work because of a pugsbug ATM
+            for sort keys %self -> $section {
+                next if $_ eq "_err_str";
                 $output.say("[$section]") if $section.chars;
                 for sort keys %self{$section} {
                     $output.say("$_=%self{$section}{$_}");
@@ -119,7 +122,7 @@ Config::Tiny is a utility to read and write .ini style configuration files
 with as little code as possible, reducing load time and memory overhead.
 
 Written using Pugs as of 2005-05-05, it was written to provide functionality
-while Perl6 was still being developed.
+while Perl 6 was still being developed.
 
 This module is primarily for reading human written files, and anything we
 write shouldn't need to have documentation/comments. If you need something
@@ -191,7 +194,7 @@ The C<err_str> method returns the last error message
 
 =head1 AUTHORS
 
-This module is based on Adam Kennedy's Perl5 module by the same name
+This module is based on Adam Kennedy's Perl 5 module by the same name
 
 Joshua Gatcomb, E<lt>Limbic_Region_2000@Yahoo.comE<gt>
 
@@ -201,11 +204,11 @@ Stevan Little, E<lt>stevan@iinteractive.comE<gt>
 
 =over 4
 
-=item Adam's Perl5 implementation
+=item Adam's Perl 5 implementation
 
 L<http://search.cpan.org/~adamk/Config-Tiny-2.01/lib/Config/Tiny.pm>
 
-=item OO Perl6 implementation by Ingo Blechschmidt 
+=item OO Perl 6 implementation by Ingo Blechschmidt 
 
 L<http://tpe.freepan.org/repos/adamk/Config-Tiny/lib/Config/Tiny.pm>
 

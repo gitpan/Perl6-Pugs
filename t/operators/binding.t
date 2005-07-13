@@ -13,7 +13,7 @@ L<S03/"Binding">
 
 =cut
 
-plan 21;
+plan 23;
 
 # L<S03/"Binding" /replaces the container itself.  For instance:/>
 
@@ -28,7 +28,7 @@ ok($y =:= $x, 'y is bound to x (we checked with the =:= identity op)');
 my $z = $x;
 is($z, 'Just Another', 'z is not bound to x');
 
-ok(eval '!($z =:= $x)', 'z is not bound to x (we checked with the =:= identity op)', :todo);
+ok(!($z =:= $x), 'z is not bound to x (we checked with the =:= identity op)', :todo);
 
 $y = 'Perl Hacker';
 is($y, 'Perl Hacker', 'y has been changed to "Perl Hacker"');
@@ -90,4 +90,14 @@ ok(foo(), "CALLER resolves bindings in caller's dynamic scope");
   lives_ok { $a = 23 }, "bound rw sub param remains rw (1)";
   is $a, 23,            "bound rw sub param remains rw (2)";
   is $val, 23,          "bound rw sub param remains rw (3)";
+}
+
+# := actually takes function parameter list
+{
+  my $a;
+  eval '(+$a) := (:a<foo>)';
+  is($a, "foo", "bound keyword", :todo);
+  my @tail;
+  eval '($a, *@tail) := (1, 2, 3)';
+  ok($a == 1 and ~@tail eq '2 3', 'bound slurpy', :todo);
 }

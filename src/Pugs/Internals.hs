@@ -57,6 +57,7 @@ module Pugs.Internals (
     module Network,
     internalError,
     split,
+    split_n,
     breakOnGlue,
     afterPrefix,
     decodeUTF8,
@@ -89,7 +90,8 @@ import System.Process
 import System.IO (
     Handle, stdin, stdout, hClose, hGetLine, hGetChar, hGetContents,
     openFile, hSetBinaryMode, hPutStr, hPutStrLn, IOMode(..), stderr, SeekMode(..),
-    hSetBuffering, BufferMode(..), hIsTerminalDevice, hFlush, hPrint, isEOF
+    hSetBuffering, BufferMode(..), hIsTerminalDevice, hFlush, hPrint, isEOF,
+    hSeek, hTell, hIsOpen, hIsClosed, hIsReadable, hIsWritable, hIsSeekable,
     )
 import System.IO.Unsafe
 import System.IO.Error (ioeGetErrorString, isUserError)
@@ -126,16 +128,19 @@ import Pugs.Rule.Pos
 -- Instances.
 instance Show Unique where
     show = show . hashUnique
-instance Show (a -> b) where
-    show _ = "(->)"
-instance Eq (a -> b) where
-    _ == _ = False
-instance Ord (a -> b) where
-    compare _ _ = LT
+instance (Typeable a, Typeable b) => Show (a -> b) where
+    show _ = "(" ++ typA ++ " -> " ++ typB ++ ")"
+        where
+        typA = show $ typeOf (undefined :: a)
+        typB = show $ typeOf (undefined :: b)
+instance (Typeable a, Typeable b) => Eq (a -> b) where
+    x == y = show x == show y
+instance (Typeable a, Typeable b) => Ord (a -> b) where
+    compare x y = compare (show x) (show y)
 instance Eq Dynamic where
-    _ == _ = False
+    x == y = show x == show y
 instance Ord Dynamic where
-    compare _ _ = LT
+    compare x y = compare (show x) (show y)
 
 internalError :: String -> a
 internalError s = error $
@@ -147,6 +152,15 @@ split sep str =
    case breakOnGlue sep str of
      Just (before, after) -> before : split sep after
      Nothing -> [str]
+
+split_n :: (Eq a) => [a] -> [a] -> Int -> [[a]]
+split_n [] _ _ = internalError "splitting by an empty list"
+split_n sep str n
+   | n == 1 = [str]
+   | otherwise =
+   case breakOnGlue sep str of
+       Just (before, after) -> before : split_n sep after (n-1)
+       Nothing -> [str]
 
 -- returns Nothing if the glue isn't there
 breakOnGlue :: (Eq a) => [a] -> [a] -> Maybe ([a], [a])

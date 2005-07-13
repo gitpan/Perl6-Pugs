@@ -3,7 +3,9 @@
 
 module Pugs.Eval.Var (
     findVar, findVarRef,
-    evalVar, findSub,
+    findSub, evalExpType,
+    isQualified, packageOf, qualify,
+    toPackage, toQualified,
 ) where
 import qualified Data.Map as Map
 import Pugs.Internals
@@ -70,10 +72,12 @@ findVarRef name
     doFindVarRef :: Var -> Eval (Maybe (TVar VRef))
     doFindVarRef name = do
         callCC $ \foundIt -> do
-            lexSym <- fmap (findSym name . envLexical) ask
+            lexSym  <- fmap (findSym name . envLexical) ask
             when (isJust lexSym) $ foundIt lexSym
-            glob   <- liftSTM . readTVar . envGlobal =<< ask
-            let globSym = findSym name glob
+            glob    <- liftSTM . readTVar . envGlobal =<< ask
+            name'   <- toQualified name
+            -- XXX - find qualified name here
+            let globSym = findSym name' glob
             when (isJust globSym) $ foundIt globSym
             let globSym = findSym (toGlobal name) glob
             when (isJust globSym) $ foundIt globSym
@@ -250,11 +254,11 @@ findSub name' invs args = do
     argSlurpLen :: Exp -> Eval Int
     argSlurpLen (Val listMVal) = do
         listVal  <- fromVal listMVal
-        return $ length (vCast listVal :: [Val])
+        fmap length (fromVal listVal :: Eval [Val])
     argSlurpLen (Var name) = do
-        listMVal <- evalVar name
+        listMVal <- evalExp (Var name)
         listVal  <- fromVal listMVal
-        return $ length (vCast listVal :: [Val])
+        fmap length (fromVal listVal :: Eval [Val])
     argSlurpLen (Syn "," list) =  return $ length list
     argSlurpLen _ = return 1 -- XXX
     doFindSub :: Int -> [(String, Val)] -> Eval (Maybe VCode)
@@ -313,8 +317,12 @@ evalExpType (Pad _ _ exp) = evalExpType exp
 evalExpType (Sym _ _ exp) = evalExpType exp
 evalExpType (Stmts _ exp) = evalExpType exp
 evalExpType (Syn "sub" [exp]) = evalExpType exp
+evalExpType (Syn "," _)    = return $ mkType "List"
 evalExpType (Syn "\\[]" _) = return $ mkType "Array"
 evalExpType (Syn "\\{}" _) = return $ mkType "Hash"
+evalExpType (Syn "&{}" _)  = return $ mkType "Code"
+evalExpType (Syn "@{}" _)  = return $ mkType "Array"
+evalExpType (Syn "%{}" _)  = return $ mkType "Hash"
 evalExpType _ = return $ mkType "Any"
 
 {-|
@@ -366,14 +374,6 @@ toGlobal name
     = sigil ++ ('*':identifier)
     | otherwise = name
 
-evalVar :: Var -> Eval Val
-evalVar name = do
-    v <- findVar name
-    case v of
-        Just var -> readRef var
-        _ | (':':rest) <- name -> return $ VType (mkType rest)
-        _ -> retError "Undeclared variable" name
-
 arityMatch :: VCode -> Int -> Int -> Maybe VCode
 arityMatch sub@MkCode{ subAssoc = assoc, subParams = prms } argLen argSlurpLen
     | assoc == "list" || assoc == "chain"
@@ -392,10 +392,44 @@ arityMatch sub@MkCode{ subAssoc = assoc, subParams = prms } argLen argSlurpLen
     | otherwise
     = Nothing
 
+breakSigil :: String -> (String, String)
+breakSigil = break (\x -> isAlpha x || x == '_')
+
 toPackage :: String -> String -> String
 toPackage pkg name
-    | (sigil, identifier) <- break (\x -> isAlpha x || x == '_') name
+    | (sigil, identifier) <- breakSigil name
     , last sigil /= '*'
     = concat [sigil, pkg, "::", identifier]
     | otherwise = name
 
+packageOf :: String -> String
+packageOf name = case isQualified name of
+    Just (pkg, _)   -> pkg
+    _               -> "main"
+
+qualify :: String -> String
+qualify name = case isQualified name of
+    Just _  -> name
+    _       -> let (sigil, name') = breakSigil name
+        in sigil ++ "main::" ++ name'
+
+isQualified :: String -> Maybe (String, String)
+isQualified name | Just (post, pre) <- breakOnGlue "::" (reverse name) =
+    let (sigil, pkg) = span (not . isAlphaNum) preName
+        name'       = possiblyFixOperatorName (sigil ++ postName)
+        preName     = reverse pre
+        postName    = reverse post
+    in Just (pkg, name')
+isQualified _ = Nothing
+
+toQualified :: String -> Eval String
+toQualified name@(_:'*':_) = return name
+toQualified name@(_:'?':_) = return name
+toQualified name@(_:"!") = return name
+toQualified name@(_:"/") = return name
+toQualified name = do
+    case isQualified name of
+        Just _  -> return name
+        _       -> do
+            pkg <- asks envPackage
+            return $ toPackage pkg name

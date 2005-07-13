@@ -263,9 +263,7 @@ initTree = fmap MkType $ Node "Any" [ Node "Void"
                         , Node "Submethod" []  -- why isn't this a node off Method? - mugwump
                         ]
                     , Node "Macro" [] ]
-                , Node "Block"
-                    [ Node "Bare"
-                        [ Node "Parametric" [] ] ]
+                , Node "Block" []
                 ]
             , Node "Rule" []
             , Node "Match" []
@@ -274,7 +272,10 @@ initTree = fmap MkType $ Node "Any" [ Node "Void"
             , Node "Scalar::Proxy" []
             , Node "Scalar::Lazy" []
             , Node "Scalar::Perl5" []
-            ]
+            , Node "Proxy" []
+            , Node "Control::Caller" []
+            , Node "Time::Local" []
+	    ]
         ]
     , Node "Grammar" []
     , Node "Type"

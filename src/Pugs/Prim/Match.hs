@@ -2,13 +2,12 @@
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 module Pugs.Prim.Match (
-    op2Match, rxSplit, matchFromMR
+    op2Match, rxSplit, rxSplit_n, matchFromMR, pkgParents
 ) where
 import Pugs.Internals
 import Pugs.Embed
 import Pugs.AST
 import Pugs.Types
-import Pugs.Context
 import Pugs.Config
 import qualified RRegex.PCRE as PCRE
 import qualified Data.Map as Map
@@ -73,9 +72,24 @@ matchFromMR mr = VMatch $ mkMatchOk 0 0 (decodeUTF8 all) subsMatch Map.empty
 
 -- XXX - need to generalise this
 op2Match :: Val -> Val -> Eval Val
+
+op2Match x (VRef (MkRef (IScalar sv))) | scalar_iType sv == mkType "Scalar::Const" = do
+    y' <- scalar_fetch' sv
+    op2Match x y'
+
 op2Match x (VRef y) = do
     y' <- readRef y
     op2Match x y'
+
+op2Match x@(VObject MkObject{ objType = MkType "Class" } ) y = do
+    fetch   <- doHash x hash_fetchVal
+    name    <- fromVal =<< fetch "name"
+    op2Match (VType (MkType name)) y
+
+op2Match x y@(VObject MkObject{ objType = MkType "Class" } ) = do
+    fetch   <- doHash y hash_fetchVal
+    name    <- fromVal =<< fetch "name"
+    op2Match x (VType (MkType name))
 
 op2Match x (VSubst (rx, subst)) | rxGlobal rx = do
     str         <- fromVal x
@@ -118,9 +132,11 @@ op2Match x (VRule rx) | rxGlobal rx = do
     cxt	    <- asks envContext
     if (not $ isSlurpyCxt cxt)
 	then return (VInt $ genericLength rv)
-	else return . VList $ if rxStringify rx
-	    then map (VStr . vCast) rv
-	    else rv
+	else if rxStringify rx
+	    then do
+                strs <- mapM fromVal rv
+                return (VList $ map VStr strs)
+	    else return (VList rv)
     where
     matchOnce :: String -> Eval [Val]
     matchOnce str = do
@@ -139,19 +155,24 @@ op2Match x (VRule rx) = do
         (return $ VList (matchSubPos match))
         (return $ VMatch match)
 
+op2Match (VType typ) (VType t) = do
+    typs <- pkgParents (showType typ)
+    return . VBool $ showType t `elem` (showType typ:typs)
+
+op2Match x y@(VType _) = do
+    typ <- fromVal x
+    case x of
+        VRef x | typ == MkType "Class" -> do
+            x' <- readRef x
+            op2Match x' y
+        _ -> op2Match (VType typ) y
+
 op2Match (VRef x) y = do
     x' <- readRef x
     op2Match x' y
 
-op2Match (VType typ) (VType t) = do
-    cls <- asks envClasses
-    return $ VBool (isaType cls (showType t) typ)
-
-op2Match x y@(VType _) = do
-    typ <- fromVal x
-    op2Match (VType typ) y
-
-op2Match x y = op2Cmp (fromVal :: Val -> Eval VStr) (==) x y
+op2Match x y = do
+    op2Cmp (fromVal :: Val -> Eval VStr) (==) x y
 
 op2Cmp :: (a -> Eval b) -> (b -> b -> VBool) -> a -> a -> Eval Val
 op2Cmp f cmp x y = do
@@ -174,3 +195,32 @@ rxSplit rx str = do
                 after  = genericDrop (matchTo match) str
             rest <- rxSplit rx after
             return $ (VStr before:matchSubPos match) ++ rest
+
+-- duplicated for now, pending über-Haskell-fu
+
+rxSplit_n :: VRule -> String -> Int -> Eval [Val]
+rxSplit_n _ [] _ = return []
+rxSplit_n rx str n = do
+    match <- str `doMatch` rx
+    if or [ ( n == 1 ), ( not (matchOk match) ) ] then return [VStr str] else do
+    if matchFrom match == matchTo match
+        then do
+            let (c:cs) = str
+            rest <- rxSplit_n rx (cs) (n-1)
+            return (VStr [c]:rest)
+        else do
+            let before = genericTake (matchFrom match) str
+                after  = genericDrop (matchTo match) str
+            rest <- rxSplit_n rx after (n-1)
+            return $ (VStr before:matchSubPos match) ++ rest
+
+pkgParents :: VStr -> Eval [VStr]
+pkgParents pkg = do
+    ref     <- readVar (':':'*':pkg)
+    if ref == undef then return [] else do
+    meta    <- readRef =<< fromVal ref
+    fetch   <- doHash meta hash_fetchVal
+    attrs   <- fromVal =<< fetch "traits"
+    pkgs    <- mapM pkgParents attrs
+    return $ nub (pkg:concat pkgs)
+

@@ -4,7 +4,7 @@ use v6;
 
 use Test;
 
-plan 31;
+plan 33;
 
 
 =head1 DESCRIPITION
@@ -22,9 +22,9 @@ See L<S06/"Types"> for more information about Code, Routine, Sub, Block, etc.
 #                        ____________|________________
 #                       |                             |
 #                    Routine                        Block
-#       ________________|_______________            __|___
-#      |     |       |       |    |     |          |      |
-#     Sub Method Submethod Multi Rule Macro      Bare Parametric
+#       ________________|_______________ 
+#      |     |       |       |    |     |
+#     Sub Method Submethod Multi Rule Macro
 
 {
     my $foo = sub () { 42 };
@@ -40,7 +40,6 @@ See L<S06/"Types"> for more information about Code, Routine, Sub, Block, etc.
     my $foo = -> () { 42 };
     isa_ok($foo, 'Code');
     isa_ok($foo, 'Block');
-    isa_ok($foo, 'Bare',:todo);
     is $foo.(), 42,                 "basic invocation of a pointy block";
     try { $foo.(23) };
     ok($!, "invocation of an parameterless pointy block with a parameter dies",:todo);
@@ -50,7 +49,6 @@ See L<S06/"Types"> for more information about Code, Routine, Sub, Block, etc.
     my $foo = { 100 + $^x };
     isa_ok($foo, 'Code');
     isa_ok($foo, 'Block');
-    isa_ok($foo, 'Parametric',:todo);
     is $foo.(42), 142,              "basic invocation of a pointy block with a param";
     try { $foo.() };
     ok($!, "invocation of an parameterized block expecting a param without a param dies");
@@ -76,6 +74,26 @@ See L<S06/"Types"> for more information about Code, Routine, Sub, Block, etc.
     ok($!, "calling an anonymous sub expecting a param without a param dies",:todo);
     try{ $foo.(42, 5) };
     ok($!, "calling an anonymous sub expecting one param with two params dies",:todo);
+}
+
+# Confirmed by p6l, see thread "Anonymous macros?" by Ingo Blechschmidt
+# http://www.nntp.perl.org/group/perl.perl6.language/21825
+{
+    # We do all this in a eval() not because the code doesn't parse,
+    # but because it's safer to only call macro references at compile-time.
+    # So we'd need to wrap the code in a BEGIN {...} block. But then, our test
+    # code would be called before all the other tests, causing confusion. :)
+    # So, we wrap the code in a eval() with an inner BEGIN.
+    # (The macros are subject to MMD thing still needs to be fleshed out, I
+    # think.)
+    eval 'BEGIN {
+        BEGIN { our &foo_macro = macro ($x) { "1000 + $x" } }
+        isa_ok(&foo_macro, "Code");
+        isa_ok(&foo_macro, "Routine");
+        isa_ok(&foo_macro, "Macro", :todo<feature>);
+
+        is foo_macro(3), 1003, "anonymous macro worked";
+    }';
 }
 
 {

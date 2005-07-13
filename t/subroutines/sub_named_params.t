@@ -4,7 +4,7 @@ use v6;
 
 use Test;
 
-plan 39;
+plan 41;
 
 =kwid
 
@@ -64,7 +64,7 @@ is(assign_based_on_named_positional(5, "y"=> 2), 2, "When we explicitly specify,
 is(assign_based_on_named_positional(5, y => 2), 2, "When we explicitly specify, we get our value");
 my $var = "y";
 is(assign_based_on_named_positional(5, $var => 2), 2,
-   "When we explicitly specify, we get our value", :todo<feature>);
+   "When we explicitly specify, we get our value");
 
 # L<S06/"Named parameters" /a \+\+ prefix.*?required/>
 sub mandatory (++$param) {
@@ -72,14 +72,14 @@ sub mandatory (++$param) {
 }
 
 is(mandatory('param' => 5) , 5, "named mandatory parameter is returned");
-is(eval 'mandatory()', undef, "not specifying a mandatory parameter fails");
+is(eval('mandatory()'), undef, "not specifying a mandatory parameter fails");
 
 sub mandatory_by_trait (+$param is required) {
     return $param;
 }
 
 is(mandatory_by_trait('param' => 5) , 5, "named mandatory parameter is returned");
-is(eval 'mandatory_by_trait()', undef, "not specifying a mandatory parameter fails");
+is(eval('mandatory_by_trait()'), undef, "not specifying a mandatory parameter fails");
 
 
 
@@ -136,6 +136,18 @@ is(+%rest, 2, "exactly 2 arguments were slurped");
 is(%rest<sky>, 'blue', "sky argument was slurped");
 is(%rest<fire>, 'red', "fire argument was slurped");
 is(%rest<grass>, undef, "grass argument was NOT slurped");
+}
+
+{
+my $ref;
+sub setref($refin) {
+    $ref = $refin;
+}
+my $aref = [0];
+setref(refin => $aref);
+$aref[0]++;
+is($aref[0], 1, "aref actually implemented");
+is($ref[0], 1, "ref is the same as aref");
 }
 
 =kwid

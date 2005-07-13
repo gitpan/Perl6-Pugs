@@ -7,9 +7,10 @@ use FindBin;
 use File::Copy;
 use File::Basename;
 use File::Glob 'bsd_glob';
+use IPC::Open2;
 
 if (!@ARGV || grep /^--help$/, @ARGV) {
-    die "Usage: $0 [--run] [--pugs|--haskell|--parrot] [ source[.p6] | -e oneliner ]\n";
+    die "Usage: $0 [--run] [--pugs|--haskell|--pir] [ source[.p6] | -e oneliner ]\n";
 }
 
 my $run;
@@ -27,12 +28,12 @@ if ($ARGV[0] =~ /^(?:(-)r|(--)run)(.*)$/) {
 
 
 my $backend = 'Pugs';
-if ($ARGV[0] =~ /^(?:-H|--haskell)$/) {
-    $backend = 'Haskell';
+if ($ARGV[0] =~ /^(?:-H|--haskell|--ghc)$/) {
+    $backend = 'Ghc';
     shift @ARGV;
 }
-elsif ($ARGV[0] =~ /^(?:-P|--parrot)$/) {
-    $backend = 'Parrot';
+elsif ($ARGV[0] =~ /^(?:-P|--pir|--parrot)$/) {
+    $backend = 'PIR';
     shift @ARGV;
 }
 elsif ($ARGV[0] =~ /^--pugs$/) {
@@ -54,26 +55,38 @@ if (@ARGV and -e $ARGV[0]) {
     $out =~ s{\..*}{};
 }
 
-if ($backend eq 'Parrot') {
-    $out .= ".imc";
+if ($backend eq 'PIR') {
+    $out .= '.pir';
 }
 else {
     $out .= ($^O eq 'MSWin32') ? ".exe" : ".out";
 }
 
 unlink "dump.ast";
-system("pugs", "-C$backend" => @ARGV);
-exit 1 unless -e "dump.ast";
 
-if ($backend eq 'Parrot') {
-    rename "dump.ast" => $out;
+my ($rh, $wh);
+my $pid = open2($rh, $wh, 'pugs', -C => $backend, @ARGV);
+my $program = do { local $/; <$rh> };
+waitpid($pid, 0);
+
+exit 1 unless length $program;
+
+sub writeFile {
+    my ($file, $str) = @_;
+    open my $fh, '>', $file or die $!;
+    print $fh $str;
+    close $fh;
+}
+
+if ($backend eq 'PIR') {
+    writeFile($out, $program);
     chmod 0755, $out;
 }
 else {
-    rename "dump.ast" => "$base/MainCC.hs";
+    writeFile("$base/MainCC.hs", $program);
 
-    my $archlib = `pugs -V:archlib`;
-    $archlib =~ /archlib:\s*(.+)/ or die "Cannot find archlib";
+    my $archlib = `pugs -V:installsitearch`;
+    $archlib =~ /installsitearch:\s*(.+)/ or die "Cannot find sitearch";
     my $core = "$1/CORE/pugs";
 
     # XXX - Maybe enable -threaded based on config?
@@ -93,6 +106,8 @@ else {
     push @ghc_flags, bsd_glob("$core/syck/*.o");
     push @ghc_flags, "$core/UnicodeC.o";
 
+    #fix_path(@ghc_flags);
+
     my $rv = system(
         $ghc_exe,
         "-v0", "-o", $out, "--make", "-main-is", "MainCC.mainCC",
@@ -110,8 +125,8 @@ else {
 die unless -e $out;
 
 if ($run) {
-    if ($backend eq 'Parrot' and !-x '/usr/bin/env') {
-        system("parrot" => $out);
+    if ($backend eq 'PIR' and !-x '/usr/bin/env') {
+        system(parrot => $out);
     }
     else {
         system {$out} $out;
@@ -130,6 +145,13 @@ sub ghc_version {
     return $1;
 }
 
+#sub fix_path {
+#    my ($fs) = ($Config{sitelib} =~ /([\/\\])/)
+#        or die "Can't determine file_sep";
+#    return if $fs eq '/';
+#    s#/#$fs#g for @_;
+#}
+
 1;
 
 =pod
@@ -140,8 +162,8 @@ pugscc - Pugs Compiler Compiler
 
 =head1 SYNOPSIS
 
-    % pugscc --runpugs -e "'Hello, Parrot'.say"
-    % pugscc --runparrot -e "'Hello, Parrot'.say"
+    % pugscc --runpir -e "'Hello, Parrot'.say"
+    % pugscc --runpugs -e "'Hello, Pugs'.say"
     % pugscc --runhaskell -e "'Hello, Haskell'.say"
 
 =head1 DESCRIPTION
@@ -177,7 +199,7 @@ links to where they can be downloaded.
 
 =item Pugs - requires Pugs ;-)
 
-=item Parrot - requires Parrot
+=item PIR - requires Parrot
 
 L<http://search.cpan.org/~ltoetsch/parrot/>
 L<http://www.parrotcode.org/>

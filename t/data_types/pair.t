@@ -65,7 +65,7 @@ my $pair3 = "foo" => ("bar" => "baz");
 isa_ok($pair3, 'Pair');
 
 my $pair3a = $pair3.value;
-isa_ok($pair3a, 'Pair', :todo<bug> ); # see also t/data_types/nested_pairs.t
+isa_ok($pair3a, 'Pair');
 is($pair3a.key, 'bar', 'got right nested pair key');
 is($pair3a.value, 'baz', 'got right nested pair key');
 
@@ -96,8 +96,8 @@ is($val, "baz", "lvalue lists");
 # illustrate a bug
 
 my $var   = 'foo' => 'bar';
-sub test1 (Any $pair) {
-	isa_ok($pair,'Pair') ; 
+sub test1 (Any|Pair $pair) {
+	isa_ok($pair,'Pair');
 	my $testpair = $pair;
 	isa_ok($testpair,'Pair'); # new lvalue variable is also a Pair
 	my $boundpair := $pair;

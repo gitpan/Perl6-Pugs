@@ -32,17 +32,17 @@ method find ( $self: +@dirs, +$wanted_dir, +$wanted_file ) {
                 $abs = catfile( $dir, $node );
                 if $wfile_cb( $node, $dir, $abs ) {
                     $.results.push($abs);
-                    say "  +f $abs";
+                    say "  +f $abs" if $.debug;
                 }
-                else { say "  -f $abs" }
+                else { say "  -f $abs" if $.debug }
             }
             # XXX: Add symlink detection!
             else {
                 if $wdir_cb( $node, $dir, $abs ) {
                     $.queue.push($abs);
-                    say "  +d $abs";
+                    say "  +d $abs" if $.debug;
                 }
-                else { say "  -d $abs" }
+                else { say "  -d $abs" if $.debug }
             }
         }
     }
@@ -69,7 +69,7 @@ File::Find - Traverse a directory tree
 
 =head1 DESCRIPTION
 
-Perl6 port of the C<File::Find> library.
+Perl 6 port of the C<File::Find> library.
 
 This is no direct port, the api got cleaned up a bit. :)
 Some features are still missing but will be added in the future...

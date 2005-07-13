@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 23;
+plan 25;
 
 ok(1 =:= 1, "int");
 ok(!(2 =:= 1), "int (neg)");
@@ -26,16 +26,19 @@ ok(!("7" =:= 7), "identify checks type mismatch");
 	:todo<feature>);
 }
 
+{
+  my $f = sub {};
+  ok($f =:= $f, "sub in one scalar");    
+  ok(&say =:= &say, "&say =:= &say");
+}
+
 class TestObj {
    has $:a;
-   sub new($x) {
-      $:a = $x;
-   }
 };
 
 {
-  my $foo = TestObj.new(3);
-  my $bar = TestObj.new(3);
+  my $foo = TestObj.new(:a<3>);
+  my $bar = TestObj.new(:a<3>);
   my $baz = $foo;
   my $frop := $foo;
 

@@ -115,7 +115,8 @@ concrete implementation remains a work in progress after 4 years of development.
 This paper presents Pugs, a working implementation of Perl 6, written in
 Haskell.  We review the challenges posed by Perl 6's unusual execution model,
 and how Pugs tackles them using features introduced in GHC 6.4, such as
-Template Haskell, Software Transactional Memory, and GADTs.
+Template Haskell, Software Transactional Memory, and Generalised Algebraic
+Data Types (GADTs).
 
 Moreover, we demonstrate how Pugs uses Haskell's FFI to embed Perl 5, Parrot
 and Haskell within Perl 6 programs, and how it mediates the execution context
@@ -395,8 +396,8 @@ its concrete syntax.  PGE can handle most static Rules constructs, but does not
 support calling out to other functions, so the parser returns only simple match
 objects, not AST nodes.
 
-Because the Perl 6 grammar has not been specified in Rules, the planned Perl 6
-compiler, based on PGE/PAST, is yet to be written.
+Because PGE is not yet complete enough to support a Perl 6 grammar specified in
+Rules, the planned Perl 6 compiler, based on PGE/PAST, is yet to be written.
 
 % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % 
 % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % % 
@@ -965,13 +966,13 @@ with this definition:
     }
 \end{lstlisting}
 
-We further extend Pugs's \code{use} syntax with a \code{--perl5} suffix to load
+We further extend Pugs's \code{use} syntax with a \code{perl5:} prefix to load
 Perl 5 modules and import them as Pugs-side classes.  Pugs programs can
 therefore easily use OO modules installed from CPAN:
 
 \begin{lstlisting}
     #!/usr/bin/pugs
-    use DBI--perl5;
+    use perl5:DBI;
     my $dbh = DBI.connect('dbi:SQLite:test.db');
     my @tables = $dbh.tables;
     ...
@@ -1259,7 +1260,7 @@ something like this:
         -- ...more PIR instructions...
 \end{lstlisting}
 
-At the time of this writing, the effort to compiling PugsAST into corresponding
+At the time of this writing, the effort to compile PugsAST into corresponding
 PIR structures has just started.  Aside from the syntax transformation itself,
 we expect to run into additional issues, such as embedding Haskell and Perl 5
 runtime in Parrot; we will update the final version of this paper with our

@@ -144,18 +144,28 @@ gatherArgs(x:xs)                  = [File x] ++ gatherArgs(xs)
 -}
 joinDashE :: [Arg] -> [Arg]
 joinDashE [] = []
-joinDashE ((Switch 'p'):args) = joinDashE ((Opt "-e" "while ($_ = =<>) { chomp $_;"):script++[(Opt "-e" "; say $_; }")]++rest)
+joinDashE ((Switch 'p'):args) = joinDashE ((Opt "-e" "while ($_ = =<>) { $_ .= chomp;"):script++[(Opt "-e" "; say $_; }")]++rest)
                                  where
                                    (script,rest) = partition isDashE args
                                    isDashE (Opt "-e" _) = True
                                    isDashE (_) = False
-joinDashE ((Switch 'n'):args) = joinDashE ((Opt "-e" "while ($_ = =<>) { chomp $_;"):script++[(Opt "-e" "}")]++rest)
+joinDashE ((Switch 'n'):args) = joinDashE ((Opt "-e" "while ($_ = =<>) { $_ .= chomp;"):script++[(Opt "-e" "}")]++rest)
                                  where
                                    (script,rest) = partition isDashE args
                                    isDashE (Opt "-e" _) = True
                                    isDashE (_) = False
 
-joinDashE ((Opt "-M" mod):args) = joinDashE ((Opt "-e" ("use " ++ mod ++ ";\n")):args)
+-- -E is like -e, but not accessible as a normal parameter and used only
+-- internally:
+--   "-e foo bar.p6" executes "foo" with @*ARGS[0] eq "bar.p6",
+--   "-E foo bar.p6" executes "foo" and then bar.p6.
+joinDashE ((Opt "-M" mod):args) = joinDashE ((Opt "-E" (";use " ++ mod ++ ";\n")):args)
+
+-- Preserve the curious Perl5 behaviour:
+--   perl -e 'print CGI->VERSION' -MCGI     # works
+--   perl print_cgi.pl -MCGI                # fails
+joinDashE (x@(Opt "-e" _):y@(Opt "-E" _):args) = joinDashE (y:x:args)
+joinDashE ((Opt "-E" a):y@(Opt "-e" _):args) = joinDashE ((Opt "-e" a):y:args)
 
 joinDashE ((Opt "-e" a):(Opt "-e" b):args) =
     joinDashE (Opt "-e" combined:args)

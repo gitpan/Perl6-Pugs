@@ -59,30 +59,28 @@ emptyEnv :: (MonadIO m, MonadSTM m)
          -> [STM (Pad -> Pad)] -- ^ List of 'Pad'-mutating transactions used
                                --     to declare an initial set of global vars
          -> m Env
-emptyEnv name genPad = do
-    uniq <- liftIO newUnique
-    liftSTM $ do
-        pad  <- sequence genPad
-        ref  <- newTVar Map.empty
-        syms <- initSyms
-        glob <- newTVar (combine (pad ++ syms) $ mkPad [])
-        return $ MkEnv
-            { envContext = CxtVoid
-            , envLexical = mkPad []
-            , envLValue  = False
-            , envGlobal  = glob
-            , envPackage = "main"
-            , envClasses = initTree
-            , envEval    = evaluate
-            , envCaller  = Nothing
-            , envOuter   = Nothing
-            , envDepth   = 0
-            , envID      = uniq
-            , envBody    = Val undef
-            , envDebug   = Just ref -- Set to "Nothing" to disable debugging
-            , envStash   = ""
-            , envPos     = MkPos name 1 1 1 1
-            }
+emptyEnv name genPad = liftSTM $ do
+    pad  <- sequence genPad
+    ref  <- newTVar Map.empty
+    syms <- initSyms
+    glob <- newTVar (combine (pad ++ syms) $ mkPad [])
+    return $ MkEnv
+        { envContext = CxtVoid
+        , envLexical = mkPad []
+        , envLValue  = False
+        , envGlobal  = glob
+        , envPackage = "main"
+        , envClasses = initTree
+        , envEval    = evaluate
+        , envCaller  = Nothing
+        , envOuter   = Nothing
+        , envDepth   = 0
+        -- XXX see AST/Internals.hs
+        --, envID      = uniq
+        , envBody    = Val undef
+        , envDebug   = Just ref -- Set to "Nothing" to disable debugging
+        , envPos     = MkPos name 1 1 1 1
+        }
 
 -- Evaluation ---------------------------------------------------------------
 
@@ -104,14 +102,14 @@ debug key fun str a = do
 evaluateMain :: Exp -> Eval Val
 evaluateMain exp = do
     -- S04: INIT {...}*      at run time, ASAP
-    initAV   <- evalVar "@?INIT"
+    initAV   <- reduceVar "@*INIT"
     initSubs <- fromVals initAV
     enterContext CxtVoid $ do
         mapM_ evalExp [ App (Val sub) Nothing [] | sub <- initSubs ]
     -- The main runtime
     val      <- resetT $ evaluate exp
     -- S04: END {...}       at run time, ALAP
-    endAV    <- evalVar "@*END"
+    endAV    <- reduceVar "@*END"
     endSubs  <- fromVals endAV
     enterContext CxtVoid $ do
         mapM_ evalExp [ App (Val sub) Nothing [] | sub <- endSubs ]
@@ -245,8 +243,12 @@ reduceVar name = do
     v <- findVar name
     case v of
         Just var -> evalRef var
-        _ | (':':rest) <- name -> return $ VType (mkType rest)
-        _ -> retError "Undeclared variable" name
+        _ -> case name of
+            (':':rest)  -> return $ VType (mkType rest)
+            (_:'*':_)   -> evalExp (Sym SGlobal name (Var name))
+            _           -> case isQualified name of
+                Just _  -> evalExp (Sym SGlobal name (Var name))
+                _       -> retError "Undeclared variable" name
 
 reduceStmts :: Exp -> Exp -> Eval Val
 reduceStmts this rest
@@ -294,15 +296,21 @@ reduceSym :: Scope -> String -> Exp -> Eval Val
 -- Special case: my (undef) is no-op
 reduceSym _ "" exp = evalExp exp
 
-reduceSym scope name exp = do
+reduceSym scope name exp | scope <= SMy = do
     ref <- newObject (typeOfSigil $ head name)
     sym <- case name of
         ('&':_) -> genMultiSym name ref
         _       -> genSym name ref
-    case scope of
-        SMy     -> enterLex [ sym ] $ evalExp exp
-        SState  -> enterLex [ sym ] $ evalExp exp
-        _       -> do { addGlobalSym sym; evalExp exp }
+    enterLex [ sym ] $ evalExp exp
+
+reduceSym _ name exp = do
+    ref     <- newObject (typeOfSigil $ head name)
+    name'   <- toQualified name
+    sym <- case name' of
+        ('&':_) -> genMultiSym name' ref
+        _       -> genSym name' ref
+    addGlobalSym sym
+    evalExp exp
 
 -- Context forcing
 reduceCxt :: Cxt -> Exp -> Eval Val
@@ -325,8 +333,8 @@ reduceSyn "block" [body] = do
     
 reduceSyn "sub" [exp] = do
     (VCode sub) <- enterEvalContext (cxtItem "Code") exp
-    env     <- ask
-    cont    <- if subType sub /= SubCoroutine then return Nothing else liftSTM $ do
+    env  <- ask
+    cont <- if subType sub /= SubCoroutine then return Nothing else liftSTM $ do
         tvar <- newTVar undefined
         let thunk = MkThunk . fix $ \redo -> do
             evalExp $ subBody sub
@@ -335,9 +343,12 @@ reduceSyn "sub" [exp] = do
         writeTVar tvar thunk
         return $ Just tvar
     retVal $ VCode sub
-        { subEnv  = Just (env{ envStash = "" })
+        { subEnv  = Just env
         , subCont = cont
         }
+
+reduceSyn "but" [obj, block] = do
+    evalExp $ App (Var "&Pugs::Internals::but_block") Nothing [obj, block]
 
 reduceSyn name [cond, bodyIf, bodyElse]
     | "if"     <- name = doCond id
@@ -365,11 +376,11 @@ reduceSyn "for" [list, body] = do
         runBody [] _ = retVal undef
         runBody vs sub' = do
             let (these, rest) = arity `splitAt` vs
-            genSymCC "&next" $ \symNext -> do
-                genSymPrim "&redo" (const $ runBody vs sub') $ \symRedo -> do
+            callCC $ \esc -> genSymPrim "&redo" (const $ (runBody vs sub') >>= esc) $  \symRedo -> do
+                genSymCC "&next" $ \symNext -> do
                     apply (updateSubPad sub' (symRedo . symNext)) Nothing $
                         map (Val . VRef . MkRef) these
-            runBody rest sub'
+                runBody rest sub'
     genSymCC "&last" $ \symLast -> do
         let munge sub | subParams sub == [defaultArrayParam] =
                 munge sub{ subParams = [defaultScalarParam] }
@@ -392,21 +403,22 @@ reduceSyn "loop" exps = do
     vb  <- evalCond
     if not vb then retEmpty else do
     genSymCC "&last" $ \symLast -> enterLex [symLast] $ fix $ \runBody -> do
-        genSymPrim "&redo" (const $ runBody) $ \symRedo -> do
+        -- genSymPrim "&redo" (const $ runBody) $ \symRedo -> do
+        callCC $ \esc -> genSymPrim "&redo" (const $ runBody >>= esc) $ \symRedo -> do
         let runNext = do
             valPost <- evalExp post
             vb      <- evalCond
             trapVal valPost $ if vb then runBody else retEmpty
-        genSymPrim "&next" (const $ runNext) $ \symNext -> do
-        valBody <- enterLex [symRedo, symNext] $ evalExp body
-        trapVal valBody $ runNext
+        callCC $ \esc -> genSymPrim "&next" (const $ runNext >>= esc) $ \symNext -> do
+            valBody <- enterLex [symRedo, symNext] $ evalExp body
+            trapVal valBody $ runNext
 
 reduceSyn "given" [topic, body] = do
     vtopic <- fromVal =<< enterLValue (enterEvalContext cxtItemAny topic)
     enterGiven vtopic $ enterEvalContext (cxtItem "Code") body
 
 reduceSyn "when" [match, body] = do
-    break  <- evalVar "&?BLOCK_EXIT"
+    break  <- reduceVar "&?BLOCK_EXIT"
     vbreak <- fromVal break
     result <- reduce $ case unwrap match of
         App _ (Just (Var "$_")) _ -> match
@@ -417,7 +429,7 @@ reduceSyn "when" [match, body] = do
         else retVal undef
 
 reduceSyn "default" [body] = do
-    break  <- evalVar "&?BLOCK_EXIT"
+    break  <- reduceVar "&?BLOCK_EXIT"
     vbreak <- fromVal break
     enterWhen (subBody vbreak) $ apply vbreak Nothing [body]
 
@@ -439,7 +451,8 @@ reduceSyn name [cond, body]
             vb    <- fromVal vbool
             case f vb of
                 True -> fix $ \runBody -> do
-                    genSymPrim "&redo" (const $ runBody) $ \symRedo -> do
+                    -- genSymPrim "&redo" (const $ runBody) $ \symRedo -> do
+                    callCC $ \esc -> genSymPrim "&redo" (const $ runBody >>= esc) $  \symRedo -> do
                     rv <- enterLex [symRedo] $ reduce body
                     case rv of
                         VError _ _  -> retVal rv
@@ -481,8 +494,7 @@ reduceSyn ":=" exps
             rv   <- findVarRef name
             case rv of
                 Just ioRef -> return (ioRef, ref)
-                Nothing -> do
-                    retError "Undeclared variable" name
+                _ -> retError "Undeclared variable" name
         forM_ bindings $ \(ioRef, ref) -> do
             liftSTM $ writeTVar ioRef ref
         return $ case map (VRef . snd) bindings of
@@ -493,11 +505,6 @@ reduceSyn ":=" [var, vexp] = do
     let expand e | e'@(Syn "," _) <- unwrap e = e'
         expand e = Syn "," [e]
     reduce (Syn ":=" [expand var, expand vexp])
-
-reduceSyn "=>" [keyExp, valExp] = do
-    key <- enterEvalContext cxtItemAny keyExp
-    val <- enterEvalContext cxtItemAny valExp
-    retItem $ castV (key, val)
 
 reduceSyn "*" exps
     | [Syn syn [exp]] <- unwrap exps --  * cancels out [] and {}
@@ -511,7 +518,10 @@ reduceSyn "*" exps
 
 reduceSyn "," exps = do
     vals <- mapM (enterEvalContext cxtSlurpyAny) exps
-    retVal . VList . concat $ map vCast vals
+    retVal . VList . concat $ map castList vals
+    where
+    castList (VList vs) = vs
+    castList v = [v]
 
 reduceSyn "val" [exp] = do
     enterRValue $ evalExp exp
@@ -562,7 +572,7 @@ reduceSyn "[...]" [listExp, indexExp] = do
     retVal $ VList (drop idx $ list)
 
 reduceSyn "@{}" [exp] = do
-    val     <- enterEvalContext (cxtItem "Hash") exp
+    val     <- enterEvalContext (cxtItem "Array") exp
     ivar    <- doArray val IArray
     evalRef (MkRef ivar)
 
@@ -572,12 +582,12 @@ reduceSyn "%{}" [exp] = do
     evalRef (MkRef ivar)
 
 reduceSyn "&{}" [exp] = do
-    val     <- enterEvalContext (cxtItem "Hash") exp
+    val     <- enterEvalContext (cxtItem "Code") exp
     sub     <- fromVal val
     return $ VCode sub
 
 reduceSyn "${}" [exp] = do
-    val     <- enterEvalContext (cxtItem "Hash") exp
+    val     <- enterEvalContext (cxtItem "Scalar") exp
     ref     <- fromVal val
     evalRef ref
 
@@ -641,20 +651,23 @@ reduceSyn "subst" [exp, subst, adverbs] = do
 reduceSyn "is" _ = do
     retEmpty
 
-reduceSyn "module" [exp] = do
+reduceSyn "package" [exp] = reduceSyn "namespace" [exp, emptyExp]
+
+reduceSyn "namespace" [exp, body] = do
     val <- evalExp exp
-    writeVar "$?MODULE" val
-    retEmpty
+    str <- fromVal val
+    when (str `elem` words "MY OUR OUTER CALLER") $ do
+        fail $ "Cannot use " ++ str ++ " as a namespace"
+    enterPackage str $ evalExp body
 
 reduceSyn "inline" [langExp, _] = do
     langVal <- evalExp langExp
     lang    <- fromVal langVal
     when (lang /= "Haskell") $
         retError "Inline: Unknown language" langVal
-    modVal  <- readVar "$?MODULE"
-    mod     <- fromVal modVal
+    pkg     <- asks envPackage -- full module name here
 #ifndef HADDOCK
-    let file = (`concatMap` mod) $ \v -> case v of
+    let file = (`concatMap` pkg) $ \v -> case v of
         { '-' -> "__"; _ | isAlphaNum v -> [v] ; _ -> "_" }
 #endif
     externRequire "Haskell" (file ++ ".o")
@@ -689,6 +702,13 @@ reduceApp (Var "&zip") invs args = do
     val  <- op0Zip vals
     retVal val
 
+-- XXX absolutely evil bloody hack for "return"
+reduceApp (Var "&return") Nothing [] = shiftT . const $ retEmpty
+reduceApp (Var "&return") (Just inv) [] = shiftT . const $ evalExp inv
+reduceApp (Var "&return") Nothing [arg] = shiftT . const $ evalExp arg
+reduceApp (Var "&return") invs args = shiftT . const . evalExp $
+    Syn "," (maybeToList invs ++ args)
+
 -- XXX absolutely evil bloody hack for "not"
 reduceApp (Var "&not") Nothing [] = retEmpty
 
@@ -710,6 +730,7 @@ reduceApp (Var "&goto") (Just subExp) args = do
            , envContext = envContext caller
            , envLValue  = envLValue caller
            , envDepth   = envDepth caller
+           , envPos     = envPos caller
            }
 
 -- XXX absolutely evil bloody hack for "assuming"
@@ -720,7 +741,11 @@ reduceApp (Var "&assuming") (Just subExp) args = do
         Left errMsg      -> fail errMsg
         Right curriedSub -> retVal $ castV $ curriedSub
 
-reduceApp (Var "&infix:=>") invs args = reduce (Syn "=>" (maybeToList invs ++ args))
+reduceApp (Var "&infix:=>") invs args = do
+    let [keyExp, valExp] = maybeToList invs ++ args
+    key <- enterEvalContext cxtItemAny keyExp
+    val <- enterEvalContext cxtItemAny valExp
+    retItem $ castV (key, val)
 
 reduceApp (Var name@('&':_)) invs args = do
     sub     <- findSub name invs args
@@ -826,23 +851,34 @@ applyExp :: SubType -> [ApplyArg] -> Exp -> Eval Val
 applyExp _ bound (Prim f) =
     f [ argValue arg | arg <- bound, (argName arg) /= "%_" ]
 applyExp styp bound body = do
-    sequence_ [ evalExp
-        (Syn "=" [Syn "{}" [Val (argValue $ head bound), Val (VStr key)], Val val]) |
-        ApplyArg{ argName = (_:twigil:key), argValue = val }
-        <- bound, (twigil ==) `any` ".:" ]
-    applyThunk styp bound (MkThunk $ evalExp body)
+    let invocant         = head bound
+    let (attrib, normal) = partition isAttrib bound
+    sequence_ [ evalExp (Syn "=" [Syn "{}" [Val (argValue invocant), Val (VStr key)], Val val]) |
+        ApplyArg{ argName = (_:_:key), argValue = val } <- attrib ]
+    ret <- applyThunk styp normal (MkThunk $ evalExp body)
+    return ret
+
+isAttrib :: ApplyArg -> Bool
+isAttrib ApplyArg{ argName = (_:'.':_) } = True
+isAttrib ApplyArg{ argName = (_:':':_) } = True
+isAttrib _ = False
 
 applyThunk :: SubType -> [ApplyArg] -> VThunk -> Eval Val
 applyThunk _ [] thunk = thunk_force thunk
 applyThunk styp bound@(arg:_) thunk = do
     -- introduce $?SELF and $_ as the first invocant.
-    inv <- if styp <= SubMethod then invocant else return []
+    inv     <- case styp of
+        SubPointy               -> aliased ["$_"]
+        _ | styp <= SubMethod   -> aliased ["$?SELF", "$_"]
+        _                       -> return []
     pad <- formal
     enterLex (inv ++ pad) $ thunk_force thunk
     where
     formal = mapM argNameValue $ filter (not . null . argName) bound
-    invocant = mapM (`genSym` (vCast $ argValue arg)) $ words "$?SELF $_"
-    argNameValue (ApplyArg name val _) = genSym name (vCast val)
+    aliased names = do
+        argRef  <- fromVal (argValue arg)
+        mapM (`genSym` argRef) names
+    argNameValue (ApplyArg name val _) = genSym name =<< fromVal val
 
 {-|
 Apply a sub (or other code) to lists of invocants and arguments.
@@ -868,8 +904,16 @@ doApply :: Env   -- ^ Environment to evaluate in
         -> (Maybe Exp) -- ^ Invocants (arguments before the colon)
         -> [Exp] -- ^ Arguments (not including invocants)
         -> Eval Val
-doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args =
-    case bindParams sub invs args of
+doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args = do
+    -- check invs and args for Pair types; if they are, reduce them fully
+    -- to stringified normal form.
+    let isPairs = (map isPairParam (subParams sub)) ++ repeat False
+        isPairParam = isaType cls "Pair" . typeOfCxt . paramContext
+        cls = envClasses env
+        argsPairs = if isJust invs then tail isPairs else isPairs
+    invs' <- fmapM (reducePair (head isPairs)) invs
+    args' <- fmapM (uncurry reducePair) (argsPairs `zip` args)
+    case bindParams sub invs' args' of
         Left errMsg -> fail errMsg
         Right sub   -> do
             forM_ (subSlurpLimit sub) $ \limit@(n, _) -> do
@@ -891,6 +935,16 @@ doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args
                             Nothing     -> applyExp (subType sub) realBound fun
                 retVal val
     where
+    reducePair :: Bool -> Exp -> Eval Exp
+    reducePair True exp = return exp
+    reducePair _ exp = do
+        typ     <- evalExpType exp
+        let cls = envClasses env
+        if not (isaType cls "Pair" typ) then return exp else do
+        ref     <- enterLValue $ enterContext (CxtItem (mkType "Pair")) $ evalExp exp
+        (k, v)  <- join $ doPair ref pair_fetch
+        key     <- fromVal k
+        return $ App (Var "&infix:=>") Nothing [Val (VStr key), Val v]
     enterScope :: Eval Val -> Eval Val
     enterScope
         | typ >= SubBlock = id
@@ -919,7 +973,7 @@ doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args
     expToVal MkParam{ isLazy = thunk, isLValue = lv, paramContext = cxt, paramName = name, isWritable = rw } exp = do
         env <- ask -- freeze environment at this point for thunks
         let eval = local (const env{ envLValue = lv }) $ do
-            enterEvalContext (cxtOfSigil $ head name) exp
+                enterEvalContext (cxtOfSigil $ head name) exp
         val <- if thunk then return (VRef . thunkRef $ MkThunk eval) else do
             v   <- eval
             typ <- evalValType v
@@ -928,11 +982,14 @@ doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args
             case (lv, rw) of
                 (True, True)    -> return v
                 (True, False)   -> do
-                    --- not scalarRef!
+                    --- not scalarRef! -- use the new "transparent IType" thing!
                     case showType (typeOfSigil $ head name) of
                         "Hash"  -> fmap (VRef . hashRef) (fromVal v :: Eval VHash)
                         "Array" -> fmap (VRef . arrayRef) (fromVal v :: Eval VArray)
-                        _       -> return (VRef $ scalarRef v) 
+                        _       -> case v of
+                            VRef (MkRef (IScalar _)) -> return (VRef $ scalarRef v) 
+                            VRef _ -> return v -- XXX - preserving ref
+                            _ -> return (VRef $ scalarRef v) 
                 (False, False)  -> return v -- XXX reduce to val?
                 (False, True)   -> do
                     -- make a copy

@@ -1,7 +1,10 @@
+use v6;
+
 class HTTP::Headers-1.62;
 
 use HTTP::Date;
-use MIME::Base64;
+# XXX port MIME::Base64 and use it!
+#use MIME::Base64;
 
 # The $TRANSLATE_UNDERSCORE variable controls whether '_' can be used
 # as a replacement for '-' in header field names.
@@ -36,48 +39,50 @@ my @entity_headers = <
  Content-MD5 Content-Range Content-Type Expires Last-Modified
 >;
 
-my %entity_header = @entity_headers.map:{ lc $_  => 1 };
+#my %entity_header = @entity_headers.map:{ uc $_ => 1 };
+my %entity_header = @entity_headers.map:{ %entity_header{uc $_} = 1 };
 
-has @:header_order = (
+our @header_order = (
  *@general_headers,
  *@request_headers,
  *@response_headers,
  *@entity_headers,
 );
 
-# Make alternative representations of @:header_order.  This is used
+# Make alternative representations of @header_order.  This is used
 # for sorting and case matching.
-has %:header_order;
-has %:standard_case;
+our %header_order;
+our %standard_case;
 
 {
-  for @:header_order.kv -> $i, $header {
+  for @header_order.kv -> $i, $header {
     my $lc = lc $header;
-    %:header_order{$lc}  = $i + 1;
-    %:standard_case{$lc} = $_;
+    %header_order{$lc}  = $i + 1;
+    %standard_case{$lc} = $_;
   }
 }
 
 has %:headers;
 
-method BUILD (Str *%headers) {
-  .header($_.key) = $_.value for pairs %headers;
+submethod BUILD (Str *%headers) {
+  ./header($_.key) = $_.value for pairs %headers;
 }
 
 method header (Str $field) is rw {
-  return new Proxy:
-    FETCH => { %:headers{$field} },
-    STORE => -> Str $val { .:header($field, $val) };
+    return Proxy.new(
+	FETCH => { %:headers{$field} },
+	STORE => -> Str $val { ./:header($field, $val) }
+    );
 }
 
 method clear () { %:headers = () }
 
 method push_header (Str $field, Str $val) {
-  .:header($field, $val, "PUSH");
+  ./:header($field, $val, "PUSH");
 }
 
 method init_header (Str $field, Str $val) {
-  .:header($field, $val, "INIT");
+  ./:header($field, $val, "INIT");
 }
 
 method remove_header (Str *@fields) {
@@ -102,19 +107,16 @@ method remove_content_headers () {
   return $c;
 }
 
-method :header (
-  Str where { length $^str > 0 } $field is copy,
-  Str $val is copy,
-  Str ?$op = ""
-) {
+# XXX Str where { .length > 0 }
+method :header (Str $field is copy, Str $val is copy, Str ?$op = "") {
   unless $field ~~ /^\:/ {
-    $field ~~ tr/_/-/ if $TRANSLATE_UNDERSCORE;
+    $field ~~ s:g/_/-/ if $TRANSLATE_UNDERSCORE;
     my $old = $field;
     $field = lc $field;
-    unless %:standard_case{$field}.defined {
-      # generate a %:standard_case entry for this field
+    unless %standard_case{$field}.defined {
+      # generate a %standard_case entry for this field
       $old ~~ s:g/\b(\w)/{$0.ucfirst}/;
-      %:standard_case{$field} = $old;
+      %standard_case{$field} = $old;
     }
   }
 
@@ -138,36 +140,36 @@ method :header (
 
 method :sorted_field_names () {
   return %:headers.key.sort:{
-    (%:header_order{$^a} || 999) <=> (%:header_order{$^b} || 999) ||
+    (%header_order{$^a} || 999) <=> (%header_order{$^b} || 999) ||
     $a cmp $b
   };
   
 }
 
 method header_field_names () {
-  return .:sorted_field_names.map:{ %:standard_case{$_} || $_ };
+  return ./:sorted_field_names.map:{ %standard_case{$_} || $_ };
 }
 
 method scan (Code $sub) {
-  for .:sorted_field_names -> $key {
+  for ./:sorted_field_names -> $key {
     next if $key ~~ /^_/;
     my $vals = %:headers{$key};
     if $vals ~~ Array {
       for @$vals -> $val {
-	$sub.(%:standard_case{$key} || $key, $val);
+	$sub.(%standard_case{$key} || $key, $val);
       }
     } else {
-      $sub.(%:standard_case{$key} || $key, $vals);
+      $sub.(%standard_case{$key} || $key, $vals);
     }
   }
 }
 
-multi method *coerce:<as> ($self: Str ::to) { $self.as_string("\n") }
+multi sub *coerce:<as> (::?CLASS $self, Str ::to) { ./as_string("\n") }
 
 method as_string (Str ?$ending = "\n") {
   my @result;
 
-  .scan(-> $field is copy, $val is copy {
+  ./scan(-> $field is copy, $val is copy {
     $field ~~ s/^://;
     if $val ~~ m/\n/ {
       # must handle header values with embedded newlines with care
@@ -185,22 +187,23 @@ method as_string (Str ?$ending = "\n") {
 }
 
 method :date_header (Str $header) is rw {
-  return new Proxy:
+  return Proxy.new(
     FETCH => { HTTP::Date::str2time(%:headers{$header}) },
     STORE => -> $time {
-      .:header($header, HTTP::Date::time2str($time));
-    };
+      ./:header($header, HTTP::Date::time2str($time));
+    }
+  );
 }
 
-method date ()                is rw { .:date_header("Date")                }
-method expires ()             is rw { .:date_header("Expires")             }
-method if_modified_since ()   is rw { .:date_header("If-Modified-Since")   }
-method if_unmodified_since () is rw { .:date_header("If-Unmodified-Since") }
-method last_modified ()       is rw { .:date_header("Last-Modified")       }
+method date ()                is rw { ./:date_header("Date")                }
+method expires ()             is rw { ./:date_header("Expires")             }
+method if_modified_since ()   is rw { ./:date_header("If-Modified-Since")   }
+method if_unmodified_since () is rw { ./:date_header("If-Unmodified-Since") }
+method last_modified ()       is rw { ./:date_header("Last-Modified")       }
 
 # This is used as a private LWP extension.  The Client-Date header is
 # added as a timestamp to a response when it has been received.
-method client_date ()         is rw { .:date_header('Client-Date')         }
+method client_date ()         is rw { ./:date_header('Client-Date')         }
 
 # The retry_after field is dual format (can also be a expressed as
 # number of seconds from now), so we don't provide an easy way to
@@ -210,7 +213,7 @@ method client_date ()         is rw { .:date_header('Client-Date')         }
 #sub retry_after       { shift->_date_header('Retry-After',       @_); }
 
 method content_type () is rw {
-  return new Proxy:
+  return Proxy.new(
     FETCH => {
       my $ct = (.:header("Content-Type"))[0];
       return "" unless $ct.defined and $ct.chars;
@@ -227,17 +230,17 @@ method content_type () is rw {
       }
     },
     STORE => -> Str $type {
-      .:header("Content-Type", $type);
-    };
+      ./:header("Content-Type", $type);
+    });
 }
 
 method referer () is rw {
-  return new Proxy:
-    FETCH => { (.:header("Referer")[0]) },
-    STORE => -> Str|URI $new is copy {
-      if $new ~~ /\#/ {
+  return Proxy.new(
+    FETCH => { @{./:header("Referer")}[0] },
+    STORE => -> $new is copy {
+      if ($new ~~ /\#/) {
 	# Strip fragment per RFC 2616, section 14.36.
-	if $new ~~ URI {
+	if ($new ~~ URI) {
 	  $new .= clone;
 	  $uri.fragment = undef;
 	} else {
@@ -245,38 +248,39 @@ method referer () is rw {
 	}
       }
 
-      .:header("Referer", $new);
-    };
+      ./:header("Referer", $new);
+    }
+  );
 }
 
-&referrer ::= &referer;  # at tchrist's request
+our &referrer ::= &referer;
 
-method title ()                     is rw { .header("Title") }
-method content_encoding ()          is rw { .header("Content-Encoding") }
-method content_language ()          is rw { .header("Content-Language") }
-method content_length ()            is rw { .header("Content-Length") }
+method title ()                     is rw { ./header("Title") }
+method content_encoding ()          is rw { ./header("Content-Encoding") }
+method content_language ()          is rw { ./header("Content-Language") }
+method content_length ()            is rw { ./header("Content-Length") }
 
-method user_agent ()                is rw { .header("User-Agent") }
-method server ()                    is rw { .header("Server") }
+method user_agent ()                is rw { ./header("User-Agent") }
+method server ()                    is rw { ./header("Server") }
 
-method from ()                      is rw { .header("From") }
-method warning ()                   is rw { .header("Warning") }
+method from ()                      is rw { ./header("From") }
+method warning ()                   is rw { ./header("Warning") }
 
-method www_authenticate ()          is rw { .header("WWW-Authenticate") }
-method authorization ()             is rw { .header("Authorization") }
+method www_authenticate ()          is rw { ./header("WWW-Authenticate") }
+method authorization ()             is rw { ./header("Authorization") }
 
-method proxy_authenticate ()        is rw { .header("Proxy-Authenticate") }
-method proxy_authorization ()       is rw { .header("Proxy-Authorization") }
+method proxy_authenticate ()        is rw { ./header("Proxy-Authenticate") }
+method proxy_authorization ()       is rw { ./header("Proxy-Authorization") }
 
-method authorization_basic ()       is rw { .:basic_auth("Authorization") }
-method proxy_authorization_basic () is rw { .:basic_auth("Proxy-Authorization") }
+method authorization_basic ()       is rw { ./:basic_auth("Authorization") }
+method proxy_authorization_basic () is rw { ./:basic_auth("Proxy-Authorization") }
 
 method :basic_auth (Str $h) is rw {
-  return new Proxy:
+  return Proxy.new(
     FETCH => {
-      my $cur = .:header($h);
-      if defined $old and $old ~~ s/^\s* Basic \s+// {
-	my $val = MIME::Base64::decode($cur);
+      my $cur = ./:header($h);
+      if (defined $old and $old ~~ s/^\s* Basic \s+//) {
+	#my $val = MIME::Base64::decode($cur);
 
 	given want {
 	  when Scalar { return $val }
@@ -289,14 +293,21 @@ method :basic_auth (Str $h) is rw {
     # -- XXX does this create a reasonable warning? If not, put
     #   Carp::croak("Basic authorization user name can't contain ':'")
     # back.
-    STORE => -> Str where { $^str !~ /\:/ } $user, Str ?$passwd = "" {
-      .:header($h, "Basic " ~ MIME::Base64::encode("$user:$passwd", ""));
-    };
+    # XXX Str where { $^str !~ /\:/ }
+    STORE => -> Str $user, Str ?$passwd = "" {
+      #./:header($h, "Basic " ~ MIME::Base64::encode("$user:$passwd", ""));
+    });
 }
 
-1;
-
-__END__
+method redirect (::?CLASS ::class: Str $location, Str ?$target, Str ?$status = "302 Found", Str +$cookie, Bool +$nph, *%extra) {
+    my $h = ::class.new();
+    
+    $h.header('Status') = $status;
+    $h.header('Location') = $location;
+    $h.header('Target') = $target if $target.defined;
+    
+    return $h;
+}
 
 =head1 NAME
 

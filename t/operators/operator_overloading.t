@@ -29,7 +29,7 @@ sub prefix:<->($thing) { return "CROSS$thing"; };
 is(-"fish", "CROSSfish",
    'prefix operator overloading for existing operator');
 
-sub infix:<×> { $^a * $^b }
+sub infix:<×> ($a, $b) { $a * $b }
 is(5 × 3, 15, "infix Unicode operator");
 
 sub infix:<C> ($text, $owner) { return "$text copyright $owner"; };
@@ -130,7 +130,7 @@ is("boobies"!, "BOOBIES!!!", "correct overloaded method called");
 
   my $obj;
   lives_ok { $obj = MyClass.new }, "instantiation of a prefix:<...> and coerce:<as> overloading class worked", :todo<feature>;
-  my $try = lives_ok { ~$obj}, "our object was stringified correctly", :todo<feature>;
+  my $try = lives_ok { ~$obj }, "our object was stringified correctly";
   if ($try) {
    is ~$obj, "hi", "our object was stringified correctly", :todo<feature>;
   } else {

@@ -8,23 +8,23 @@ module t_LKT_Util;
 
 ######################################################################
 
-sub message( Str $detail ) {
+sub message( Str $detail is rw ) {
 	say "# $detail";
 }
 
 ######################################################################
 
-sub serialize( Any $input ) returns Str {
+sub serialize( Any $input is rw ) returns Str {
 	return [
-		$input.does(Hash) ?? 
+		!$input.defined ??
+			'undef, '
+		:: $input.does(Hash) ?? 
 			( '{ ', ( $input.pairs.sort.map:{ serialize( $_ ) } ), '}, ' ) 
+		:: $input.does(Pair) || $input.ref eq 'Array::Const' ?? # Slice not does(Pair) right now
+			'\''~$input.key~'\' => \''~$input.value~'\', '
 		:: $input.does(Array) ?? 
 			( '[ ', ( $input.map:{ serialize( $_ ) } ), '], ' ) 
-		:: $input.does(Pair) ?? 
-			'\''~$input.key~'\' => \''~$input.value~'\', '
-		:: $input.defined ??
-			'\''~$input~'\', '
-		:: 'undef, '
+		:: '\''~$input~'\', '
 	].join( '' );
 }
 

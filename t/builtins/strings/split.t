@@ -4,7 +4,8 @@ use v6;
 use Test;
 
 # XXX - this needs to be updated when Str.split(Str) works again
-plan 50;
+# this test really wants is_deeply()
+plan 70;
 
 # split on an empty string
 
@@ -20,11 +21,11 @@ my %ords = (
   9 => 'ninth',
 );
 
-sub split_test(Array @splitted, Array @expected, Str $desc, ?$todo = 0) {
+sub split_test(@splitted, @expected, Str $desc, ?$todo = 0) {
   is +@splitted, +@expected,
      "split created the correct value amount for: $desc", $todo;
   is @splitted[$_], @expected[$_],
-     "the %ords{$_} value matched for: $desc", $todo
+     "the %ords{$_ + 1} value matched for: $desc", $todo
     for 0 .. @splitted.end;
 }
 
@@ -75,3 +76,24 @@ split_test "to be || ! to be".split(' '),
 split_test "this will be split".split(rx:perl5{ }),
            qw/this will be split/,
            q/Str.split(rx:perl5{ })/;
+
+# split on multiple space characters
+split_test split(rx:perl5{\s+}, "Hello World    Goodbye   Mars", 3),
+           ( qw/Hello World/, "Goodbye   Mars" ),
+           q(split rx:perl5{\s+}, Str, limit);
+
+split_test split(" ", "Hello World    Goodbye   Mars", 3),
+           ( qw/Hello World/, "   Goodbye   Mars" ),
+           q(split " ", Str, limit);
+
+split_test  "Hello World    Goodbye   Mars".split(rx:perl5{\s+}, 3),
+           ( qw/Hello World/, "Goodbye   Mars" ),
+           q/Str.split(rx:perl5{\s+}, limit)/;
+
+split_test  "Hello World    Goodbye   Mars".split(" ", 3),
+           ( qw/Hello World/, "   Goodbye   Mars" ),
+           q/Str.split(" ", limit)/;
+
+split_test  "Word".split("", 3), qw(W o rd),
+           q/Str.split("", limit)/;
+

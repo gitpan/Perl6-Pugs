@@ -14,7 +14,7 @@ L<http://groups.google.de/group/perl.perl6.language/msg/bd9eb275d5da2eda>
 
 =cut
 
-plan 30;
+plan 35;
 
 {
   my @array = <5 -3 7 0 1 -9>;
@@ -64,11 +64,29 @@ ok (not [!=] 4, 4, 4),    "[!=] works (2)";
 }
 
 {
+  my $hash = {a => {b => 42}};
+  is ([.{}] $hash, <a b>), 42, '[.{}] works two levels deep';
+}
+
+{
   my $hash = {a => {b => {c => {d => 42, e => 23}}}};
-  is eval('[.{}] $hash, <a b c d>'), 42, '[.{}] works';
+  is eval('[.{}] $hash, <a b c d>'), 42, '[.{}] works', :todo<bug>;
 
   my $arr = [[[1,2,3],[4,5,6]],[[7,8,9],[10,11,12]]];
   is ([.[]] $arr, 1, 0, 2), 9, '[.[]] works';
+}
+
+{
+  my $hash = {a => {b => {c => 42}}};
+  my @reftypes;
+  sub foo (Hash $hash, String $key) {
+    push @reftypes, $hash.ref;
+    $hash.{$key};
+  }
+  is((reduce(&foo, $hash, <a b c>)), 42, 'reduce(&foo) (foo ~~ .{}) works three levels deep', :todo<bug>);
+  is(@reftypes[0], "Hash", "first application of reduced hash subscript passed in a Hash", :todo<bug>); # Array
+  is(@reftypes[1], "Hash", "second application of reduced hash subscript passed in a Hash", :todo<bug>); # Scalar::Proxy
+  is(@reftypes[2], "Hash", "third application of reduced hash subscript passed in a Hash", :todo<bug>); # Scalar::Proxy
 }
 
 {
@@ -76,8 +94,8 @@ ok (not [!=] 4, 4, 4),    "[!=] works (2)";
   # 18:45 < autrijus> [=>] 1..10;
   my $list = [=>] 1,2,3;
   is $list.key,         1, "[=>] works (1)";
-  is $list.value.key,   2, "[=>] works (2)";
-  is $list.value.value, 3, "[=>] works (3)";
+  is try{$list.value.key},   2, "[=>] works (2)", :todo<bug>;
+  is try{$list.value.value}, 3, "[=>] works (3)", :todo<bug>;
 }
 
 {
@@ -92,4 +110,4 @@ eval_ok('my @foo = [>>+<<] ([1..3],[1..3],[1..3]);','Parse [>>+<<]');
 
 # Check that user defined infix ops work with [...], too.
 sub infix:<more_than_plus>(Int $a, Int $b) { $a + $b + 1 }
-is ([more_than_plus] 1, 2, 3), 8, "[...] reduce metaop works on user defined ops";
+is(([more_than_plus] 1, 2, 3), 8, "[...] reduce metaop works on user defined ops");
