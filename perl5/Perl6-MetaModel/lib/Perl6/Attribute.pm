@@ -7,8 +7,6 @@ use warnings;
 use Carp 'confess';
 use Scalar::Util 'blessed';
 
-use Perl6::Container::Scalar;
-
 use constant PUBLIC  => 'public';
 use constant PRIVATE => 'private';
 
@@ -23,10 +21,10 @@ sub new {
         || confess "Bad label : could not extract accessor name from label ($label)";
     if (defined $props) {
         $props->{access} = 'ro'  unless exists $props->{access};
-        $props->{type}   = undef unless exists $props->{type};        
+        $props->{build}  = undef unless exists $props->{build};                
     }
     else {
-        $props = { access => 'ro', type => undef };
+        $props = { access => 'ro', build => undef };
     }
     my $attr = bless {
         associated_with => $associated_with,
@@ -40,7 +38,6 @@ sub new {
 
 sub is_ro { (shift)->{properties}->{access} eq 'ro' }
 sub is_rw { (shift)->{properties}->{access} eq 'rw' }
-sub type  { (shift)->{properties}->{type}           }
 
 sub label { (shift)->{label} }
 
@@ -56,9 +53,14 @@ sub is_public  { (shift)->{visibility} eq PUBLIC  }
 
 sub instantiate_container {
     my ($self) = @_;
-    return \([]) if $self->is_array;
-    return \({}) if $self->is_hash; 
-    return \(my $scalar);
+    if (defined $self->{properties}->{build}) {
+        my $builder = $self->{properties}->{build};
+        return $builder->() if ref($builder) eq 'CODE';
+        return $builder;
+    }
+    return [] if $self->is_array;
+    return {} if $self->is_hash; 
+    return undef;
 }
 
 1;

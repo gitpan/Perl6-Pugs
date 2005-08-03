@@ -1,37 +1,25 @@
 use v6;
 
-class Set::Infinite::Functional-0.01;
-
 use Span;
 
+class Set::Infinite::Functional-0.01;
+
 has @.spans;
-has $.density;
 
 =for TODO
 
     * compare
 
-    * mark as "internal" class
-
-    * base-type spans should not store 'density' inside them - it's duplicated
-
-    * set_density
-
-    * how to make the 'density' accessor read-only?
-
 =cut
 
-submethod BUILD ( @.spans, ?$density ) {}
+submethod BUILD ( @.spans ) {}
 
-method empty_set ($class: ?$density ) returns Set::Infinite::Functional {
-    $class.new( spans => (),
-                density => $density );
+method empty_set ($class: ) returns Set::Infinite::Functional {
+    $class.new( spans => () );
 }
 
-method universal_set ($class: ?$density ) returns Set::Infinite::Functional {
-    $class.new( spans => Span.new( 
-                           start => -Inf, end => Inf, density => $density ).span,
-                density => $density );
+method universal_set ($class: ) returns Set::Infinite::Functional {
+    $class.new( spans => Span.new( start => -Inf, end => Inf ) );
 }
 
 method is_empty () returns bool { return ! @.spans }
@@ -79,11 +67,21 @@ method union ($self: Set::Infinite::Functional $set )
     my @tmp;
     my @res;
     my @a = *@.spans, *$set.spans;
-    @a.sort:{ $^a.compare( $^b ) };
+    @a = @a.sort:{ $^a.compare( $^b ) };
+    # say "union ", @a.map:{ $_.stringify }.join(":");
     @res[0] = shift @a
         if @a;
-    for( @a ) {
-        @tmp = @res[-1].union( $_ );
+    while( @a ) {
+        my $elem = shift @a;
+        @tmp = @res[-1].union( $elem );
+        # say "span union ", @tmp.map:{ $_.stringify }.join(":");
+        if @tmp == 3 {
+            # intersecting Recurrence Spans
+            # say "push ", @tmp[0], " left ", @tmp[1,2];
+            @res[-1] = @tmp[0];
+            unshift @a, @tmp[1,2];
+            redo;
+        }
         if @tmp == 2 {
             push @res, @tmp[1];
         }
@@ -119,7 +117,7 @@ method intersects ( Set::Infinite::Functional $set ) returns bool {
 }
 
 method complement ($self: ) returns Set::Infinite::Functional {
-    return $self.universal_set( density => $self.density ) 
+    return $self.universal_set() 
         if $self.is_empty;
     return @.spans.map:{ $self.new( spans => $_.complement ) }
                   .reduce:{ $^a.intersection( $^b ) };
@@ -159,7 +157,7 @@ Creates an empty set.
 
 - `new( spans => @spans )`
 
-Creates a set containing zero or more `Span::Int` or `Span::Num` span objects.
+Creates a set containing zero or more `Span` objects.
 
 The array of spans must be ordered, and the spans must not intersect with each other.
 
@@ -227,7 +225,7 @@ This method return a logical value.
 
 - `spans()`
 
-Returns a list of `Span::Int` or `Span::Num` objects.
+Returns a list of `Span` objects.
 
 - `density()`
 
@@ -235,7 +233,7 @@ Returns a list of `Span::Int` or `Span::Num` objects.
 
 = AUTHOR
 
-Flavio S. Glock, <fglock@pucrs.br>
+Flavio S. Glock, <fglock@gmail.com>
 
 = COPYRIGHT
 

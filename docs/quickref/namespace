@@ -91,9 +91,89 @@ Autoloading
 
     [Can a package or role AUTOMETH?]
 
+Declarators [what is a real name for these things?]
+
+ [Fill me in...]
+
+   keyword    Comment - meaning and common usage
+    my
+    our
+    temp                   Similar to Perl 5's local()
+    let
+    state                  Initialization (see also FIRST {}
+                           in quickref/control)
+
+ [ my $x = 20; { let $x = 3; 0 }; # $x restored to 20
+   my $x = 20; { let $x = 3; 1 }; # $x stays 3
+   sub foo { state $x; say ++$x }; foo(); foo(); foo(); # 1,2,3
+  ?]
+
+Names and symbol tables
+
+               Symbol tables
+                  affected       Comments
+   Declarator    %::    %MY::
+    my  $x       no     YES
+    my  $.x
+    my  $:x
+    our $x       YES
+    our $.x
+    our $:x
+    temp $x      no     no
+    temp $.x     no     no
+    temp $:x     no     no
+    let  $x      no     no
+    let  $.x     no     no
+    let  $:x     no     no
+    state $x     no     yes
+    state $.x
+    state $:x
+    package
+    sub
+    method
+    ::($var)
+
+    Blank entries means I don't know.
+
+   state() will create a new lexical var, exactly like my.
+   temp() and let() only work with already declared vars.
+   [ binding? ]
+
 Binding
 
-    := ::=  # todo
+    $a := $b;
+    # Now $a and $b point to the same container, i.e.
+    # if you change $b, $a is changed too, and vice versa.
+    # Think of Unix' hardlinks.
+
+    # Binding works with sub return values and aggregate access, too:
+    $a := @array[$idx];
+    $a := %hash{$key};
+    $a := foo($param);
+    @array[$idx] := $a;
+    %hash{$key}  := $a;
+    foo($param)  := $a;
+
+    # You can use =:= to check whether two variables point to the same
+    # container:
+    my ($foo, $bar);
+    $foo =:= $bar;   # false
+    $bar  := $foo;
+    $foo =:= $bar;   # true
+
+    # Binding is also used for the parameter binding in subroutines:
+    foo $a;
+    sub foo ($param) { $param =:= $a }
+
+    my ($foo, ?$blarb, +$baz) := some_sub();
+
+    # ::= is binding at compile-time.
+    $foo ::= $bar;
+    BEGIN { ...do something with $foo, which is an alias to $bar... }
+
+    # ::= is, for example, used implicitly in subroutine declarations:
+    sub foo {...}             # is really
+    our &foo ::= sub {...};
 
 Examples
 

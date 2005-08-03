@@ -76,7 +76,7 @@ method intersects ( Span::Functional $span ) returns bool {
            ( $cmp != 0  ||  ( ! $open_start && ! $open_end ) );
 }
 
-method complement ($self: ) returns List of Span::Functional 
+method complement ($self: ) returns List of Span::Num 
 {
     if ($.end == Inf) {
         return () if $.start == -Inf;
@@ -101,8 +101,8 @@ method complement ($self: ) returns List of Span::Functional
                      end_is_open =>   bool::true ) );
 }
 
-method union ($self: Span::Functional $span ) 
-    returns List of Span::Functional 
+method union ($self: Span::Num $span ) 
+    returns List of Span::Num 
 {
     my int $cmp;
     $cmp = $.end <=> $span.start;
@@ -150,9 +150,11 @@ method union ($self: Span::Functional $span )
                  end_is_open =>   $open_end );
 }
 
-method intersection ($self: Span::Functional $span ) 
-    returns Span::Functional 
-{
+method intersection ($self: $span ) {
+
+    return $span.intersection( $self )
+        if $span.isa( 'Span::Code' );
+
     my ($i_start, $i_end);
     my bool $open_start;
     my bool $open_end;
@@ -204,7 +206,7 @@ method stringify () returns String {
            ( $.end_is_open   ?? ')' :: ']' );
 }
 
-method compare ( Span::Functional $span ) returns int {
+method compare ( Span::Num $span ) returns int {
     my int $cmp;
     $cmp = $.start <=> $span.start;
     return $cmp if $cmp;
@@ -215,15 +217,36 @@ method compare ( Span::Functional $span ) returns int {
     return $span.end_is_open <=> $.end_is_open;
 }
 
+method difference ($self: $span ) returns List {
+    return $self if $self.is_empty;
+    my @span = $span.complement;
+    @span = @span.map:{ $self.intersection( $_ ) };
+    return @span;
+}
+
+method next ($self: $x ) {
+    return $.start if $x < $.start;
+    return $x      if   $.end_is_open && $x < $.end;
+    return $x      if ! $.end_is_open && $x <= $.end;
+    return Inf;
+}
+
+method previous ($self: $x ) {
+    return $.end   if $x > $.end;
+    return $x      if   $.start_is_open && $x > $.start;
+    return $x      if ! $.start_is_open && $x >= $.start;
+    return -Inf;
+}
+
 =kwid
 
 = NAME
 
-Span::Functional - An object representing a single span, with a simple functional API.
+Span::Num - An object representing a single span, with a simple functional API.
 
 = SYNOPSIS
 
-  use Span:::Functional;
+  use Span::Num;
 
   $span = new( start => $start, end => $end, start_is_open => bool::false, end_is_open => bool::false );
 
@@ -233,45 +256,11 @@ This class represents a single span.
 
 It is intended mostly for "internal" use by the Span class. For a more complete API, see `Span`.
 
-= CONSTRUCTORS
-
-- `new( start => $start, end => $end, start_is_open => bool::false, end_is_open => bool::false )`
-
 The `start` value must be less than or equal to `end`. There is no checking.
-
-= OBJECT METHODS
-
-The following methods are available for Span::Functional objects:
-
-- `start()` / `end()`
-
-Return the start or end value.
-
-- `start_is_open()` / `end_is_open()` / `start_is_closed()` / `end_is_closed()`
-
-Return a logical value, whether the `start` or `end` values belong to the span ("closed") or not ("open").
-
-- size
-
-Return the "size" of the span.
-
-If `start` and `end` are times, then `size` is a duration.
-
-- union
-
-- complement
-
-- intersects
-
-- intersection 
-
-- stringify 
-
-- compare 
 
 = AUTHOR
 
-Flavio S. Glock, <fglock@pucrs.br>
+Flavio S. Glock, <fglock@gmail.com>
 
 = COPYRIGHT
 

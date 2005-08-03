@@ -12,11 +12,19 @@
     "Pugs.AST.SIO" and "Pugs.AST.Internals".
 -}
 
-module Pugs.Monads where
+module Pugs.Monads (
+    enterLex, enterContext, enterEvalContext, enterPackage, enterCaller,
+    enterGiven, enterWhen, enterWhile, genSymPrim, genSymCC,
+    enterBlock, enterSub,
+    evalVal, tempVar,
+
+    module Control.Monad.RWS
+) where
 import Pugs.Internals
 import Pugs.AST
 import Pugs.Context
 import Pugs.Types
+import Control.Monad.RWS
 
 {-|
 Create a new lexical scope by applying the list of 'Pad'-transformers
@@ -33,7 +41,7 @@ enterLex :: [Pad -> Pad] -- ^ Transformations on current 'Pad' to produce the
 enterLex newSyms = local (\e -> e{ envLexical = combine newSyms (envLexical e) })
 
 {-|
-Perform the specified evaluation in the specified (Perl6) context ('Cxt').
+Perform the specified evaluation in the specified (Perl 6) context ('Cxt').
 
 (Subsequent chained 'Eval's do /not/ see this new scope.)
 -}
@@ -41,7 +49,7 @@ enterContext :: Cxt -> Eval a -> Eval a
 enterContext cxt = local (\e -> e{ envContext = cxt })
 
 {-|
-Evaluate the specified wxpression in the specified (Perl6) context ('Cxt').
+Evaluate the specified wxpression in the specified (Perl 6) context ('Cxt').
 
 (Subsequent chained 'Eval's do /not/ see this new scope.)
 -}
@@ -123,7 +131,7 @@ enterWhile action = genSymCC "&last" $ \symLast -> do
         enterLex [symLast, symNext] action
 
 {-|
-Generate a new Perl6 operation from a Haskell function, give it a name, and
+Generate a new Perl 6 operation from a Haskell function, give it a name, and
 generate a @('Pad' -> 'Pad')@ transformer that can be used to install it into
 a pad.
 
@@ -150,7 +158,7 @@ genSymPrim symName@('&':name) prim action = do
 genSymPrim _ _ _ = error "need a &name"
 
 {-|
-Generate a Perl6 primitive that, when called, will activate the /current/
+Generate a Perl 6 primitive that, when called, will activate the /current/
 continuation (i.e. one that can be used to immediately break out of whatever 
 evaluation we are about to perform). This is great for @&last@ and the like.
 
@@ -168,7 +176,7 @@ genSymCC symName action = callCC $ \esc -> do
     genSymPrim symName (const $ esc undef) action
 
 {-|
-Create a Perl6 @&?BLOCK_EXIT@ function that, when activated, breaks out of
+Create a Perl 6 @&?BLOCK_EXIT@ function that, when activated, breaks out of
 the block scope by activating the current continuation. The block body
 evaluation is then performed in a new lexical scope with @&?BLOCK_EXIT@
 installed.

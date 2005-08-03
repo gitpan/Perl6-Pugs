@@ -4,8 +4,10 @@ use warnings;
 use Config;
 use Cwd qw(abs_path);
 use File::Spec;
-use lib 'util';
+#use lib 'util';
 use inc::Module::Install;
+use lib 'inc';
+use PugsBuild::Config;
 
 my $pugs = "pugs$Config{_exe}";
 my ($fs) = ($Config{sitelib} =~ /([\/\\])/)
@@ -15,7 +17,7 @@ my $version_h = "src/Pugs/pugs_version.h";
 my $config_h = "src/Pugs/pugs_config.h";
 my @srcdirs  = grep {-d} glob("src"), glob("src/*"), glob("src/*/*"), glob("src/*/*/*");
 my @hsfiles  = map {glob "$_/*.hs"} @srcdirs;
-push @hsfiles, qw<src/Pugs/Config.hs src/Pugs/Prelude.hs src/Pugs/CodeGen/PIR/Prelude.hs>;
+push @hsfiles, qw<src/Pugs/Config.hs src/Pugs/CodeGen/PIR/Prelude.hs>;
 my @hppfiles = map {my $x=$_; $x=~s/\.hs$/.hpp/; $x} @hsfiles;
 
 warn_cygwin     ();
@@ -48,11 +50,18 @@ makemaker_args  (
     test => { TESTS => join ' ', "t/*/*.t", "t/*/*/*.t" },
     MAN1PODS => {},
 );
+
+if (my $prefix = PugsBuild::Config->lookup('install_dir')) {
+    makemaker_args(PREFIX => $prefix);
+}
+
 clean_files     (map fixpaths($_),
     "pugs*", "src/Pugs/pugs_config.h", $version_h, $config_h,
     'src/Pugs/Config.hs', 'blib6',
-    'src/Pugs/Prelude.hs', 'src/Pugs/PreludePC.hs',
+    'src/Pugs/PreludePC.hs',
     'src/Pugs/CodeGen/PIR/Prelude.hs',
+    'src/Pugs/CodeGen/PIR/Prelude.hi',
+    'src/Pugs/CodeGen/PIR/Prelude.o',
     "src/gen_prelude$Config{_exe}",
     'test.log',
     'src/Pugs/Embed/Parrot.hs',
@@ -63,7 +72,8 @@ clean_files     (map fixpaths($_),
     (map {("$_/*.o*")} qw(pcre perl5 syck)),
     (map {("$_/*.hpp", "$_/*.hi", "$_/*.o*")} @srcdirs),
     'temp-ex*',
-    'unlink-test*'
+    'unlink-test*',
+    'tmp-Prelude.pm',
 );
 
 set_postamble   ();
@@ -97,6 +107,8 @@ sub set_postamble {
         $hsc2hs =~ s{(.*)ghc}{$1hsc2hs};
     }
 
+    my $heap = PugsBuild::Config->lookup('ghc_heap_size');
+    $ghc_flags .= " +RTS -M$heap -RTS" if $heap;
     # $ghc_flags .= ' -dcore-lint';
     # $ghc_flags .= " -keep-tmp-files";
     if (has_ghc_package('plugins')
@@ -145,7 +157,7 @@ sub set_postamble {
     my $hsc2hs_flags = "";
     my $ccdlflags = "";
 
-    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bperl5\b/i) {
+    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bperl5\b/i  and !($Config{cc} eq 'cl') )  {
         push @prereqs, "src/perl5/perl5.o";
         $ghc_output .= " src/perl5/perl5.o ";
         $ghc_flags .= " -DPUGS_HAVE_PERL5 ";
@@ -155,6 +167,12 @@ sub set_postamble {
             $ccdlflags .= (/^-D/ ? ' -optc' : ' -optl') . qq["$_" ]
 	      for split /\s+/, $flags;
         }
+    }
+    elsif( $ENV{PUGS_EMBED} and $Config{cc} eq 'cl' and $^O =~ /Win32/ )   {
+            $ENV{PUGS_EMBED} =~ s/\bperl5\b//g;
+	    warn << '.'
+*** Perl 5 embedding disabled on Win32 systems.
+.
     }
     else {
         warn << '.';
@@ -184,6 +202,32 @@ sub set_postamble {
     or set the CC environment variable to "/usr/bin/gcc-3.3".
 EOD
       }
+    }
+
+    if ($Config{cf_by} eq 'Debian Project' and $ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bperl5\b/i) {
+	# Is it safe to remove 'Debian Project' above, to test on all platforms?
+	my $need_path = 1;
+	my $libperlpath = '';
+	my $libperl = $Config{libperl};
+        foreach my $path (split(/\s/, $Config{libpth} . ' ' . $Config{libsdirs})) {
+	    if (-e "$path/libperl.so") {
+		$need_path = 0;
+	        last;
+	    } elsif (-e "$path/$libperl") {
+	        $libperlpath ||= $path;
+	    }
+	}
+	if ($need_path) {
+	    my $message = '';
+	    $message .= qq[        * Symlink $libperlpath/$libperl to libperl.so\n] if ($libperlpath and $libperl);
+	    $message .= qq[        * Install libperl-dev package\n] if ($Config{cf_by} eq 'Debian Project');
+	    die <<EOD;
+*** Could not find libperl.so in: $Config{libpth} $Config{libsdirs}
+    Solutions include:
+        * Remove perl5 from PUGS_EMBED
+$message
+EOD
+	}
     }
 
     if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bparrot\b/i) {
@@ -270,9 +314,6 @@ src/Pugs/Config.hs : util/PugsConfig.pm
 src/gen_prelude$Config{_exe} : src/gen_prelude.hs
 	$ghc -O0 -o src/gen_prelude$Config{_exe} src/gen_prelude.hs
 
-src/Pugs/Prelude.hs : src/gen_prelude$Config{_exe} src/perl6/Prelude.pm
-	src/gen_prelude$Config{_exe} Pugs.Prelude < src/perl6/Prelude.pm > src/Pugs/Prelude.hs
-
 src/Pugs/CodeGen/PIR/Prelude.hs : src/gen_prelude$Config{_exe} src/perl6/Prelude/PIR.pm
 	\@\$(PERL) -e "mkdir q-src/Pugs/CodeGen/PIR-"
 	src/gen_prelude$Config{_exe} Pugs.CodeGen.PIR.Prelude < src/perl6/Prelude/PIR.pm > src/Pugs/CodeGen/PIR/Prelude.hs
@@ -300,36 +341,24 @@ haddock : $version_h $config_h @hppfiles docs/haddock
 docs/haddock :
 	\@\$(PERL) -e "mkdir q-docs/haddock-"
 
-profiled :: src/Pugs/Config.hs src/Pugs/Prelude.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs
-	\$(PERL) util/gen_prelude.pl -v --touch --null > src/Pugs/PreludePC.hs
-	$ghc $threaded -O -auto-all -prof --make $profiled_flags $ccdlflags $ghc_output
-	\$(PERL) util/gen_prelude.pl -v -i src/perl6/Prelude.pm -p $thispugs --touch > src/Pugs/PreludePC.hs
-	$ghc $threaded -O -auto-all -prof --make $profiled_flags $ccdlflags $ghc_output
+profiled :: src/Pugs/Config.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs config.yml src/perl6/Prelude.pm
+	\$(PERL) util/build_pugs.pl _+GHC $ghc $threaded -O -auto-all -prof --make $profiled_flags $ccdlflags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
 
 pugs.prof :: profiled
 	find t -type f | grep -v D | grep -v R | grep -v pugsrun | ./pugs +RTS -p -RTS -e 'my sub exit {}; for =\$\$*IN -> \$\$t is copy { \$\$t .= chomp; require \$\$t }'
 
 optimised :: optimized
 
-optimized :: src/Pugs/Config.hs src/Pugs/Prelude.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs
-	\$(PERL) util/gen_prelude.pl -v --touch --null > src/Pugs/PreludePC.hs
-	$ghc $threaded -O --make $ghc_flags $embed_flags $ccdlflags $ghc_output
-	\$(PERL) util/gen_prelude.pl -v -i src/perl6/Prelude.pm -p $thispugs --touch > src/Pugs/PreludePC.hs
-	$ghc $threaded -O --make $ghc_flags $embed_flags $ccdlflags $ghc_output
+optimized :: src/Pugs/Config.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs config.yml src/perl6/Prelude.pm
+	\$(PERL) util/build_pugs.pl _+GHC $ghc $threaded -O --make $ghc_flags $embed_flags $ccdlflags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
 
 unoptimised :: unoptimized
 
-unoptimized :: src/Pugs/Config.hs src/Pugs/Prelude.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs
-	\$(PERL) util/gen_prelude.pl -v --touch --null > src/Pugs/PreludePC.hs
-	$ghc $threaded -O0 --make $ghc_flags $embed_flags $ccdlflags $ghc_output
-	\$(PERL) util/gen_prelude.pl -v -i src/perl6/Prelude.pm -p $thispugs --touch > src/Pugs/PreludePC.hs
-	$ghc $threaded -O0 --make $ghc_flags $embed_flags $ccdlflags $ghc_output
+unoptimized :: src/Pugs/Config.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs config.yml src/perl6/Prelude.pm
+	\$(PERL) util/build_pugs.pl _+GHC $ghc $threaded -O0 --make $ghc_flags $embed_flags $ccdlflags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
 
-$pugs : src/Pugs/Config.hs src/Pugs/Prelude.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs
-	\$(PERL) util/gen_prelude.pl -v --touch --null > src/Pugs/PreludePC.hs
-	$ghc $threaded -O --make $ghc_flags $embed_flags $ccdlflags $ghc_output
-	\$(PERL) util/gen_prelude.pl -v -i src/perl6/Prelude.pm -p $thispugs --touch > src/Pugs/PreludePC.hs
-	$ghc $threaded -O --make $ghc_flags $embed_flags $ccdlflags $ghc_output
+$pugs : src/Pugs/Config.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h @prereqs config.yml src/perl6/Prelude.pm
+	\$(PERL) util/build_pugs.pl _+GHC $ghc $threaded __optimization__ --make $ghc_flags $embed_flags $ccdlflags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
 
 smoke : $pugs util/run-smoke.pl all
 	\$(PERL) util/run-smoke.pl . smoke.html
@@ -340,6 +369,9 @@ pirsmoke : $pugs util/run-smoke.pl all
 pirtest :
 	\$(PERL) -e "ENV->{HARNESS_PERL_SWITCHES}=q+-B PIR+; system qq+$Config{make}+, q+test+"
 
+jssmoke : $pugs util/run-smoke.pl all
+	\$(PERL) -e "ENV->{PUGS_RUNTIME}=q+JS+; exec qw+$^X util/run-smoke.pl . smoke.html+"
+
 ghci ::
 	$ghc --interactive $ghc_flags $ghc_output
 
@@ -347,6 +379,10 @@ tags : @srcfiles
 	$hasktags -c @srcfiles
 	sort tags > tags.tmp
 	mv tags.tmp tags
+
+config.yml:
+
+src/perl6/Prelude.pm:
 
 INST6_ARCHLIB = blib6/arch
 INST6_SCRIPT = blib6/script

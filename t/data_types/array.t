@@ -9,7 +9,7 @@ Arrays
 
 =cut
 
-plan 58;
+plan 59;
 
 # array of strings
 
@@ -115,8 +115,9 @@ eval_ok('my @array11 is shape(2,4)', "another way to declare a multidimension ar
 eval_ok('@array11[2,0] = 12', "push the value to a multidimension array", :todo);
 
 # declare the array with data type
-eval_ok('my Int @array', "declare a array for integer only", :todo);
-eval_ok('@array[0] = 23', "declare the array value", :todo);
+my Int @array;
+lives_ok { @array[0] = 23 },                   "stuffing Ints in an Int array works";
+dies_ok  { @array[1] = $*ERR }, "stuffing IO in an Int array does not work", :todo<feature>;
 
 # negative index
 my @array12 = ('a', 'b', 'c', 'e'); 
@@ -146,3 +147,11 @@ is ~@b,
     assign to a negatively indexed slice array from array  
     lvalue in assignment is then lvalue to negatively indexed slice as rvalue"; 
 #
+
+# This test may seem overly simplistic, but it was actually a bug in PIL2JS, so
+# why not write a test for it so other backends can benefit of it, too? :)
+{
+  my @arr = (0, 1, 2, 3);
+  @arr[0] = "new value";
+  is @arr[0], "new value", "modifying of array contents (constants) works";
+}

@@ -6,18 +6,6 @@ has $.start;
 has $.end;
 has $.density;
 
-=for TODO
-
-    * compare
-        - tests
-
-    * complete POD
-        - explain "density" parameter
-
-    * mark as "internal" class
-
-=cut
-
 submethod BUILD ( $.start, $.end, ?$.density = 1 ) {}
 
 method empty_span ($class: ?$density = 1 ) {
@@ -54,7 +42,7 @@ method complement ($self: ) returns List of Span::Int
                $self.new( start => $.end + $.density,  end =>   Inf, density => $.density ) );
 }
 
-multi method union ($self: Span::Int $span ) 
+method union ($self: Span::Int $span ) 
     returns List of Span::Int 
 {
     return ( $self, $span ) if $.end + $.density     < $span.start;
@@ -64,9 +52,9 @@ multi method union ($self: Span::Int $span )
     return $self.new( start => $i_start, end =>   $i_end, density => $.density );
 }
 
-method intersection ($self: Span::Int $span ) 
-    returns Span::Int 
-{
+method intersection ($self: $span ) {
+    return $span.intersection( $self )
+        if $span.isa( 'Span::Code' ) || $span.isa( 'Span::Num' );
     my $i_start = $.start < $span.start ?? $span.start :: $.start;
     my $i_end =   $.end > $span.end     ?? $span.end   :: $.end;
     return () if $i_start > $i_end;
@@ -88,6 +76,27 @@ method compare ( Span::Int $span ) returns int {
     return $.end <=> $span.end;
 }
 
+method difference ($self: $span ) returns List {
+    return $self if $self.is_empty;
+    my @span = $span.complement;
+    @span = @span.map:{ $self.intersection( $_ ) };
+    return @span;
+}
+
+method next ($self: $x is copy ) {
+    $x = $x + $.density if defined $.density;
+    return $.start if $x < $.start;
+    return $x      if $x <= $.end;
+    return Inf;
+}
+
+method previous ($self: $x is copy ) {
+    $x = $x - $.density if defined $.density;
+    return $.end   if $x > $.end;
+    return $x      if $x >= $.start;
+    return -Inf;
+}
+
 =kwid
 
 = NAME
@@ -106,45 +115,9 @@ This class represents a single span.
 
 It is intended mostly for "internal" use by the Span class. For a more complete API, see `Span`.
 
-= CONSTRUCTORS
-
-- `new( start => $start, end => $end )`
-
-- `new( start => $start, end => $end, density => 1 )`
-
-The `start` value must be less than or equal to `end`. There is no checking.
-
-The optional `density` parameter defines the "chunk size". The default density is "1".
-
-= OBJECT METHODS
-
-The following methods are available for Span::Int objects:
-
-- `start()` / `end()`
-
-Return the start or end value.
-
-- size
-
-Return the "size" of the span.
-
-If `start` and `end` are times, then `size` is a duration.
-
-- union
-
-- complement
-
-- intersects
-
-- intersection 
-
-- stringify 
-
-- compare 
-
 = AUTHOR
 
-Flavio S. Glock, <fglock@pucrs.br>
+Flavio S. Glock, <fglock@gmail.com>
 
 = COPYRIGHT
 

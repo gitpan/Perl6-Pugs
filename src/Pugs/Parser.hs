@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -cpp -fglasgow-exts -funbox-strict-fields #-}
+{-# OPTIONS_GHC -cpp -fglasgow-exts -funbox-strict-fields -fno-full-laziness -fno-cse #-}
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 {-|
@@ -14,6 +14,10 @@ module Pugs.Parser (
     ruleBlockBody,
     possiblyExit,
     mkPos,
+
+    module Pugs.Lexer,
+    module Pugs.Parser.Types,
+    module Pugs.Parser.Unsafe,
 ) where
 import Pugs.Internals
 import Pugs.AST
@@ -183,6 +187,7 @@ ruleDeclaration = rule "declaration" $ choice
     , ruleMemberDeclaration
     , ruleTraitDeclaration
     , ruleUseDeclaration
+    , ruleNoDeclaration
     , ruleInlineDeclaration
     , ruleRequireDeclaration
     , ruleTrustsDeclaration
@@ -546,10 +551,16 @@ ruleVarDeclaration = rule "variable declaration" $ do
             return $ Pad scope lexDiff implicit_first_block
         _      -> return $ Pad scope lexDiff rhs
 
+ruleNoDeclaration :: RuleParser Exp
+ruleNoDeclaration = rule "no declaration" $ do
+    symbol "no"
+    ruleUsePackage False
+    return emptyExp
+
 ruleUseDeclaration :: RuleParser Exp
 ruleUseDeclaration = rule "use declaration" $ do
     symbol "use"
-    tryChoice [ ruleUseVersion, ruleUsePackage ]
+    tryChoice [ ruleUseVersion, ruleUsePackage True ]
     return emptyExp
 
 ruleUseVersion :: RuleParser ()
@@ -561,8 +572,8 @@ ruleUseVersion = rule "use version" $ do
         error $ "Perl v" ++ version ++ " required--this is only v" ++ versnum ++ ", stopped at " ++ (show pos)
     return ()
 
-ruleUsePackage :: RuleParser ()
-ruleUsePackage = rule "use package" $ do
+ruleUsePackage :: Bool -> RuleParser ()
+ruleUsePackage use = rule "use package" $ do
     lang    <- option "pugs" $ try $ do
         lang <- identifier
         char ':'
@@ -573,20 +584,26 @@ ruleUsePackage = rule "use package" $ do
     _       <- option "" $ ruleAuthorPart
     let pkg = concat (intersperse "::" names)
     env <- getRuleEnv
-    val <- unsafeEvalExp $
-        if lang == "perl5"
-            then Stmts (Sym SGlobal (':':'*':pkg) (Syn ":=" [ Var (':':'*':pkg), App (Var "&require_perl5") Nothing [Val $ VStr pkg] ])) (Syn "env" [])
-            else App (Var "&use") Nothing [Val . VStr $ concat (intersperse "/" names) ++ ".pm"]
-    option () $ try $ do
-        imp <- ruleExpression
-        unsafeEvalExp $ App (Var $ ('&':pkg) ++ "::import") (Just val) [imp]
+    when use $ do   -- for &no, don't load code
+        val <- unsafeEvalExp $
+            if lang == "perl5"
+                then Stmts (Sym SGlobal (':':'*':pkg) (Syn ":=" [ Var (':':'*':pkg), App (Var "&require_perl5") Nothing [Val $ VStr pkg] ])) (Syn "env" [])
+                else App (Var "&use") Nothing [Val . VStr $ concat (intersperse "/" names) ++ ".pm"]
+        case val of
+            Val (VControl (ControlEnv env')) -> putRuleEnv env
+                { envClasses = envClasses env' `addNode` mkType pkg
+                , envGlobal  = envGlobal env'
+                }
+            _  -> error $ pretty val
+    try (verbatimParens whiteSpace) <|> do
+        imp <- option emptyExp ruleExpression
+        let sub = Var $ ('&':pkg) ++ if use then "::import" else "::unimport"
+        unsafeEvalExp $ Syn "if"
+            [ App (Var "&name") (Just sub) [] -- XXX Hack
+            , App sub (Just $ Val $ VStr $ envPackage env) [imp]
+            , emptyExp
+            ]
         return ()
-    case val of
-        Val (VControl (ControlEnv env')) -> putRuleEnv env
-            { envClasses = envClasses env' `addNode` mkType pkg
-            , envGlobal  = envGlobal env'
-            }
-        _  -> error $ pretty val
     return ()
 
 -- | The version part of a full class specification.
@@ -625,8 +642,11 @@ ruleRequireDeclaration = tryRule "require declaration" $ do
 ruleDoBlock :: RuleParser Exp
 ruleDoBlock = rule "do block" $ try $ do
     symbol "do"
-    choice 
-        [ ruleBlockDeclaration
+    choice
+        -- do { STMTS }
+        [ try $ between (symbol "{") (char '}') ruleBlockBody
+        -- do STMTS
+        , ruleBlockDeclaration
         , ruleDeclaration
         , ruleConstruct
         , ruleStatement
@@ -671,6 +691,7 @@ checkForIOLeak exp =
 -- | If we've executed code like @BEGIN { exit }@, we've to run all @\@*END@
 --   blocks and then exit. Returns the input expression if there's no need to
 --   exit.
+{-# NOINLINE possiblyExit #-}
 possiblyExit :: Exp -> RuleParser Exp
 possiblyExit (Val (VControl (ControlExit exit))) = do
     -- Run all @*END blocks...
@@ -1027,6 +1048,7 @@ litOperators = do
     return $ tight ++ loose
 
 -- read just the current state (ie, not a parser)
+{-# NOINLINE currentFunctions #-}
 currentFunctions :: RuleParser [(Var, VStr, Params)]
 currentFunctions = do
     env     <- getRuleEnv
@@ -1090,7 +1112,10 @@ currentTightFunctions = do
         mapPair f (x, y) = (f x, f y)
     -- Finally, we return the names of the ops.
     -- But we've to s/^infix://, as we've to return (say) "+" instead of "infix:+".
-    return $ map (encodeUTF8 . unwords . nub)
+    -- Hack: Filter out &infix:<,> (which are most Preludes for PIL -> *
+    -- compilers required to define), because else basic function application
+    -- (foo(1,2,3) will get parsed as foo(&infix:<,>(1,&infix:<,>(2,3))) (bad).
+    return $ map (encodeUTF8 . unwords . filter (/= ",") . nub) $
         [nullary, optionary, namedUnary, preUnary, postUnary, infixOps]
 
 parseOpWith :: (DynParsers -> RuleParser Exp) -> RuleParser Exp
@@ -1366,39 +1391,48 @@ parseParamList = parseParenParamList <|> parseNoParenParamList
 
 parseParenParamList :: RuleParser (Maybe Exp, [Exp])
 parseParenParamList = do
+    leading     <- option [] $ try $ many pairAdverb
     params      <- option Nothing . fmap Just $
         verbatimParens $ parseHasParenParamList
-    blocks      <- option [] ruleAdverbBlock
-    when (isNothing params && null blocks) $ fail ""
+    trailing    <- option [] $ try $ many pairOrBlockAdverb
+    when (isNothing params && null trailing && null leading) $ fail ""
     let (inv, args) = maybe (Nothing, []) id params
-    return (inv, args ++ blocks)
+    return (inv, leading ++ args ++ trailing)
 
 parseParenParamListMaybe :: RuleParser (Maybe Exp, [Exp])
 parseParenParamListMaybe = do
+    leading     <- option [] $ try $ many pairAdverb
     params      <- option Nothing . fmap Just $
         verbatimParens $ parseHasParenParamList
-    blocks      <- option [] ruleAdverbBlock
+    trailing    <- option [] $ try $ many pairOrBlockAdverb
     let (inv, args) = maybe (Nothing, []) id params
-    return (inv, args ++ blocks)
+    return (inv, leading ++ args ++ trailing)
 
-ruleAdverbBlock :: RuleParser [Exp]
-ruleAdverbBlock = tryRule "adverbial block" $ do
+pairOrBlockAdverb :: RuleParser Exp
+pairOrBlockAdverb = tryChoice [ pairAdverb, blockAdverb ]
+
+blockAdverb :: RuleParser Exp
+blockAdverb = do
     char ':'
-    rblock <- ruleBlockLiteral
-    next <- option [] ruleAdverbBlock
-    return (rblock:next)
+    ruleBlockLiteral
 
 parseHasParenParamList :: RuleParser (Maybe Exp, [Exp])
 parseHasParenParamList = do
     formal <- (`sepEndBy` symbol ":") $ fix $ \rec -> do
-        rv <- option Nothing $ fmap Just $ do
-            x <- parseLitOp
-            return (x, symbol ",")
+        rv <- option Nothing $ do
+            fmap Just $ tryChoice
+                [ do x <- pairOrBlockAdverb
+                     lookAhead (satisfy (/= ','))   
+                     return ([x], return "")
+                , do x <- parseLitOp
+                     a <- option [] $ try $ many pairOrBlockAdverb
+                     return (x:a, symbol ",")
+                ]
         case rv of
             Nothing           -> return []
             Just (exp, trail) -> do
                 rest <- option [] $ do { trail; rec }
-                return (exp:rest)
+                return (exp ++ rest)
     processFormals formal
 
 parseNoParenParamList :: RuleParser (Maybe Exp, [Exp])
@@ -1408,15 +1442,19 @@ parseNoParenParamList = do
             fmap Just $ tryChoice
                 [ do x <- ruleBlockLiteral
                      lookAhead (satisfy (/= ','))
-                     return (x, return "")
+                     return ([x], return "")
+                , do x <- pairOrBlockAdverb
+                     lookAhead (satisfy (/= ','))   
+                     return ([x], return "")
                 , do x <- parseTightOp
-                     return (x, symbol ",")
+                     a <- option [] $ try $ many pairOrBlockAdverb
+                     return (x:a, symbol ",")
                 ]
         case rv of
             Nothing           -> return []
             Just (exp, trail) -> do
                 rest <- option [] $ do { trail; rec }
-                return (exp:rest)
+                return (exp ++ rest)
     processFormals formal
 
 processFormals :: Monad m => [[Exp]] -> m (Maybe Exp, [Exp])
@@ -1609,15 +1647,18 @@ pairAdverb :: RuleParser Exp
 pairAdverb = do
     string ":"
     key <- many1 wordAny
-    val <- option (Val $ VInt 1) (valueDot <|> valueExp)
+    val <- option (Val $ VInt 1) $ tryChoice [ valueDot, noValue, valueExp ]
     return $ App (Var "&infix:=>") Nothing [Val (VStr key), val]
     where
     valueDot = do
         skipMany1 (satisfy isSpace)
         symbol "."
         option (Val $ VInt 1) $ valueExp
-    valueExp = choice
-        [ parens ruleExpression
+    noValue = do
+        skipMany1 (satisfy isSpace)
+        return (Val $ VInt 1)
+    valueExp = lexeme $ choice
+        [ verbatimParens ruleExpression
         , arrayLiteral
         , angleBracketLiteral
         ]
@@ -1634,6 +1675,12 @@ qInterpolateDelimiter protectedChar = do
     char '\\'
     c <- oneOf (protectedChar:"\\")
     return (Val $ VStr [c])
+
+qInterpolateDelimiterMinimal :: Char -> RuleParser Exp
+qInterpolateDelimiterMinimal protectedChar = do
+    char '\\'
+    c <- oneOf (protectedChar:"\\")
+    return (Val $ VStr ['\\',c])
 
 qInterpolateQuoteConstruct :: RuleParser Exp
 qInterpolateQuoteConstruct = try $ do
@@ -1668,6 +1715,7 @@ qInterpolator flags = choice [
                <|> (try $ qInterpolateDelimiter $ qfProtectedChar flags)
             QB_Single -> try qInterpolateQuoteConstruct
                <|> (try $ qInterpolateDelimiter $ qfProtectedChar flags)
+            QB_Minimal -> try $ qInterpolateDelimiterMinimal $ qfProtectedChar flags
             QB_No -> mzero
         variable = try $ do
             var <- ruleVarNameString
@@ -1762,23 +1810,23 @@ angleBracketLiteral :: RuleParser Exp
 angleBracketLiteral = try $
         do
         symbol "<<"
-        qLiteral1 (symbol "<<") (symbol ">>") $ qqFlags
+        qLiteral1 (symbol "<<") (string ">>") $ qqFlags
             { qfSplitWords = QS_Protect, qfProtectedChar = '>' }
     <|> do
         symbol "<"
-        qLiteral1 (symbol "<") (symbol ">") $ qFlags
+        qLiteral1 (symbol "<") (string ">") $ qFlags
             { qfSplitWords = QS_Yes, qfProtectedChar = '>' }
     <|> do
         symbol "\xab"
-        qLiteral1 (symbol "\xab") (symbol "\xbb") $ qFlags
+        qLiteral1 (symbol "\xab") (string "\xbb") $ qFlags
             { qfSplitWords = QS_Yes, qfProtectedChar = '\xbb' }
 
 -- Quoting delimitor and flags
 -- qfProtectedChar is the character to be
 --   protected by backslashes, if
---   qfInterpolateBackslash is Single or All.
+--   qfInterpolateBackslash is Minimal or Single or All
 data QS_Flag = QS_No | QS_Yes | QS_Protect deriving (Show, Eq, Ord, Typeable)
-data QB_Flag = QB_No | QB_Single | QB_All deriving (Show, Eq, Ord, Typeable)
+data QB_Flag = QB_No | QB_Minimal | QB_Single | QB_All deriving (Show, Eq, Ord, Typeable)
 
 data QFlags = MkQFlags
     { qfSplitWords              :: !QS_Flag -- No, Yes, Protect
@@ -1787,7 +1835,7 @@ data QFlags = MkQFlags
     , qfInterpolateHash         :: !Bool
     , qfInterpolateFunction     :: !Bool
     , qfInterpolateClosure      :: !Bool
-    , qfInterpolateBackslash    :: !QB_Flag -- No, Single, All
+    , qfInterpolateBackslash    :: !QB_Flag -- No, Minimal, Single, All
     , qfProtectedChar           :: !Char
     , qfP5RegularExpression     :: !Bool
     , qfHereDoc                 :: !Bool
@@ -1887,10 +1935,10 @@ rawFlags  :: QFlags
 rawFlags  = MkQFlags QS_No False False False False False QB_No 'x' False False False
 -- | Default flags
 rxP5Flags :: QFlags
-rxP5Flags = MkQFlags QS_No True True True True False QB_No '/' True False False
+rxP5Flags = MkQFlags QS_No True True True True False QB_Minimal '/' True False False
 -- | Default flags
 rxP6Flags :: QFlags
-rxP6Flags = MkQFlags QS_No False False False False False QB_Single '/' False False False
+rxP6Flags = MkQFlags QS_No False False False False False QB_Minimal '/' False False False
 
 -- Regexps
 

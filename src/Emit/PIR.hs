@@ -1,6 +1,18 @@
 {-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances -fno-warn-orphans -funbox-strict-fields -cpp #-}
 
-module Emit.PIR where
+{-|
+    Parrot PIR syntax tree.
+
+>   All that is gold does not glitter,
+>   Not all those who wander are lost;
+>   The old that is strong does not wither,
+>   Deep roots are not reached by the frost.
+-}
+
+module Emit.PIR (
+    module Emit.PIR,
+    module Emit.Common,
+) where
 import Data.Char
 import Data.List
 import Data.Typeable

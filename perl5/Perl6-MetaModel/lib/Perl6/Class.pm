@@ -7,10 +7,13 @@ use warnings;
 use Carp 'confess';
 use Scalar::Util 'blessed';
 
+use Perl6::Instance; # << this is where the Perl 5 sugar is now ...
+
+use Perl6::MetaClass;
 use Perl6::Role;
-use Perl6::Object;
 
 use Perl6::SubMethod;
+use Perl6::PrivateMethod;
 
 use Perl6::Class::Attribute;
 use Perl6::Class::Method;
@@ -18,50 +21,73 @@ use Perl6::Class::Method;
 use Perl6::Instance::Attribute;
 use Perl6::Instance::Method;
 
+## Private methods
+
 sub new {
     my ($class, $name, $params) = @_;
     my $self = bless { 
-        name   => $name,
-        params => {}
+        name   => $name
     }, $class;
-    $self->_validate_params($params);
+    _validate_params($self, $params);
     return $self;
 }
 
-sub name { (shift)->{name} }
-
-sub apply {
+sub _apply_class_to_environment {
     my ($self) = @_;
-    my ($name, $version, $authority) = $self->_get_class_meta_information();
+    my ($name, $version, $authority) = _get_class_meta_information($self);
+    # create the package ...
     my $code = qq|
         package $name;
-        \@$name\:\:ISA = 'Perl6::Object';
+        \@$name\:\:ISA = 'Perl6::Instance';
+        \$$name\:\:META = undef;
+        1;
     |;
-    eval $code || confess "Could not initialize class '$name'";    
-    eval {
-        no strict 'refs';
-        ${$name .'::META'} = Perl6::MetaClass->new(
-            name => $name,
-            (defined $version   ? (version   => $version)   : ()),
-            (defined $authority ? (authority => $authority) : ())                              
-        );
+    eval $code || confess "Could not initialize class '$name'";   
+    # alias the full name ...
+    eval {  
+        no strict 'refs';         
+        *{$self->{name} . '::'} = *{$name . '::'};
     };
-    confess "Could not initialize the metaclass for $name : $@" if $@;
+    confess "Could not create full name " . $self->{name} . " : $@" if $@;   
+    # create the metaclass ...     
+    my $meta; 
     eval {
-        no strict 'refs';            
-        *{$self->name . '::'} = *{$name . '::'};
+        if ($name eq 'Perl6::Object') {
+            ## BOOTSTRAPPING
+            # XXX - Perl6::Object cannot call the 
+            # regular new() becuase Perl6::MetaClass
+            # actually inherits new() from Perl6::Object
+            # meta-circulatiry rules :P
+            $meta = Perl6::MetaClass::new(
+                '$.name' => $name,
+                (defined $version   ? ('$.version'   => $version)   : ()),
+                (defined $authority ? ('$.authority' => $authority) : ())                              
+            );  
+            # this action is done in the Perl6::MetaClass->BUILD
+            # submethod, but we need to do it manually here
+            {
+                no strict 'refs';    
+                ${"${name}::META"} = $meta;                    
+            }
+        }
+        else {
+            $meta = ::dispatch('Perl6::MetaClass', 'new', (
+                '$.name' => $name,
+                (defined $version   ? ('$.version'   => $version)   : ()),
+                (defined $authority ? ('$.authority' => $authority) : ())                              
+            ));
+        }
+        # build the metaclass
+        _build_class($self, $meta);  
     };
-    confess "Could not create full name " . $self->name . " : $@" if $@;    
-    $self->_build_class($name);    
+    confess "Could not initialize the metaclass for $name : $@" if $@;  
 }
-
-## Private methods
 
 sub _validate_params {
     my ($self, $params) = @_;
 
     my %allowed = map { $_ => undef } qw(is does instance class);
-    my %allowed_in = map { $_ => undef } qw(attrs BUILD DESTROY methods);
+    my %allowed_in = map { $_ => undef } qw(attrs BUILD DESTROY methods submethods);
 
     foreach my $key (keys %{$params}) {
         confess "Invalid key ($key) in params" 
@@ -79,7 +105,7 @@ sub _validate_params {
 
 sub _get_class_meta_information {
     my ($self) = @_;
-    my $identifier = $self->name;
+    my $identifier = $self->{name};
     # shortcut for classes with no extra meta-info
     return ($identifier, undef, undef) if $identifier !~ /\-/;
     # XXX - this will actually need work, 
@@ -88,58 +114,74 @@ sub _get_class_meta_information {
 }
 
 sub _build_class {
-    my ($self, $name) = @_;
+    my ($self, $meta) = @_;
 
-    my $superclasses = $self->{params}->{is} || [ 'Perl6::Object' ];
-    ($name)->meta->superclasses([ map { $_->meta } @{$superclasses} ]);        
+    my $name = ::dispatch($meta, 'name');
+
+    my $superclasses = $self->{params}->{is};
+    ::dispatch($meta, 'superclasses', ([ map { ::meta($_) } @{$superclasses} ]));        
 
     if (my $instance = $self->{params}->{instance}) {
 
-        ($name)->meta->add_method('BUILD' => Perl6::SubMethod->new($name => $instance->{BUILD}))
+        ::dispatch($meta, 'add_method', ('BUILD' => Perl6::SubMethod->new($name => $instance->{BUILD})))
             if exists $instance->{BUILD};            
-        ($name)->meta->add_method('DESTROY' => Perl6::SubMethod->new($name => $instance->{DESTROY}))          
+        ::dispatch($meta, 'add_method', ('DESTROY' => Perl6::SubMethod->new($name => $instance->{DESTROY})))
             if exists $instance->{DESTROY};
             
         if (exists $instance->{methods}) {
-            ($name)->meta->add_method($_ => Perl6::Instance::Method->new($name, $instance->{methods}->{$_})) 
-                foreach keys %{$instance->{methods}};
+            foreach (keys %{$instance->{methods}}) {
+                if (/^_/) {
+                    ::dispatch($meta, 'add_method', ($_ => Perl6::PrivateMethod->new($name, $instance->{methods}->{$_})));
+                }
+                else {
+                    ::dispatch($meta, 'add_method', ($_ => Perl6::Instance::Method->new($name, $instance->{methods}->{$_})));
+                }
+            }
         }
+        if (exists $instance->{submethods}) {
+            ::dispatch($meta, 'add_method', ($_ => Perl6::SubMethod->new($name, $instance->{submethods}->{$_})))
+                foreach keys %{$instance->{submethods}};
+        }        
         if (exists $instance->{attrs}) {
             foreach my $attr (@{$instance->{attrs}}) {
                 my $props;
                 if (ref($attr) eq 'ARRAY') {
                     ($attr, $props) = @{$attr}; 
                 }
-                ($name)->meta->add_attribute(
+                ::dispatch($meta, 'add_attribute', (
                     $attr => Perl6::Instance::Attribute->new($name => $attr, $props)
-                );              
+                ));              
             }
         }        
     }
-    if (my $class = $self->{params}->{class}) {
+    if (my $class = $self->{params}->{class}) {  
+        
         if (exists $class->{attrs}) {
             foreach my $attr (@{$class->{attrs}}) {
                 my $props;
                 if (ref($attr) eq 'ARRAY') {
                     ($attr, $props) = @{$attr}; 
                 }
-                ($name)->meta->add_attribute(
+                ::dispatch($meta, 'add_attribute', (
                     $attr => Perl6::Class::Attribute->new($name => $attr, $props)
-                );              
+                ));
             }            
 
         }
         if (exists $class->{methods}) {
             foreach my $label (keys %{$class->{methods}}) {
-                ($name)->meta->add_method(
-                    $label => Perl6::Class::Method->new($name, $class->{methods}->{$label})
-                );
+                if ($label =~ /^_/) {
+                    ::dispatch($meta, 'add_method', ($label => Perl6::PrivateMethod->new($name, $class->{methods}->{$label})));
+                }
+                else {
+                    ::dispatch($meta, 'add_method', ($label => Perl6::Class::Method->new($name, $class->{methods}->{$label})));
+                }
             }
         }
     }
 
 
-    Perl6::Role->flatten_roles_into($name, @{$self->{params}->{does}})
+    Perl6::Role->flatten_roles_into($meta, @{$self->{params}->{does}})
         if $self->{params}->{does};
 }
 

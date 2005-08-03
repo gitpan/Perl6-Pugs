@@ -3,10 +3,11 @@
 use strict;
 use warnings;
 
-use Test::More tests => 39;
+use Test::More tests => 25;
 use Test::Exception;
 
 use Perl6::MetaModel;
+use Perl6::Object;
 
 =pod
 
@@ -30,6 +31,7 @@ generation, in particular it checks the following:
 =cut
 
 class Basic => {
+    is => [ 'Perl6::Object' ],
     instance => {
         attrs => [ 
             [ '$.scalar' => { access => 'rw' } ], 
@@ -78,12 +80,13 @@ lives_ok {
 is_deeply($basic->hash(), { one => 1, two => 2 }, '... hash() was assigned to correctly');
 
 class Base => {
+    is => [ 'Perl6::Object' ],    
     instance => {
         attrs => [ '$:foo' ],
-        BUILD => sub { (shift)->set_value('$:foo' => 'Base::Foo') },
+        BUILD => sub { _('$:foo' => 'Base::Foo') },
         methods => {
-            get_base_foo => sub { (shift)->get_value('$:foo') },
-            set_base_foo => sub { (shift)->set_value('$:foo' => 'Base::Foo -> new') }            
+            get_base_foo => sub { _('$:foo') },
+            set_base_foo => sub { _('$:foo' => 'Base::Foo -> new') }            
         }
     }
 };
@@ -92,13 +95,9 @@ class Derived1 => {
     is => [ 'Base' ],
     instance => {
         attrs => [ [ '$.foo' => { access => 'rw' } ], '$:bar' ],
-        BUILD => sub { (shift)->set_value('$.foo' => 'Foo::Foo') },
+        BUILD => sub { _('$.foo' => 'Foo::Foo') },
     }
 };
-
-
-#use Data::Dumper;
-#diag Dumper Derived1->class->metaclass;
 
 my $d = Derived1->new();
 isa_ok($d, 'Derived1');
@@ -120,34 +119,20 @@ lives_ok {
 
 is($d->get_base_foo(), 'Base::Foo -> new', '... the Base::foo attribute can still be accessed');
 
-#$@ = undef;
-#eval { $d->get_value('$:foo') };
-#ok($@, '... getting a private value failed correctly');
-
-#$@ = undef;
-#eval { $d->set_value('$:foo' => 'nothing') };
-#ok($@, '... setting a private value failed correctly');
-
-# check for incorrect parameters
-
-#$@ = undef;
-#eval { $d->get_value('$.foo2') };
-#ok($@, '... getting a incorrect parameter failed correctly');
-
 dies_ok {
-    $d->set_value('$.foo2' => 'nothing')
+    _('$.foo2' => 'nothing')
 } '... setting a incorrect parameter failed correctly';
 
 # check for accessor conflicts
 
 class ConflictChecker => {
+    is => [ 'Perl6::Object' ],    
     instance => {
         attrs => [ '$.foo' ],
-        BUILD => sub { (shift)->set_value('$.foo' => 'just $.foo') },
+        BUILD => sub { _('$.foo' => 'just $.foo') },
         methods => {
             foo => sub {
-                my $self = shift;
-                'ConflictChecker->foo returns "' . $self->get_value('$.foo') . '"'
+                'ConflictChecker->foo returns "' . _('$.foo') . '"'
             }
         }
     }    
@@ -157,61 +142,3 @@ my $cc = ConflictChecker->new();
 isa_ok($cc, 'ConflictChecker');
 
 is($cc->foo(), 'ConflictChecker->foo returns "just $.foo"', '... got the right value from the accessor');
-
-# check for typed accessor
-
-role Checker => {};
-
-class TypeChecking => {
-    does => [ 'Checker' ],
-    instance => {
-        attrs => [ 
-            [ '$.foo' => { type => 'TypeChecking', access => 'rw' } ],
-            [ '$.bar' => { type => 'Checker'     , access => 'rw' } ],
-            [ '@.baz' => { type => 'Checker'     , access => 'rw' } ],      
-            [ '@.bah' => { type => 'TypeChecking', access => 'rw' } ],                        
-        ]
-    }    
-};
-
-my $tc = TypeChecking->new();
-isa_ok($tc, 'TypeChecking');
-
-my $tc2 = TypeChecking->new();
-isa_ok($tc2, 'TypeChecking');
-
-lives_ok { 
-    $tc->foo($tc2) 
-} '... we do not have an exception (Class is correct type)';
-
-is($tc->foo(), $tc2, '... value foo() was assigned correctly');
-
-lives_ok { 
-    $tc->bar($tc2) 
-} '... we do not have an exception (Role is correct type)';
-
-is($tc->bar(), $tc2, '... value bar() was assigned correctly');
-
-is_deeply($tc->baz(), [], '... value baz() was initialized correctly');
-
-lives_ok { 
-    $tc->baz([ $tc2, $tc2, $tc2, $tc2 ]) 
-} '... we do not have an exception (Roles are correct type)';
-
-is_deeply($tc->baz(), [ $tc2, $tc2, $tc2, $tc2 ], '... value baz() was assigned correctly');
-
-is_deeply($tc->bah(), [], '... value bah() was initialized correctly');
-
-lives_ok { 
-    $tc->bah([ $tc2, $tc2, $tc2, $tc2 ]) 
-} '... we do not have an exception (Classes are correct type)';
-
-is_deeply($tc->bah(), [ $tc2, $tc2, $tc2, $tc2 ], '... value bah() was assigned correctly');
-
-dies_ok { 
-    $tc->foo('Fail') 
-} '... we do have an exception when we try to assign a non-blessed type';
-
-dies_ok { 
-    $tc->foo($cc) 
-} '... we do have an exception when we assign a blessed type of the wrong type';

@@ -4,20 +4,31 @@ use v6;
 use Net::IRC;
 
 # Parse @*ARGS
-my $nick     = @*ARGS[0] // "blechbot";
-my $server   = @*ARGS[1] // "localhost";
-my $interval = @*ARGS[2] // 300;
-my $repository = @*ARGS[3] // ".";
+my $nick        = @*ARGS[0] // "blechbot";
+my $server      = @*ARGS[1] // "localhost";
+my $interval    = @*ARGS[2] // 300;
+my $repository  = @*ARGS[3] // ".";
+my $show_branch = @*ARGS[4] eq "true";
+my $sep_header  = @*ARGS[5] eq "true";
 my ($host, $port) = split ":", $server;
 $port //= 6667;
 
 debug "svnbot started. Summary of configuration:";
 debug "  Will connect as...                  $nick";
 debug "  to...                               $host:$port";
-debug "  checking for new revisions every... $interval seconds.";
+debug "  checking for new revisions of...    $repository";
+debug "  every...                            $interval seconds.";
+debug "  Branch information will {$show_branch ?? "" :: "not "}be shown.";
+debug "  There {$sep_header ?? "will" :: "won't"} be a separate header line.";
 debug "To change any of these parameters, restart $*PROGRAM_NAME";
 debug "and supply appropriate arguments:";
-debug "  $*PROGRAM_NAME nick host[:port] interval";
+debug "  $*PROGRAM_NAME nick host[:port] interval repository show_branch sep_header";
+debug "  where repository...    is the path to the SVN repository (e.g. \".\"";
+debug "                         or \"http://svn.perl.org/parrot/\"),";
+debug "        show_branch...   specifies whether branch information should";
+debug "                         be shown (true|false), and";
+debug "        sep_header...    specifies whether a separate header line";
+debug "                         should be outputted (true|false).";
 
 # Initialize $cur_svnrev. $cur_svnrev contains the last revision seen, and is
 # set by svn_headrev() and svn_commits().
@@ -71,7 +82,10 @@ sub on_privmsg($event) {
 
         when rx:P5/^\?uptime$/ {
             my $start_time = INIT { time };
-            $bot<privmsg>(to => $reply_to, text => "Running for {time() - $start_time} seconds.");
+            $bot<privmsg>(
+                to   => $reply_to,
+                text => "Running for {int(time() - $start_time)} seconds."
+            );
         }
 
         when rx:P5/^\?check$/ {
@@ -113,8 +127,11 @@ sub svn_check($event) {
 # This queries "svn".
 sub svn_commits() {
     # Pipes not yet supported in Pugs.
-    my $tempfile = BEGIN { "temp-svnbot-$*PID-{int rand 1000}" };
+    my $tempfile = INIT { "temp-svnbot-$*PID-{int rand 1000}" };
     END { unlink $tempfile }
+    # We don't want localized svn messages (like "Geänderte Pfade" instead of
+    # "Changed paths"), so we can reliably grep for them and process them.
+    INIT { %*ENV<LC_ALL> = %*ENV<LANG> = "C" }
 
     # If this is an incremental update...
     if $cur_svnrev {
@@ -123,33 +140,48 @@ sub svn_commits() {
         # Hack to prevent "-3:HEAD", resulting in a syntax error, resulting in
         # svn not outputting the log, resulting in svnbot not saying anything.
         $from    = "HEAD" if $from <= 0; 
-        system "svn log -r $from:HEAD $repository > $tempfile";
+        system "svn log -vr $from:HEAD $repository > $tempfile";
     } else {
         # Else query only for the newest commit.
-        system "svn log -r HEAD $repository > $tempfile";
+        system "svn log -vr HEAD $repository > $tempfile";
     }
 
     my $commits;
     my $fh = open $tempfile;
+    my $branch;
+    my $subst = "XXX-HACK-SVNBOT-SUBST-{rand}"; # XXX!
+
     for =$fh -> $_ {
         state $cur_entry;
-        
+
         when rx:P5/^-----+/ {
             # ignore
         }
 
+        when rx:P5/^   [MAUDCGR] / {
+            $branch = $_ ~~ rx:P5:i{branches/([^/]+)}
+                ?? $0
+                :: "trunk";
+            $commits ~~ s:P5:g/$subst/$branch/;
+        }
+
         when rx:P5/^r(\d+) \| (\w+)/ {
-            $cur_entry = "r$0, $1++";
+            $cur_entry = "r$0 | $1++";
             # Break the loop if we see $cur_svnrev -- that means, there're no new
             # commits.
             next if $0 == $cur_svnrev;
             $cur_svnrev = +$0 if $0 > $cur_svnrev;
+            $commits ~= "{$cur_entry}{$show_branch ?? " | $subst" :: ""}:\n"
+                if $sep_header;
         }
 
         when rx:P5/\S/ {
-           if $cur_entry {
+           if $cur_entry and $_ !~ rx:P5/^Changed paths\:/ {
               $_ ~~ rx:P5/^(.*)$/;
-              $commits ~= "$cur_entry | $0\n";
+              $commits ~= $sep_header
+                  ?? ": "
+                  :: "$cur_entry | {$show_branch ?? "$branch | " :: ""}";
+              $commits ~= "$0\n";
            }
        }
     }

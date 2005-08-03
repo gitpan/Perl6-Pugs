@@ -16,7 +16,7 @@ module URI::Escape-0.6 {
     multi sub uri_escape (Str $string is copy, Str $unsafe, Bool +$negate) returns Str is export(:DEFAULT) {
         my $pattern;
         
-        $pattern = ($negate) ?? '([^$unsafe])' :: '([$unsafe])';
+        $pattern = ($negate) ?? "([^$unsafe])" :: "([$unsafe])";
         
         $string ~~ s:P5:g/$pattern/{ %escapes{$0} || fail_hi($0) }/;
         
@@ -44,6 +44,8 @@ module URI::Escape-0.6 {
     
     multi sub uri_unescape ($str is copy) returns Str is export(:DEFAULT) {
         $str ~~ s:P5:g/%([0-9A-Fa-f]{2})/{ chr(hex($0)) }/;
+        
+        return $str;
     }
     
     multi sub uri_unescape (*@str is copy) returns Array is export(:DEFAULT) {
@@ -53,8 +55,6 @@ module URI::Escape-0.6 {
     }
     
     sub fail_hi (Str $char) {
-        die sprintf("Can't escape \\x{%04X}, try uri_escape_utf8() instead", ord $char);
+        die sprintf("Can't escape \\x\{%04X}, try uri_escape_utf8() instead", ord $char);
     }
 }
-
-1;

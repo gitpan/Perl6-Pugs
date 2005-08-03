@@ -11,18 +11,12 @@
 >   Then world behind and home ahead,
 >   We'll wander back to home and bed...
 
-This module takes an Abstract Syntaxt Tree and recursively evaluates it,
+This module takes an /abstract syntax tree/ and recursively evaluates it,
 thereby evaluating the program.
 
-The AST is represented as a hierarchy of nested 'Exp's (see "Pugs.AST").
-Some understanding of 'Exp' and "Pugs.AST" in general will be necessary
-before this module can be properly understood.
-
-Functions of notable interest:
-
-* 'evaluate' and 'reduce' (the guts of the whole evaluation\/reduction engine)
-
-* 'apply' and 'doApply' (the guts of function application)
+The AST is represented as a hierarchy of nested 'Exp' expressions
+(see "Pugs.AST").  Some understanding of 'Exp' and "Pugs.AST" in will help in
+understanding this module.
 -}
 
 module Pugs.Eval (
@@ -35,7 +29,6 @@ import Prelude hiding ( exp )
 import qualified Data.Map as Map
 
 import Pugs.AST
-import Pugs.AST.Internals
 import Pugs.Junc
 import Pugs.Bind
 import Pugs.Prim
@@ -48,16 +41,16 @@ import Pugs.External
 import Pugs.Eval.Var
 
 {-|
-Construct a new, initially empty 'Env' (evaluation environment).
+Construct a new, \'empty\' 'Env' (evaluation environment).
 
-Used in 'Main.doParse', 'Main.doParseWith' and 'Pugs.Run.prepareEnv'.
-Of these, only 'Pugs.Run.prepareEnv' seems to make use of the second
-argument.  See 'Pugs.Prims.initSyms'
+See the source of 'Pugs.Prims.initSyms' for a list of symbols that are
+initially present in the global 'Pad'.
 -}
 emptyEnv :: (MonadIO m, MonadSTM m) 
          => String             -- ^ Name associated with the environment
          -> [STM (Pad -> Pad)] -- ^ List of 'Pad'-mutating transactions used
-                               --     to declare an initial set of global vars
+                               --     to declare an initial set of global
+                               --     variables
          -> m Env
 emptyEnv name genPad = liftSTM $ do
     pad  <- sequence genPad
@@ -116,7 +109,11 @@ evaluateMain exp = do
     liftIO $ performGC
     return val
 
--- | Evaluate an expression. This function mostly just delegates to 'reduce'.
+{-|
+Evaluate an expression.
+
+This function mostly just delegates to 'reduce'.
+-}
 evaluate :: Exp -- ^ The expression to evaluate
          -> Eval Val
 evaluate (Val val) = evalVal val
@@ -138,7 +135,14 @@ retItem val = do
         (retVal $ VList [val])
         (retVal $ val)
 
-addGlobalSym :: (Pad -> Pad) -> Eval ()
+{-|
+Add a symbol to the global 'Pad'.
+
+Used by 'reduceSym'.
+-}
+addGlobalSym :: (Pad -> Pad) -- ^ 'Pad'-transformer that will insert the new
+                             --     symbol
+             -> Eval ()
 addGlobalSym newSym = do
     glob <- asks envGlobal
     liftSTM $ do
@@ -154,12 +158,12 @@ trapVal val action = case val of
     _               -> action
 
 {-|
-Perform the given evaluation in an lvalue context.
+Perform the given evaluation in an /LValue/ context.
 -}
 enterLValue :: Eval a -> Eval a
 enterLValue = local (\e -> e{ envLValue = True })
 {-|
-Perform the given evaluation in an rvalue (i.e. non-lvalue) context.
+Perform the given evaluation in an /RValue/ (i.e. non-/LValue/) context.
 -}
 enterRValue :: Eval a -> Eval a
 enterRValue = local (\e -> e{ envLValue = False })
@@ -266,7 +270,7 @@ reduceStmts this rest = do
 
 {-|
 Reduce a 'Pos' expression by reducing its subexpression in a new 'Env', which
-contains the 'Pos'\'s position.
+holds the 'Pos'\'s position.
 -}
 reducePos :: Pos -> Exp -> Eval Val
 reducePos pos exp = do
@@ -318,8 +322,13 @@ reduceCxt cxt exp = do
     val <- enterEvalContext cxt exp
     enterEvalContext cxt (Val val) -- force casting
 
--- Reduction for syntactic constructs
--- (wholeExp is only used when the Syn is not recognised)
+{-|
+Reduce a 'Syn' expression, i.e. a syntactic construct that cannot (yet) be
+expressed using 'App' (regular sub application).
+
+Theoretically, 'Syn' will one day be deprecated when 'App' becomes powerful
+enough to make it redundant.
+-}
 reduceSyn :: String -> [Exp] -> Eval Val
 
 reduceSyn "env" [] = do
@@ -620,10 +629,16 @@ reduceSyn "rx" [exp, adverbs] = do
     p5flags <- fromAdverb hv ["P5", "Perl5", "perl5"]
     flag_g  <- fromAdverb hv ["g", "global"]
     flag_i  <- fromAdverb hv ["i", "ignorecase"]
+    flag_w  <- fromAdverb hv ["w", "words"]
     flag_s  <- fromAdverb hv ["stringify"] -- XXX hack
-    let rx | p5 = MkRulePCRE p5re g flag_s 
-           | otherwise = MkRulePGE str g flag_s
+    adverbHash <- reduce adverbs
+    let rx | p5 = MkRulePCRE p5re g flag_s adverbHash
+           | otherwise = MkRulePGE p6re g flag_s adverbHash
         g = ('g' `elem` p5flags || flag_g)
+        p6re = if not flag_w then str
+               else case str of
+                      ':':_ -> ":w"   ++ str
+                      _     -> ":w::" ++ str
         p5re = mkRegexWithPCRE (encodeUTF8 str) $
                     [ pcreUtf8
                     , ('i' `elem` p5flags || flag_i) `implies` pcreCaseless
@@ -672,6 +687,11 @@ reduceSyn "inline" [langExp, _] = do
 #endif
     externRequire "Haskell" (file ++ ".o")
     retEmpty
+
+reduceSyn "=>" [keyExp, valExp] = do
+    key <- enterEvalContext cxtItemAny keyExp
+    val <- enterEvalContext cxtItemAny valExp
+    retItem $ castV (key, val)
 
 reduceSyn syn [lhs, exp]
     | last syn == '=' = do
@@ -736,16 +756,14 @@ reduceApp (Var "&goto") (Just subExp) args = do
 -- XXX absolutely evil bloody hack for "assuming"
 reduceApp (Var "&assuming") (Just subExp) args = do
     vsub <- enterEvalContext (cxtItem "Code") subExp
-    sub <- fromVal vsub
-    case bindSomeParams sub Nothing args of
+    sub  <- fromVal vsub
+    (invs', args') <- expandPairs sub Nothing args
+    case bindSomeParams sub invs' args' of
         Left errMsg      -> fail errMsg
         Right curriedSub -> retVal $ castV $ curriedSub
 
 reduceApp (Var "&infix:=>") invs args = do
-    let [keyExp, valExp] = maybeToList invs ++ args
-    key <- enterEvalContext cxtItemAny keyExp
-    val <- enterEvalContext cxtItemAny valExp
-    retItem $ castV (key, val)
+    reduceSyn "=>" $ maybeToList invs ++ args
 
 reduceApp (Var name@('&':_)) invs args = do
     sub     <- findSub name invs args
@@ -804,7 +822,7 @@ reduceApp subExp invs args = do
 
 {-|
 Return the context that an expression bestows upon a hash or array
-subscript. See 'reduce' for \{\} and \[\]. (Is this correct?)
+subscript. See 'reduce' for @\{\}@ and @\[\]@.
 -}
 cxtOfExp :: Exp -- ^ Expression to find the context of
          -> Eval Cxt
@@ -881,38 +899,56 @@ applyThunk styp bound@(arg:_) thunk = do
     argNameValue (ApplyArg name val _) = genSym name =<< fromVal val
 
 {-|
-Apply a sub (or other code) to lists of invocants and arguments.
+Apply a sub (or other code object) to an (optional) invocant, and
+a list of arguments.
 
 Mostly delegates to 'doApply' after explicitly retrieving the local 'Env'.
 -}
 apply :: VCode       -- ^ The sub to apply
-      -> (Maybe Exp) -- ^ invocant
-      -> [Exp]       -- ^ List of arguments (non-invocant)
+      -> (Maybe Exp) -- ^ Explicit invocant
+      -> [Exp]       -- ^ List of arguments (not including explicit invocant)
       -> Eval Val
 apply sub invs args = do
     env <- ask
     doApply env sub invs args
 
+expandPairs :: VCode -> Maybe Exp -> [Exp] -> Eval (Maybe Exp, [Exp])
+expandPairs sub invs args = do
+    env   <- ask
+    let isPairs = (map (isPairParam . typeOfCxt . paramContext) (subParams sub)) ++ repeat False
+        isPairParam typ = isaType' cls typ (MkType "Pair")
+        cls = envClasses env
+        argsPairs = if isJust invs then tail isPairs else isPairs
+    invs' <- fmapM (reducePair cls (head isPairs)) invs
+    args' <- fmapM (uncurry (reducePair cls)) (argsPairs `zip` args)
+    return (invs', args')
+
+reducePair :: ClassTree -> Bool -> Exp -> Eval Exp
+reducePair _ True exp = return exp
+reducePair cls _ exp = do
+    typ     <- evalExpType exp
+    if not (isaType cls "Pair" typ) then return exp else do
+    ref     <- enterLValue $ enterContext (CxtItem (mkType "Pair")) $ evalExp exp
+    (k, v)  <- join $ doPair ref pair_fetch
+    key     <- fromVal k
+    return $ Syn "=>" [Val (VStr key), Val v]
+    
+
 -- XXX - faking application of lexical contexts
 -- XXX - what about defaulting that depends on a junction?
 {-|
-Apply a sub (or other code) to lists of invocants and arguments, in the 
-specified context.
+Apply a sub (or other code object) to an (optional) invocants, and a list of
+arguments, in the specified environment.
 -}
-doApply :: Env   -- ^ Environment to evaluate in
-        -> VCode -- ^ Code to apply
-        -> (Maybe Exp) -- ^ Invocants (arguments before the colon)
-        -> [Exp] -- ^ Arguments (not including invocants)
+doApply :: Env         -- ^ Environment to evaluate in
+        -> VCode       -- ^ The sub to apply
+        -> (Maybe Exp) -- ^ Explicit invocant
+        -> [Exp]       -- ^ List of arguments (not including explicit invocant)
         -> Eval Val
 doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args = do
     -- check invs and args for Pair types; if they are, reduce them fully
     -- to stringified normal form.
-    let isPairs = (map isPairParam (subParams sub)) ++ repeat False
-        isPairParam = isaType cls "Pair" . typeOfCxt . paramContext
-        cls = envClasses env
-        argsPairs = if isJust invs then tail isPairs else isPairs
-    invs' <- fmapM (reducePair (head isPairs)) invs
-    args' <- fmapM (uncurry reducePair) (argsPairs `zip` args)
+    (invs', args') <- expandPairs sub invs args
     case bindParams sub invs' args' of
         Left errMsg -> fail errMsg
         Right sub   -> do
@@ -935,20 +971,16 @@ doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args
                             Nothing     -> applyExp (subType sub) realBound fun
                 retVal val
     where
-    reducePair :: Bool -> Exp -> Eval Exp
-    reducePair True exp = return exp
-    reducePair _ exp = do
-        typ     <- evalExpType exp
-        let cls = envClasses env
-        if not (isaType cls "Pair" typ) then return exp else do
-        ref     <- enterLValue $ enterContext (CxtItem (mkType "Pair")) $ evalExp exp
-        (k, v)  <- join $ doPair ref pair_fetch
-        key     <- fromVal k
-        return $ App (Var "&infix:=>") Nothing [Val (VStr key), Val v]
     enterScope :: Eval Val -> Eval Val
     enterScope
         | typ >= SubBlock = id
         | otherwise       = resetT
+    fixSub MkCode{ subType = SubPrim } env = env
+    fixSub sub env = env
+        { envLexical = subPad sub
+        , envPackage = maybe (envPackage env) envPackage (subEnv sub)
+        , envOuter   = maybe Nothing envOuter (subEnv sub)
+        }
     fixEnv :: Env -> Env
     fixEnv env
         | typ >= SubBlock = env
@@ -962,8 +994,9 @@ doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args
         let name = paramName prm
             cxt = cxtOfSigil $ head name
         (val, coll) <- enterContext cxt $ case exp of
-            Syn "default" [exp] -> local fixEnv $ enterLex syms $ expToVal prm exp
-            _                   -> expToVal prm exp
+            Syn "param-default" [exp, Val (VCode sub)] -> do
+                local (fixSub sub . fixEnv) $ enterLex syms $ expToVal prm exp
+            _  -> expToVal prm exp
         -- trace ("==> " ++ (show val)) $ return ()
         boundRef <- fromVal val
         newSym   <- genSym name boundRef

@@ -43,7 +43,7 @@ bindNames exps prms = (bound, exps', prms')
         | Just prm <- find ((matchNamedAttribute name) . paramName) prms
         = ( ((prm, exp) : bound), exps )
         | otherwise
-        = ( bound, (App (Var "&infix:=>") Nothing [Val (VStr name), exp]:exps) )
+        = ( bound, (Syn "=>" [Val (VStr name), exp]:exps) )
 
 
 matchNamedAttribute :: String -> String -> Bool
@@ -133,12 +133,12 @@ doIndex v n = Syn "[]" [Syn "val" [v], Val $ VInt n]
 
 doBindArray :: Exp -> (Bindings, VInt) -> (Param, Char) -> MaybeError (Bindings, VInt)
 doBindArray _ (xs, -1) (p, '@') = return (((p, emptyArrayExp):xs), -1)
-doBindArray _ (_, -1)  (p, '$') = fail $ "Slurpy array followed by slurpy scalar: " ++ show p
+doBindArray _ (_, -1)  (p, _) = fail $ "Slurpy array followed by slurpy scalar: " ++ show p
 doBindArray v (xs, n)  (p, '@') = return (((p, doSlice v n):xs), -1)
-doBindArray v (xs, n)  (p, '$') = case v of
+doBindArray v (xs, n)  (p, _) = case v of
     (Syn "," [])    -> fail $ "Insufficient arguments for slurpy scalar"
     _               -> return (((p, doIndex v n):xs), n+1)
-doBindArray _ (_, _)  (_, x) = internalError $ "doBindArray: unexpected char: " ++ (show x)
+-- doBindArray _ (_, _)  (_, x) = internalError $ "doBindArray: unexpected char: " ++ (show x)
 
 {-|
 Return @True@ if the given expression represents a pair (i.e. it uses the
@@ -147,8 +147,8 @@ Return @True@ if the given expression represents a pair (i.e. it uses the
 isPair :: Exp -> Bool
 isPair (Pos _ exp) = isPair exp
 isPair (Cxt _ exp) = isPair exp
-isPair (App (Var "&infix:=>") Nothing [(Cxt _ (Val _)), _])   = True
-isPair (App (Var "&infix:=>") Nothing [(Val _), _])   = True
+isPair (Syn "=>" [(Cxt _ (Val _)), _])   = True
+isPair (Syn "=>" [(Val _), _])   = True
 isPair _                         = False
 
 {-|
@@ -158,7 +158,7 @@ Decompose a pair-constructor 'Exp'ression (\"=>\") into a Haskell pair
 unPair :: Exp -> (String, Exp)
 unPair (Pos _ exp) = unPair exp
 unPair (Cxt _ exp) = unPair exp
-unPair (App (Var "&infix:=>") Nothing [key, exp])
+unPair (Syn "=>" [key, exp])
     | Val (VStr k) <- unwrap key = (k, exp)
 unPair x = error ("Not a pair: " ++ show x)
 
@@ -216,7 +216,10 @@ finalizeBindings sub = do
             ++ (show $ length reqPrms) ++ " expected"
 
     let unboundOptPrms = optPrms \\ (map fst boundOpt) -- unbound optParams are allPrms - boundPrms
-        optPrmsDefaults = [ Syn "default" [paramDefault prm] | prm <- unboundOptPrms ] -- get a list of default values
+        optPrmsDefaults = [
+            Syn "param-default" [paramDefault prm, Val (VCode sub)]
+            | prm <- unboundOptPrms
+            ] -- get a list of default values
         boundDefOpts = unboundOptPrms `zip` optPrmsDefaults -- turn into exprs, so that +$y = $x will work
         
     return sub {

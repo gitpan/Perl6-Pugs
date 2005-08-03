@@ -17,6 +17,9 @@ open IN, "< $version_h" and do {
   close IN;
 };
 
+# We can't use SVN keyword expansion (like $Rev$), because
+# that is only updated when the file in which the keyword appears
+# is modified.
 my $revision = 0;
 
 # SVK tries to ask the user questions when it has a STDIN and there is
@@ -55,8 +58,8 @@ if ($revision != $old_revision) {
 
   if ($revision != 0) {
     # rebuild Help.hs to show new revision number
-    unlink "$base/src/Pugs/Help.hi";
-    unlink "$base/src/Pugs/Help.o";
+    unlink "$base/src/Pugs/Version.hi";
+    unlink "$base/src/Pugs/Version.o";
     exit;
   }
 } elsif ($revision) {

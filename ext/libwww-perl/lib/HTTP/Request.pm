@@ -3,7 +3,7 @@ use v6;
 
 require HTTP::Message;
 
-class HTTP::Request-0.1 {
+class HTTP::Request-0.1[?::URI_CLASS = URI] {
     is HTTP::Message;
     
     has $.method    is rw;

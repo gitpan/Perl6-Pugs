@@ -54,7 +54,7 @@ plan 22;
 
   dies_ok { $::("a_var") },
     "symbolic dereferentiation does not work for lexicals", :todo<bug>;
-  is      $::("MY::a_var"),
+  is      $::("MY::a_var"), 42,
     "symbolic dereferentiation does work for lexicals when using MY::", :todo<bug>;
 }
 
@@ -106,7 +106,7 @@ plan 22;
 # Note: I'm not 100% sure this is legal syntax. If it turns out it isn't, we'll
 # have to s/ok/dies_ok/.
 {
-  eval 'this_will_die_and_therefore_set_$!';
+  try { this_will_die_and_therefore_set_dollar_exclamation_mark };
   ok $::("!"),    "symbolic dereferentiation works with special chars (1)";
   ok $::!,        "symbolic dereferentiation works with special chars (2)";
   ok %::("*ENV"), "symbolic dereferentiation works with special chars (3)";

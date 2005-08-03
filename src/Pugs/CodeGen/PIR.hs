@@ -16,18 +16,21 @@
 module Pugs.CodeGen.PIR (genPIR) where
 import Pugs.Internals
 import Pugs.AST
-import Pugs.AST.Internals
+import Pugs.Types
 import Pugs.Eval.Var
-import Emit.Common
 import Emit.PIR
 import Pugs.Pretty
 import Text.PrettyPrint
 import Pugs.CodeGen.PIR.Prelude (preludeStr)
 import Pugs.Prim.Eval
 import Pugs.Compile
+import Pugs.Run (getLibs)
 
 type CodeGen a = WriterT [Stmt] (ReaderT TEnv IO) a
 type CodeGenMonad = WriterT [Stmt] (ReaderT TEnv IO)
+
+ratToNum :: VRat -> VNum
+ratToNum x = (fromIntegral $ numerator x) / (fromIntegral $ denominator x)
 
 {-| Currently only 'PIL' → 'PIR' -}
 class (Show a, Typeable b) => Translate a b | a -> b where
@@ -107,22 +110,22 @@ instance (Typeable a) => Translate (PIL a) a where
         thisC   <- trans this
         tell [thisC]
         trans rest
-    trans (PApp _ exp@(PCode _ _ _) []) = do
+    trans (PApp _ exp@(PCode _ _ _) Nothing []) = do
         blockC  <- trans exp
         tellIns $ [reg tempPMC] <-& blockC $ []
         return tempPMC
-    trans (PApp (TCxtLValue _) (PExp (PVar "&postcircumfix:[]")) [PExp lhs, rhs]) = do
+    trans (PApp (TCxtLValue _) (PExp (PVar "&postcircumfix:[]")) Nothing [PExp lhs, rhs]) = do
         lhsC    <- trans lhs
         rhsC    <- trans rhs
         return $ lhsC `KEYED` rhsC
-    trans (PApp _ fun args) = do
+    trans (PApp ctx fun (Just inv) args) =
+        trans (PApp ctx fun Nothing (inv:args))  -- XXX wrong
+    trans (PApp _ fun Nothing args) = do
         funC    <- trans fun {- case fun of
             PExp (PVar name) -> return $ lit name
             _           -> trans fun
         -}
-        argsC   <- if isLogicalLazy fun
-            then mapM trans (head args : map PThunk (tail args))
-            else mapM trans args
+        argsC   <- mapM trans args
         -- XXX WORKAROUND PARROT BUG (see below)
         pmc     <- genLV "app"
         -- XXX - probe if funC is slurpy, then modify ExpLV pmc accordingly
@@ -139,13 +142,6 @@ instance (Typeable a) => Translate (PIL a) a where
                 tellIns $ [reg pmc] <-& funC $ argsC
                 return pmc
         -}
-        where
-        -- XXX HACK
-        isLogicalLazy (PExp (PVar "&infix:or"))     = True
-        isLogicalLazy (PExp (PVar "&infix:and"))    = True
-        isLogicalLazy (PExp (PVar "&infix:||"))     = True
-        isLogicalLazy (PExp (PVar "&infix:&&"))     = True
-        isLogicalLazy _ = False
     trans (PPad SMy pad exps) = do
         valsC   <- mapM trans (map snd pad)
         pass $ do

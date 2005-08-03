@@ -4,7 +4,28 @@ package Perl6::SubMethod;
 use strict;
 use warnings;
 
+use Scalar::Util 'blessed';
+
 use base 'Perl6::Method';
+
+sub new {
+    my ($class, $associated_with, $code) = @_;
+    my $self = $class->SUPER::new($associated_with, $code);
+    my $old = $self->{code};
+    $self->{old_code} = $old;
+    $self->{code} = sub {
+        my ($self, @args) = @_;  
+        return ::next_METHOD() if $args[0]->{class} ne $self->associated_with; 
+        $old->($self, @args); 
+    };
+    return $self;     
+}
+
+# XXX - this just bypasses the local do()
+sub force_call { 
+    my ($self, @args) = @_;  
+    $self->{old_code}->($self, @args);     
+}
 
 1;
 
@@ -17,16 +38,6 @@ __END__
 Perl6::SubMethod - Submethods in the Perl 6 Meta Model
 
 =head1 DESCRIPTION
-
-From Synopsis 12/Submethods
-
-Apart from the keyword, submethod declaration and call syntax is identical to 
-method syntax. You may mix methods and submethods of the same name within the 
-class hierarchy, but only the methods are visible to derived classes via 
-inheritance. A submethod is called only when a method call is dispatched 
-directly to the current class.
-
-??? do method foo()  and submethod foo() both get called ???
 
 =head1 SUPERCLASS
 

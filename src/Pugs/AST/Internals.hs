@@ -32,6 +32,7 @@ module Pugs.AST.Internals (
     VJunc(..), JuncType(..), -- uss Val
     VObject(..), -- uses VType, IHash, Unique
     VType, -- uses Type
+    VRule(..), -- uses Val
 
     IVar(..), -- uses *Class and V*
     IArray, IArraySlice, IHash, IScalar, ICode, IScalarProxy,
@@ -69,7 +70,6 @@ module Pugs.AST.Internals (
 ) where
 import Pugs.Internals
 import Pugs.Context
-import Pugs.Rule
 import Pugs.Types
 import Pugs.Cont hiding (shiftT, resetT)
 import qualified Data.Set       as Set
@@ -406,7 +406,7 @@ instance Value VRat where
         str <- fromVal (VStr $ tail s)
         return str
     doCast (VStr s)     = return $
-        case ( runParser naturalOrRat () "" s ) of
+        case ( parseNatOrRat s ) of
             Left _   -> 0 % 1
             Right rv -> case rv of
                 Left  i -> i % 1
@@ -428,9 +428,10 @@ instance Value VNum where
         str <- fromVal (VStr $ tail s)
         return str
     doCast (VStr "Inf") = return $ 1/0
+    doCast (VStr "-Inf") = return $ -1/0
     doCast (VStr "NaN") = return $ 0/0
     doCast (VStr s)     = return $
-        case ( runParser naturalOrRat () "" s ) of
+        case ( parseNatOrRat s ) of
             Left _   -> 0
             Right rv -> case rv of
                 Left  i -> fromIntegral i
@@ -505,6 +506,8 @@ showNum :: Show a => a -> String
 showNum x
     | str == "Infinity"
     = "Inf"
+    | str == "-Infinity"
+    = "-Inf"
     | (i, ".0") <- break (== '.') str
     = i -- strip the trailing ".0"
     | otherwise = str
@@ -647,7 +650,7 @@ valType (VSocket  _)    = mkType "Socket"
 valType (VThread  _)    = mkType "Thread"
 valType (VProcess _)    = mkType "Process"
 valType (VControl _)    = mkType "Control"
-valType (VRule    _)    = mkType "Rule"
+valType (VRule    _)    = mkType "Pugs::Internals::VRule"
 valType (VSubst   _)    = mkType "Subst"
 valType (VMatch   _)    = mkType "Match"
 valType (VType    _)    = mkType "Type"
@@ -759,7 +762,7 @@ expression that will evaluate to the actual list of slurpable args.
 When the sub is called (see 'Pugs.Eval.apply'), the expression is evaluated.
 If it evaluates to /too many/ args, the call will fail.
 
-This needs to be a list (rather than a @Maybe@) because Perl6's @.assuming@
+This needs to be a list (rather than a @Maybe@) because Perl 6's @.assuming@
 (i.e. explicit currying) means that a sub can have its arguments bound in
 separate stages, and each of the bindings needs to be checked.
 
@@ -799,7 +802,7 @@ See "Pugs.Prim" for more info.
 mkPrim :: VCode
 mkPrim = MkCode
     { isMulti = True
-    , subName = "&?"
+    , subName = ""
     , subType = SubPrim
     , subEnv = Nothing
     , subAssoc = "pre"
@@ -815,7 +818,7 @@ mkPrim = MkCode
 mkSub :: VCode
 mkSub = MkCode
     { isMulti = False
-    , subName = "&?"
+    , subName = ""
     , subType = SubBlock
     , subEnv = Nothing
     , subAssoc = "pre"
@@ -967,7 +970,7 @@ cxtOfSigil '$'  = cxtItemAny
 cxtOfSigil '@'  = cxtSlurpyAny
 cxtOfSigil '%'  = cxtSlurpyAny
 cxtOfSigil '&'  = CxtItem $ mkType "Code"
-cxtOfSigil '<'  = CxtItem $ mkType "Rule"
+cxtOfSigil '<'  = CxtItem $ mkType "Pugs::Internals::VRule"
 cxtOfSigil ':'  = CxtItem $ mkType "Type"
 cxtOfSigil x    = internalError $ "cxtOfSigil: unexpected character: " ++ show x
 
@@ -976,11 +979,11 @@ Return the type of variable implied by a name beginning with the specified
 sigil.
 -}
 typeOfSigil :: Char -> Type
-typeOfSigil '$'  = mkType "Scalar"
+typeOfSigil '$'  = mkType "Item"
 typeOfSigil '@'  = mkType "Array"
 typeOfSigil '%'  = mkType "Hash"
 typeOfSigil '&'  = mkType "Code"
-typeOfSigil '<'  = mkType "Rule"
+typeOfSigil '<'  = mkType "Pugs::Internals::VRule"
 typeOfSigil ':'  = mkType "Type"
 typeOfSigil x    = internalError $ "typeOfSigil: unexpected character: " ++ show x
 
@@ -1282,7 +1285,7 @@ retError str a = fail $ str ++ ": " ++ show a
 defined :: VScalar -> Bool
 defined VUndef  = False
 defined _       = True
--- | Produce an undefined Perl6 value (i.e. 'VUndef').
+-- | Produce an undefined Perl 6 value (i.e. 'VUndef').
 undef :: VScalar
 undef = VUndef
 
@@ -1342,6 +1345,8 @@ clearRef (MkRef (IThunk tv)) = clearRef =<< fromVal =<< thunk_force tv
 clearRef r = retError "cannot clearRef" r
 
 newObject :: (MonadSTM m) => Type -> m VRef
+newObject (MkType "Item") = liftSTM $
+    fmap scalarRef $ newTVar undef
 newObject (MkType "Scalar") = liftSTM $
     fmap scalarRef $ newTVar undef
 newObject (MkType "Array")  = liftSTM $
@@ -1350,7 +1355,7 @@ newObject (MkType "Hash")   = liftSTM $
     fmap hashRef $ (newTVar Map.empty :: STM IHash)
 newObject (MkType "Code")   = liftSTM $
     fmap codeRef $ newTVar mkSub
-newObject (MkType "Rule")   = liftSTM $
+newObject (MkType "Pugs::Internals::VRule")   = liftSTM $
     fmap scalarRef $ newTVar undef
 newObject (MkType "Type")   = liftSTM $
     fmap scalarRef $ newTVar undef
@@ -1629,3 +1634,27 @@ instance Typeable1 IVar where
     typeOf1 (IThunk  x) = typeOf x
     typeOf1 (IPair   x) = typeOf x
 #endif
+
+{-|
+Representation for rules (i.e. regexes).
+
+Currently there are two types of rules: Perl 5 rules, implemented with PCRE,
+and Perl 6 rules, implemented with PGE.
+-}
+data VRule
+    -- | Perl5-compatible regular expression
+    = MkRulePCRE
+        { rxRegex     :: !Regex -- ^ The \'regular\' expression (as a PCRE
+                                --     'Regex' object)
+        , rxGlobal    :: !Bool  -- ^ Flag indicating \'global\' (match-all)
+	    , rxStringify :: !Bool
+        , rxAdverbs   :: !Val
+        }
+    -- | Parrot Grammar Engine rule
+    | MkRulePGE
+        { rxRule      :: !String -- ^ The rule string
+        , rxGlobal    :: !Bool   -- ^ Flag indicating \'global\' (match-all)
+	    , rxStringify :: !Bool
+        , rxAdverbs   :: !Val
+        }
+    deriving (Show, Eq, Ord, Typeable)

@@ -10,7 +10,15 @@
 >   Forbid to those that dwell therein...
 -}
 
-module Pugs.Compile where
+module Pugs.Compile (
+    PIL(..),
+    Compile(..),
+    TEnv(..), initTEnv,
+    TCxt(..), tcVoid, tcLValue,
+    TParam(..),
+    EnterClass(..),
+    die, varText,
+) where
 import Pugs.AST
 import Pugs.Internals
 import Pugs.Types
@@ -46,7 +54,7 @@ data (Typeable a) => PIL a where
     PStmt       :: !(PIL Expression) -> PIL Stmt 
     PStmts      :: !(PIL Stmt) -> !(PIL [Stmt]) -> PIL [Stmt]
 
-    PApp        :: !TCxt -> !(PIL Expression) -> ![PIL Expression] -> PIL LValue
+    PApp        :: !TCxt -> !(PIL Expression) -> !(Maybe (PIL Expression)) -> ![PIL Expression] -> PIL LValue
     PAssign     :: ![PIL LValue] -> !(PIL Expression) -> PIL LValue
     PBind       :: ![PIL LValue] -> !(PIL Expression) -> PIL LValue
 
@@ -88,8 +96,10 @@ instance Show (PIL a) where
     show (PStmts x y) = "(PStmts " ++ show x ++ " " ++ show y ++ ")"
     show PNil = "PNil"
     show PNoop = "PNoop"
-    show (PPos x y z) = "(PPos " ++ show x ++ " " ++ show y ++ " " ++ show z ++ ")"
-    show (PApp x y z) = "(PApp " ++ show x ++ " " ++ show y ++ " " ++ show z ++ ")"
+    -- We don't show the raw Exp here to ease writing parsers for PIL (Exp
+    -- contains things like MkEnv, etc.).
+    show (PPos x _ z) = "(PPos " ++ show x ++ " Noop " ++ show z ++ ")"
+    show (PApp x y i z) = "(PApp " ++ show x ++ " " ++ show y ++ " " ++ show i ++ " " ++ show z ++ ")"
     show (PExp x) = "(PExp " ++ show x ++ ")"
     show (PStmt x) = "(PStmt " ++ show x ++ ")"
     show (PAssign x y) = "(PAssign " ++ show x ++ " " ++ show y ++ ")"
@@ -175,7 +185,7 @@ eachM = forM . ([0..] `zip`)
 
 instance Compile (SubName, [PIL Decl]) [PIL Decl] where
     compile (name, decls) = do
-        let bodyC = [ PStmts . PStmt . PExp $ PApp tcVoid (PExp (PVar sub)) []
+        let bodyC = [ PStmts . PStmt . PExp $ PApp tcVoid (PExp (PVar sub)) Nothing []
                     | PSub sub _ _ _ <- decls
                     ]
         return (PSub name SubPrim [] (combine bodyC PNil):decls)
@@ -222,8 +232,8 @@ compileStmts exp = case exp of
         thisC   <- compile this
         return $ PStmts (tailCall thisC) PNil
         where
-        tailCall (PStmt (PExp (PApp cxt fun args)))
-            = PStmt $ PExp $ PApp (TTailCall cxt) fun args
+        tailCall (PStmt (PExp (PApp cxt fun inv args)))
+            = PStmt $ PExp $ PApp (TTailCall cxt) fun inv args
         tailCall (PPos pos exp x) = PPos pos exp (tailCall x)
         tailCall x = x
     Stmts this (Syn "namespace" [Val (VStr pkg), rest]) -> do
@@ -260,11 +270,17 @@ instance Compile Exp (PIL Stmt) where
         compile (Syn "loop" $ [emptyExp, Val (VBool True), emptyExp, exp])
     compile (Syn "loop" [pre, cond, post, (Syn "block" [body])]) = do
         preC    <- compile pre
-        condC   <- compile cond
+        -- loop ...; ; ... {...} ->
+        -- loop ...; bool::true; ... {...}
+        let cond' | unwrap cond == Noop
+                  = return $ PStmts (PStmt . PLit . PVal $ VBool True) PNil
+                  | otherwise
+                  = compile cond
+        condC   <- cond'
         bodyC   <- compile body
         postC   <- compile post
         funC    <- compile (Var "&statement_control:loop")
-        return . PStmt . PExp $ PApp TCxtVoid funC
+        return . PStmt . PExp $ PApp TCxtVoid funC Nothing
             [preC, pBlock condC, pBlock bodyC, pBlock postC]
     compile exp@(Syn "unless" _) = fmap (PStmt . PExp) $ compConditional exp
     compile exp@(Syn "while" _) = compLoop exp
@@ -275,7 +291,7 @@ instance Compile Exp (PIL Stmt) where
         expC    <- compile exp
         bodyC   <- compile body
         funC    <- compile (Var "&statement_control:for")
-        return . PStmt . PExp $ PApp TCxtVoid funC [expC, bodyC]
+        return . PStmt . PExp $ PApp TCxtVoid funC Nothing [expC, bodyC]
     compile (Syn "given" _) = compile (Var "$_") -- XXX
     compile (Syn "when" _) = compile (Var "$_") -- XXX
     compile exp = fmap PStmt $ compile exp
@@ -322,24 +338,42 @@ instance Compile Exp (PIL LValue) where
         cxt     <- askTCxt
         funC    <- compile inv
         argsC   <- enter cxtItemAny $ compile args
-        return $ PApp (TTailCall cxt) funC argsC
-    compile (App fun (Just inv) args) = do
-        compile (App fun Nothing (inv:args)) -- XXX WRONG
-    compile (App fun Nothing args) = do
+        return $ PApp (TTailCall cxt) funC Nothing argsC
+    compile (App fun inv args) = do
         cxt     <- askTCxt
         funC    <- compile fun
+        invC    <- maybeM (return inv) compile
         argsC   <- enter cxtItemAny $ compile args
-        return $ PApp cxt funC argsC
+        if isLogicalLazy funC
+            then return $ PApp cxt funC invC (head argsC:map PThunk (tail argsC))
+            else return $ PApp cxt funC invC argsC
+        where
+        -- XXX HACK
+        isLogicalLazy (PExp (PVar "&infix:or"))  = True
+        isLogicalLazy (PExp (PVar "&infix:and")) = True
+        isLogicalLazy (PExp (PVar "&infix:||"))  = True
+        isLogicalLazy (PExp (PVar "&infix:&&"))  = True
+        isLogicalLazy (PExp (PVar "&infix://"))  = True
+        isLogicalLazy (PExp (PVar "&infix:err"))  = True
+        isLogicalLazy _ = False
     compile exp@(Syn "if" _) = compConditional exp
     compile (Syn "{}" (x:xs)) = compile $ App (Var "&postcircumfix:{}") (Just x) xs
     compile (Syn "[]" (x:xs)) = do
         compile (App (Var "&postcircumfix:[]") (Just x) xs)
     compile (Syn "," exps) = do
         compile (App (Var "&infix:,") Nothing exps)
+    -- Minor hack, my $a = [] is parsed as my $a = [Noop], resulting in my $a =
+    -- [undef], which is wrong.
+    compile (Syn "\\[]" [Noop]) = do
+        compile (App (Var "&circumfix:[]") Nothing [])
     compile (Syn "\\[]" exps) = do
         compile (App (Var "&circumfix:[]") Nothing exps)
+    compile (Syn name@(sigil:"{}") exps) | (sigil ==) `any` "$@%&" = do
+        compile (App (Var $ "&circumfix:" ++ name) Nothing exps)
     compile (Syn "\\{}" exps) = do
         compile (App (Var "&circumfix:{}") Nothing exps)
+    compile (Syn "*" exps) = do
+        compile (App (Var "&prefix:*") Nothing exps)
     compile (Syn "=" [lhs, rhs]) = do
         lhsC <- enterLValue $ compile lhs
         rhsC <- enterRValue $ compile rhs
@@ -360,7 +394,7 @@ compLoop (Syn name [cond, body]) = do
     condC   <- enter (CxtItem $ mkType "Bool") $ compile cond
     bodyC   <- enter CxtVoid $ compile body
     funC    <- compile (Var $ "&statement_control:" ++ name)
-    return . PStmt . PExp $ PApp cxt funC [pBlock condC, pBlock bodyC]
+    return . PStmt . PExp $ PApp cxt funC Nothing [pBlock condC, pBlock bodyC]
 compLoop exp = compError exp
 
 {-| Compiles a conditional 'Syn' (@if@ and @unless@) to a call to an
@@ -371,7 +405,7 @@ compConditional (Syn name exps) = do
     [condC, trueC, falseC] <- compile exps
     funC    <- compile $ Var ("&statement_control:" ++ name)
     cxt     <- askTCxt
-    return $ PApp cxt funC [condC, PThunk trueC, PThunk falseC]
+    return $ PApp cxt funC Nothing [condC, PThunk trueC, PThunk falseC]
 compConditional exp = compError exp
 
 {-| Compiles various 'Exp's to 'PIL Expression's. -}
@@ -385,7 +419,7 @@ instance Compile Exp (PIL Expression) where
     compile (Syn "block" [body]) = do
         cxt     <- askTCxt
         bodyC   <- compile body
-        return $ PExp $ PApp cxt (pBlock bodyC) []
+        return $ PExp $ PApp cxt (pBlock bodyC) Nothing []
     compile (Syn "sub" [Val (VCode sub)]) = do
         bodyC   <- enter sub $ compile $ case subBody sub of
             Syn "block" [exp]   -> exp

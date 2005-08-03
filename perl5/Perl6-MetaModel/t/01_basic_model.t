@@ -3,22 +3,27 @@
 use strict;
 use warnings;
 
-use Test::More tests => 39;
+use Test::More tests => 34;
 use Data::Dumper;
 
 use Perl6::MetaModel;
+use Perl6::Object;
 
 class 'Person-0.0.1-cpan:STEVAN' => {
+    is => [ 'Perl6::Object' ],
     class => {
         attrs => [ '$:population' ],
         methods => {
             population => sub {
-                my ($class) = @_;              
-                $class->get_class_value('$:population') || 0;
+                __('$:population') || 0;
             },
             create => sub {
-                my ($class, %params) = @_;                
-                $class->set_class_value('$:population' => $class->population() + 1);
+                my ($class, %params) = @_;           
+                # this CLASS should be the class it 
+                # is defined in (i.e: Person)
+                __('$:population' => CLASS->population() + 1);
+                # we want this $class to possibly
+                # be a subclass
                 return $class->bless(undef, %params);
             }
         }
@@ -26,26 +31,19 @@ class 'Person-0.0.1-cpan:STEVAN' => {
     instance => {
         attrs => [ '$.first_name', '$.last_name', [ '$.age' => { access => 'rw' } ] ],
         DESTROY => sub {
-            my ($self) = @_;
-            my $class = ref($self);
-            $class->set_class_value('$:population' => $class->population() - 1);
+            __('$:population' => CLASS->population() - 1);
         },
         methods => {
             full_name => sub {
-                my ($self) = @_;
-                $self->get_value('$.first_name') . ' ' . $self->get_value('$.last_name');
+                _('$.first_name') . ' ' . _('$.last_name');
             }
         }
     }
 };
 
-is(Person->meta->name, 'Person', '... got the right name for Person');
-is(Person->meta->version, '0.0.1', '... got the right version for Person');
-is(Person->meta->authority, 'cpan:STEVAN', '... got the right authority for Person');
-
-is(Person->meta->identifier, 'Person-0.0.1-cpan:STEVAN', '... got the right identifier for Person');
-
 can_ok('Person', 'population');
+
+ok(Person->isa('Perl6::Object'), '... Person isa Perl6::Object');
 
 is(Person->population(), 0, '... Person population is 0');
 
@@ -78,11 +76,8 @@ class 'Employee-0.0.1' => {
     }
 };
 
-is(Employee->meta->name, 'Employee', '... got the right name for Employee');
-is(Employee->meta->version, '0.0.1', '... got the right version for Employee');
-ok(!defined(Employee->meta->authority), '... got the right authority for Employee (none)');
-
-is(Employee->meta->identifier, 'Employee-0.0.1', '... got the right identifier for Employee');
+ok(Employee->isa('Perl6::Object'), '... Employee isa Perl6::Object');
+ok(Employee->isa('Person'), '... Employee isa Person');
 
 is(Employee->population(), 0, '... Employee population is 0');
 is(Person->population(), 0, '... Person population is 0');

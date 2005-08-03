@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fno-full-laziness -fno-cse #-}
 {-# OPTIONS_GHC -#include "UnicodeC.h" #-}
 
 {-|
@@ -21,6 +21,8 @@ module Pugs.Prim (
     op0, op1, op2,
     -- used Pugs.Eval
     foldParam, op2Hyper, op1HyperPrefix, op1HyperPostfix,
+    -- horrible hack for at-exit finalization
+    _GlobalFinalizer,
 ) where
 import Pugs.Internals
 import Pugs.Junc
@@ -32,6 +34,7 @@ import Text.Printf
 import Pugs.External
 import Pugs.Embed
 import qualified Data.Map as Map
+import Data.IORef
 
 import Pugs.Prim.Keyed
 import Pugs.Prim.Yaml
@@ -44,13 +47,17 @@ import Pugs.Prim.Eval
 import Pugs.Prim.Code
 import Pugs.Prim.Param
 
+{-# NOINLINE _GlobalFinalizer #-}
+_GlobalFinalizer :: IORef (IO ())
+_GlobalFinalizer = unsafePerformIO $ newIORef (return ())
+
 -- |Implementation of 0-ary and variadic primitive operators and functions
 -- (including list ops).
 op0 :: String -> [Val] -> Eval Val
 op0 "&"  = fmap opJuncAll  . mapM fromVal
 op0 "^"  = fmap opJuncOne  . mapM fromVal
 op0 "|"  = fmap opJuncAny  . mapM fromVal
-op0 "want"  = const $ fmap VStr (asks envWant)
+op0 "want"  = const $ fmap VStr (asks (maybe "Void" envWant . envCaller))
 op0 "bool::true" = const $ return (VBool True)
 op0 "bool::false" = const $ return (VBool False)
 op0 "time"  = const $ do
@@ -359,8 +366,8 @@ op1 "-z"    = FileTest.sizeIsZero
 op1 "-s"    = FileTest.fileSize
 op1 "-f"    = FileTest.isFile
 op1 "-d"    = FileTest.isDirectory
-op1 "end"   = op1Cast (VInt . (-1 +) . (genericLength :: VList -> VInt))
-op1 "elems" = op1Cast (VInt . (genericLength :: VList -> VInt))
+op1 "List::end"   = op1Cast (VInt . (-1 +) . (genericLength :: VList -> VInt))
+op1 "List::elems" = op1Cast (VInt . (genericLength :: VList -> VInt))
 op1 "graphs"= op1Cast (VInt . (genericLength :: String -> VInt)) -- XXX Wrong
 op1 "codes" = op1Cast (VInt . (genericLength :: String -> VInt))
 op1 "chars" = op1Cast (VInt . (genericLength :: String -> VInt))
@@ -575,6 +582,17 @@ op1 "Pugs::Internals::hIsClosed" = op1IO hIsClosed
 op1 "Pugs::Internals::hIsReadable" = op1IO hIsReadable
 op1 "Pugs::Internals::hIsWritable" = op1IO hIsWritable
 op1 "Pugs::Internals::hIsSeekable" = op1IO hIsSeekable
+op1 "Pugs::Internals::reduceVar" = \v -> do
+    str <- fromVal v
+    evalExp (Var str)
+op1 "Pugs::Internals::rule_pattern" = \v -> do
+    case v of
+        VRule MkRulePGE{rxRule=re} -> return $ VStr re
+        _ -> fail $ "Not a rule: " ++ show v
+op1 "Pugs::Internals::rule_adverbs" = \v -> do
+    case v of
+        VRule MkRulePGE{rxAdverbs=hash} -> return hash
+        _ -> fail $ "Not a rule: " ++ show v
 op1 other   = \_ -> fail ("Unimplemented unaryOp: " ++ other)
 
 op1IO :: Value a => (Handle -> IO a) -> Val -> Eval Val
@@ -983,7 +1001,7 @@ op3 "splice" = \x y z -> do
 op3 "split" = op3Split
 op3 "Str::split" = \x y z -> do
     op3 "split" y x z
-op3 "Any::new" = \t n p -> do
+op3 "Object::new" = \t n p -> do
     positionals <- fromVal p
     typ     <- fromVal t
     named   <- fromVal n
@@ -1000,7 +1018,10 @@ op3 "Any::new" = \t n p -> do
             }
     -- Now start calling BUILD for each of parent classes (if defined)
     op2 "BUILDALL" obj $ (VRef . hashRef) named
-    liftIO $ addFinalizer obj (objectFinalizer env obj)
+    -- Register finalizers by keeping weakrefs somehow
+    liftIO $ do
+        objRef <- mkWeakPtr obj (Just $ objectFinalizer env obj)
+        modifyIORef _GlobalFinalizer (>> finalize objRef)
     return obj
 op3 "Pugs::Internals::localtime"  = \x y z -> do
     wantString <- fromVal x
@@ -1520,8 +1541,8 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      pre     rmdir   unsafe (?Str=$_)\
 \\n   Bool      pre     mkdir   unsafe (Str)\
 \\n   Bool      pre     chdir   unsafe (Str)\
-\\n   Int       pre     elems   safe   (Array)\
-\\n   Int       pre     end     safe   (Array)\
+\\n   Int       pre     List::elems   safe   (Array)\
+\\n   Int       pre     List::end     safe   (Array)\
 \\n   Int       pre     graphs  safe   (?Str=$_)\
 \\n   Int       pre     codes   safe   (?Str=$_)\
 \\n   Int       pre     chars   safe   (?Str=$_)\
@@ -1541,13 +1562,13 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Str       pre     readlink unsafe (Str)\
 \\n   List      pre     Str::split   safe   (Str)\
 \\n   List      pre     Str::split   safe   (Str: Str)\
-\\n   List      pre     Str::split   safe   (Str: Rule)\
+\\n   List      pre     Str::split   safe   (Str: Pugs::Internals::VRule)\
 \\n   List      pre     Str::split   safe   (Str: Str, Int)\
-\\n   List      pre     Str::split   safe   (Str: Rule, Int)\
+\\n   List      pre     Str::split   safe   (Str: Pugs::Internals::VRule, Int)\
 \\n   List      pre     split   safe   (Str, Str)\
 \\n   List      pre     split   safe   (Str, Str, Int)\
-\\n   List      pre     split   safe   (Rule, Str)\
-\\n   List      pre     split   safe   (Rule, Str, Int)\
+\\n   List      pre     split   safe   (Pugs::Internals::VRule, Str)\
+\\n   List      pre     split   safe   (Pugs::Internals::VRule, Str, Int)\
 \\n   Str       spre    =       safe   (Any)\
 \\n   List      spre    =       safe   (Any)\
 \\n   Junction  list    |       safe   (Any|Junction|Pair)\
@@ -1625,7 +1646,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Int       pre     sign    safe   (Num)\
 \\n   Bool      pre     kill    safe   (Thread)\
 \\n   Int       pre     kill    unsafe (Int, List)\
-\\n   Object    pre     Any::new     safe   (Any: Named)\
+\\n   Object    pre     Object::new     safe   (Object: Named)\
 \\n   Object    pre     BUILDALL   safe   (Object)\
 \\n   Object    pre     DESTROYALL safe   (Object)\
 \\n   Object    pre     clone   safe   (Any)\
@@ -1656,4 +1677,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     IO::Dir::readdir    unsafe (IO::Dir)\
 \\n   Bool      pre     IO::Dir::closedir   unsafe (IO::Dir)\
 \\n   Bool      pre     IO::Dir::rewinddir  unsafe (IO::Dir)\
+\\n   Any       pre     Pugs::Internals::reduceVar  unsafe (Str)\
+\\n   Str       pre     Pugs::Internals::rule_pattern safe (Pugs::Internals::VRule)\
+\\n   Hash      pre     Pugs::Internals::rule_adverbs safe (Pugs::Internals::VRule)\
 \\n"

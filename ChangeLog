@@ -1,3 +1,71 @@
+== Changes for 6.2.9 (r6049) - Aug 4, 2005
+
+=== Pugs Internals
+
+* New build system in `inc/PugsBuild`
+** Configuration preferences are stored in `config.yml`
+** Presists across builds, overridable via `%*ENV<PUGS_BUILD_OPTS>`
+* `$CALLER::_` is now again usable in defaults.
+* JavaScript Backend
+** Actively progressing in `perl5/PIL2JS`
+** Passes 64.00% of the Pugs test suite
+* Perl5 Backend
+** Begun in `perl5/PIL-Run`
+** Primitive interactive shell as `crude_repl.pl`
+* Object MetaModel
+** Perl 5 prototype is mostly self-hosting 
+** New C3-based method dispatch algorithm
+** JavaScript version partially completed
+** Java version begun (in very early stages)
+* Pugs Intermediate Language
+** New runcore design begun in `src/PIL`
+** QuickCheck-based specification tests added
+* Precompilation for arbitrary modules (not enabled by default)
+
+=== Bundled Modules
+
+* New Perl 6 modules:
+** `MIME::Base64`
+** `Recurrence`
+** `Span`
+* Additions to `libwww-perl`:
+** `HTTP::Cookies`
+** `HTTP::Query`
+** `HTTP::Request::CGI`
+** `HTTP::Status`
+** `URI::Escape`
+* Additions to `DateTime`:
+** `DateTime::Set`
+
+=== Test, Examples and Documentations
+
+* Many new tests and test refactoring, we now have 8100+ tests
+* A number of additions to `examples/cookbook`
+* Beginning of Rule-based grammars for Perl6 in `modules/Grammars`
+* SVG generation examples in `examples/graphics`
+* `STATUS` document added to the top level to keep track of current progress
+* `docs/notes/plan` expanded and added macro-related issues
+* `examples/algorithms/Newton.pm` implements the newton method with currying
+* `examples/network/evalbot.p6` gets safe &print primitive
+* `examples/network/seenbot.p6` gets pretty duration printing
+* `examples/network/svnbot.p6` supports branch information
+* `examples/ppt/cat.p6` added to Perl Power Tools
+* iblech's LUGA talk as `Anatomie_eines_Compilers_am_Beispiel_von_Pugs.latex`
+* ingy's OSCON talk as `oscon-apocalypse.spork`
+
+=== Bug Fixes
+
+* Fix pair binding for functions expecting pairs as arguments
+* Global destruction is now guaranteed upon program exit
+* Parameter's defaults are now evaluated in its original lexical scope
+* Parser for hash subscripting was globbing whitespaces after it
+* Primitive listops now handles Pairs as regular arguments
+* Various `+$foos` in sub signatures changed to `?$foo` in `Test.pm`
+* `%h<x>>` was misparsed as `%h{'x>'}`
+* `-Inf` now stringifies as `-Inf`, not `-Infinity`
+* `.end` and `.elems` no longer work as scalar methods
+* `/a/ ~~ "a"` now works the same way as `"a" ~~ /a/`
+
 == Changes for 6.2.8 (r5577) - July 13, 2005
 
 === Pugs Internals
@@ -69,7 +137,7 @@
 
 === Bug Fixes
 
-* Call parrot with `-G` (CGP) instead of `-j` (JIT) runcore to avoid segfaults
+* Call parrot with `-C` (CGP) instead of `-j` (JIT) runcore to avoid segfaults
 * Fixed `!~` to mean negated `~~` instead of `ne`
 * Fixed `.isa` to agree with smartmatch results
 * Fixed order of method invocation in `BUILDALL` and `DESTROYALL`

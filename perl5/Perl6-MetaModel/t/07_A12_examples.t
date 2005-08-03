@@ -15,6 +15,7 @@ above the Perl6::MetaModel equivalents
 =cut
 
 use Perl6::MetaModel;
+use Perl6::Object;
 
 =pod
 
@@ -38,13 +39,13 @@ use Perl6::MetaModel;
 =cut
 
 class Point => {
+    is => [ 'Perl6::Object' ],    
     instance => {
         attrs => [ '$.x', [ '$.y' => { access => 'rw' } ] ],
         methods => {
             clear => sub {
-                my ($self) = @_;
-                $self->set_value('$.x' => 0);
-                $self->set_value('$.y' => 0);                
+                _('$.x' => 0);
+                _('$.y' => 0);                
             }
         }
     }
@@ -84,11 +85,10 @@ class Point3D => {
     instance => {
         attrs => [ '$:z' ],
         methods => {
-            get_z => sub { (shift)->get_value('$:z') },
+            get_z => sub { _('$:z') },
             clear => sub {
-                my ($self) = @_;
-                $self->set_value('$:z' => 0);
-                $self->SUPER::clear();  
+                _('$:z' => 0);
+                next_METHOD;
             }
         }
     }

@@ -3,15 +3,14 @@
 {-|
     The Main REPL loop.
 
->   眾人為彼造新舟
->   鑄以祕銀精靈璃
->   船首閃耀何需槳
->   銀桅未有風帆繫
->
->   無雙寶鑽作燈炬
->   旗幟輝煌展生焰
->   映照燃星雅碧綠
->   神祇乘梭下九天...
+>   Une nef neuve alors lui firent
+>   De mithril et de verre elfique,
+>   À la proue brillante, sans rame
+>   Ni voiles à son mât d’argent:
+>   Le Silmaril comme lanterne
+>   Et bannière, vivante flamme,
+>   Pour resplendir y fut placé
+>   Par Elbereth même, qui vint...
 
 -}
 
@@ -43,6 +42,10 @@ main = do
     when (isJust _DoCompile) $ do
         writeIORef (fromJust _DoCompile) doCompile
     runWithArgs run
+    globalFinalize
+
+globalFinalize :: IO ()
+globalFinalize = join $ readIORef _GlobalFinalizer
 
 warn :: Show a => a -> IO ()
 warn x = do
@@ -210,6 +213,7 @@ doParseWith f name prog = do
     where
     f' env | Val err@(VError _ _) <- envBody env = do
         hPutStrLn stderr $ pretty err
+        globalFinalize
         exitFailure
     f' env = f env name
 
@@ -289,8 +293,11 @@ doRun = do
     where
     end err@(VError _ _)  = do
         hPutStrLn stderr $ encodeUTF8 $ pretty err
+        globalFinalize
         exitFailure
-    end (VControl (ControlExit exit)) = exitWith exit
+    end (VControl (ControlExit exit)) = do
+        globalFinalize
+        exitWith exit
     end _ = return ()
 
 runFile :: String -> IO ()

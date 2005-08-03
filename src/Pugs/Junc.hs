@@ -9,7 +9,11 @@
 >   Tomorrow we may come this way...
 -}
 
-module Pugs.Junc where
+module Pugs.Junc (
+    ApplyArg(..),
+    opJunc, opJuncNone, opJuncAll, opJuncAny, opJuncOne,
+    juncApply,
+) where
 import Pugs.Internals
 import Pugs.AST
 import qualified Data.Set as Set
@@ -61,20 +65,6 @@ opJunc t vals = VJunc $ MkJunc t Set.empty (joined `Set.union` Set.fromList vs)
     (js, vs) = partition sameType vals
     sameType (VJunc (MkJunc t' _ _))  = t == t'
     sameType _                      = False
-
-{-|
-Check if the specified value is a 'Pugs.Internals.VJunc' of one of the specified
-junctive types. If it is, return it as a 'Pugs.Internals.VJunc'.
--}
-juncTypeIs :: Val -- ^ Value to test
-           -> [JuncType] -- ^ Types to check against
-           -> Maybe VJunc -- ^ Returns 'Nothing' if the test fails
-juncTypeIs v ts
-    | (VJunc j) <- v
-    , juncType j `elem` ts
-    = Just j
-    | otherwise
-    = Nothing
 
 {-|
 Merge the contents of two @any@ or @one@ junctions into a single, combined 
@@ -193,7 +183,7 @@ isPartialJunc arg
 Represents a sub argument during the junction autothreading process.
 
 Note that 'argCollapsed' is set to @True@ only if the corresponding sub param
-is explicitly specified as accepting the Perl6 type @Junction@.
+is explicitly specified as accepting the Perl 6 type @Junc@.
 -}
 data ApplyArg = ApplyArg
     { argName       :: !String  -- ^ Name of the param that this arg is for
