@@ -7,6 +7,7 @@ module Pugs.AST.Internals (
     Env(..),   -- uses Pad, TVar, Exp, Eval, Val
     Val(..),   -- uses V.* (which ones?)
     Value(..), -- uses Val, Eval
+    InitDat(..),
 
     EvalT(..), ContT(..),
 
@@ -46,7 +47,7 @@ module Pugs.AST.Internals (
     -- MonadEval(..),
 
     runEvalSTM, runEvalIO, shiftT, resetT, callCC,
-    undef, defined,
+    undef, defined, tryIO, guardIO, guardIOexcept,
     readRef, writeRef, clearRef, dumpRef, forceRef,
     askGlobal, writeVar, readVar,
     findSymRef, findSym,
@@ -69,14 +70,15 @@ module Pugs.AST.Internals (
     expToEvalVal, -- Hack, should be removed once it's figured out how
 ) where
 import Pugs.Internals
-import Pugs.Context
 import Pugs.Types
 import Pugs.Cont hiding (shiftT, resetT)
+import System.IO.Error (try)
 import qualified Data.Set       as Set
 import qualified Data.Map       as Map
 import qualified Data.IntMap    as IntMap
 
 import Pugs.Parser.Number
+import Pugs.AST.Prag
 import Pugs.AST.Pos
 import Pugs.AST.Scope
 import Pugs.AST.SIO
@@ -525,6 +527,7 @@ instance Value VList where
         case v of
             (VList vs) -> return vs
             _          -> return [v]
+    fromVal (VList vs) = return vs
     fromVal v = fromVal' v
     doCast (VList l)     = return $ l
     doCast (VUndef)      = return $ [VUndef]
@@ -699,11 +702,11 @@ instance Show JuncType where
 
 instance Show VJunc where
     show (MkJunc jtype _ set) =
-       	(show jtype) ++ "(" ++
-	    (foldl (\x y ->
-		if x == "" then show y
-		else x ++ "," ++ show y)
-	    "" $ Set.elems set) ++ ")"
+        (show jtype) ++ "(" ++
+            (foldl (\x y ->
+                if x == "" then show y
+                else x ++ "," ++ show y)
+            "" $ Set.elems set) ++ ")"
 
 {-|
 Each 'VCode' structure has a 'SubType' indicating what \'level\' of
@@ -859,6 +862,7 @@ data Exp
                                         --     be represented by 'App'.
     | Cxt !Cxt !Exp                     -- ^ Context
     | Pos !Pos !Exp                     -- ^ Position
+    | Prag ![Pragma] !Exp               -- ^ Lexical pragmas
     | Pad !Scope !Pad !Exp              -- ^ Lexical pad
     | Sym !Scope !Var !Exp              -- ^ Symbol declaration
     | Stmts !Exp !Exp                   -- ^ Multiple statements
@@ -901,6 +905,7 @@ instance Unwrap [Exp] where
 instance Unwrap Exp where
     unwrap (Cxt _ exp)      = unwrap exp
     unwrap (Pos _ exp)      = unwrap exp
+    unwrap (Prag _ exp)     = unwrap exp
     unwrap (Pad _ _ exp)    = unwrap exp
     unwrap (Sym _ _ exp)    = unwrap exp
     unwrap x                = x
@@ -951,6 +956,9 @@ extract (Var name) vs
     = (Var name, nub (name:vs))
     | otherwise
     = (Var name, vs)
+extract (Prag prag ex) vs = ((Prag prag ex'), vs')
+    where
+    (ex', vs') = extract ex vs
 extract (Pos pos ex) vs = ((Pos pos ex'), vs')
     where
     (ex', vs') = extract ex vs
@@ -988,14 +996,14 @@ typeOfSigil ':'  = mkType "Type"
 typeOfSigil x    = internalError $ "typeOfSigil: unexpected character: " ++ show x
 
 buildParam :: String -- ^ Type of the parameter
-           -> String -- ^ Parameter-sigil (@+@ or @?@)
+           -> String -- ^ Parameter-sigil (@+@, @++@, or @?@)
            -> String -- ^ Name of the parameter (including primary sigil)
            -> Exp    -- ^ Expression for the param's default value
            -> Param
 buildParam typ sigil name e = MkParam
     { isInvocant    = False
     , isOptional    = (sigil ==) `any` ["?", "+"]
-    , isNamed       = (null sigil || head sigil /= '+')
+    , isNamed       = (sigil ==) `any` ["+", "++"]
     , isLValue      = True
     , isWritable    = (name == "$_")
     , isLazy        = False
@@ -1040,6 +1048,22 @@ data Env = MkEnv
     , envDepth   :: !Int                 -- ^ Recursion depth
     , envDebug   :: !DebugInfo           -- ^ Debug info map
     , envPos     :: !Pos                 -- ^ Source position range
+    , envPragmas :: ![Pragma]            -- ^ List of pragmas in effect
+    , envInitDat :: !(TVar InitDat)      -- ^ BEGIN result information
+    } deriving (Show, Eq, Ord, Typeable)
+
+{-|
+Module initialization information.
+
+When a module is loaded and initialized (i.e., its &import routine is
+called), it may need to communicate information back to the parser. 
+This information is held in a TVar to which the parser has access.
+Currently we use this for keeping track of lexical pragma change
+requests, but the possiblyExit mechanism may be refactored to use
+this as well.
+-}
+data InitDat = MkInitDat
+    { initPragmas :: [Pragma]            -- ^ Pragma values being installed
     } deriving (Show, Eq, Ord, Typeable)
 
 envWant :: Env -> String
@@ -1096,8 +1120,8 @@ lookupPad :: Var -- ^ Symbol to look for
 -}
 
 lookupPad key (MkPad map) = case Map.lookup (possiblyFixOperatorName key) map of
-	Just xs -> Just [tvar | (_, tvar) <- xs]
-	Nothing -> Nothing
+        Just xs -> Just [tvar | (_, tvar) <- xs]
+        Nothing -> Nothing
 
 {-|
 Transform a pad into a flat list of bindings. The inverse of 'mkPad'.
@@ -1111,8 +1135,8 @@ listToPad :: [(Var, [(TVar Bool, TVar VRef)])] -> Pad
 listToPad = MkPad . Map.fromList
 
 {- Eval Monad -}
-type Eval x = EvalT (ContT Val (ReaderT Env SIO)) x
-type EvalMonad = EvalT (ContT Val (ReaderT Env SIO))
+-- type Eval x = EvalT (ContT Val (ReaderT Env SIO)) x
+type Eval = EvalT (ContT Val (ReaderT Env SIO))
 newtype EvalT m a = EvalT { runEvalT :: m a }
 
 runEvalSTM :: Env -> Eval Val -> STM Val
@@ -1120,6 +1144,9 @@ runEvalSTM env = runSTM . (`runReaderT` env) . (`runContT` return) . runEvalT
 
 runEvalIO :: Env -> Eval Val -> IO Val
 runEvalIO env = runIO . (`runReaderT` env) . (`runContT` return) . runEvalT
+
+tryIO :: a -> IO a -> Eval a
+tryIO err = lift . liftIO . (`catch` (const $ return err))
 
 {-|
 'shiftT' is like @callCC@, except that when you activate the continuation
@@ -1187,7 +1214,7 @@ resetT :: Eval Val -- ^ An evaluation, possibly containing a 'shiftT'
 resetT e = lift . lift $
     runContT (runEvalT e) return
 
-instance Monad EvalMonad where
+instance Monad Eval where
     return a = EvalT $ return a
     m >>= k = EvalT $ do
         a <- runEvalT m
@@ -1199,18 +1226,46 @@ instance Monad EvalMonad where
 instance MonadTrans EvalT where
     lift x = EvalT x
 
-instance Functor EvalMonad where
+instance Functor Eval where
     fmap f (EvalT a) = EvalT (fmap f a)
 
-instance MonadIO EvalMonad where
+instance MonadIO Eval where
     liftIO io = EvalT (liftIO io)
+    
+{-|
+Perform an IO action and raise an exception if it fails.
+-}
+guardIO :: IO a -> Eval a
+guardIO io = do
+    rv <- liftIO $ try io
+    case rv of
+        Left e -> fail (show e)
+        Right v -> return v
 
-instance MonadSTM EvalMonad where
+{-|
+Like @guardIO@, perform an IO action and raise an exception if it fails.
+
+If the failure matches one of the IOErrors in the 'safetyNet' list,
+supress the exception and return an associated value instead.
+-}
+guardIOexcept :: [((IOError -> Bool), a)] -> IO a -> Eval a
+guardIOexcept safetyNet io = do
+    rv <- liftIO $ try io
+    case rv of
+        Right v -> return v
+        Left  e -> catcher e safetyNet
+    where
+    catcher e [] = fail (show e)
+    catcher e ((f, res):safetyNets)
+        | f e       = return res
+        | otherwise = catcher e safetyNets
+
+instance MonadSTM Eval where
     -- XXX: Should be this:
     -- liftSTM stm = EvalT (lift . lift . liftSTM $ stm)
     liftSTM stm = EvalT (lift . lift . liftIO . liftSTM $ stm)
 
-instance MonadReader Env EvalMonad where
+instance MonadReader Env Eval where
     ask       = lift ask
     local f m = EvalT $ local f (runEvalT m)
 
@@ -1225,9 +1280,9 @@ findSym name pad = case lookupPad name pad of
     Just (x:_)  -> Just x
     _           -> Nothing
 
-instance MonadEval EvalMonad
+instance MonadEval Eval
 
-instance MonadCont EvalMonad where
+instance MonadCont Eval where
     -- callCC :: ((a -> Eval b) -> Eval a) -> Eval a
     callCC f = EvalT . callCCT $ \c -> runEvalT . f $ \a -> EvalT $ c a
 
@@ -1272,6 +1327,9 @@ readVar name@(sigil:rest) = do
         _  -> readVar (sigil:'*':rest)
 readVar _ = return undef
 
+{-|
+The \'empty expression\' is just a no-op ('Noop').
+-}
 emptyExp :: Exp
 emptyExp = Noop
 
@@ -1647,14 +1705,16 @@ data VRule
         { rxRegex     :: !Regex -- ^ The \'regular\' expression (as a PCRE
                                 --     'Regex' object)
         , rxGlobal    :: !Bool  -- ^ Flag indicating \'global\' (match-all)
-	    , rxStringify :: !Bool
+        , rxNumSubs   :: !Int   -- ^ The number of subpatterns present.
+            , rxStringify :: !Bool
+        , rxRuleStr   :: !String -- ^ The rule string, for user reference.
         , rxAdverbs   :: !Val
         }
     -- | Parrot Grammar Engine rule
     | MkRulePGE
         { rxRule      :: !String -- ^ The rule string
         , rxGlobal    :: !Bool   -- ^ Flag indicating \'global\' (match-all)
-	    , rxStringify :: !Bool
+            , rxStringify :: !Bool
         , rxAdverbs   :: !Val
         }
     deriving (Show, Eq, Ord, Typeable)

@@ -125,7 +125,7 @@ this test should be added too more.
     is(%hash<key>[2], 3, 'got the right value');
     
     {
-        my @array = %hash<key>;
+        my @array = @{ %hash<key> };
         is(+@array, 3, 'it should have 3 values in it');    
         is(@array[0], 1, 'got the right value (when I pull the array out)');
         is(@array[1], 2, 'got the right value (when I pull the array out)');    
@@ -151,5 +151,5 @@ this test should be added too more.
 
 { # nested, declared in one statement
     my $h = { a => [ 1,2,3 ] };
-    is($h<a>.ref, 'Array', "array nested in hashref in one declaration", :todo<bug>);
+    is($h<a>.ref, 'Array', "array nested in hashref in one declaration");
 }

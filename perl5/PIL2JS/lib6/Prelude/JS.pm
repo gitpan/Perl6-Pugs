@@ -14,8 +14,10 @@ module Prelude::JS {}
 # emulate pass by ref (needed for is rw and is ref).
 
 use Prelude::JS::Code;
+use Prelude::JS::Continuations;
 use Prelude::JS::ControlFlow;
 use Prelude::JS::IO;
+use Prelude::JS::Junc;
 use Prelude::JS::Str;
 use Prelude::JS::Bool;
 use Prelude::JS::Keyed;
@@ -25,6 +27,11 @@ use Prelude::JS::Hash;
 use Prelude::JS::Array;
 use Prelude::JS::Context;
 use Prelude::JS::Math;
+use Prelude::JS::JSAN;
+use Prelude::JS::Rules;
+use Prelude::JS::Smartmatch;
+use Prelude::JS::OO;
+use Prelude::JS::Proxy;
 
 method JS::Root::undefine($a is rw:) {
   $a = undef;
@@ -37,32 +44,42 @@ sub JS::Root::time() is primitive {
 sub infix:<=:=>($a, $b) is primitive { JS::inline('new PIL2JS.Box.Constant(
   function (args) {
     var cxt = args.shift();
+    var cc  = args.pop();
+
     if(args[0].uid && args[1].uid) {
-      return new PIL2JS.Box.Constant(args[0].uid == args[1].uid);
-    } else if(!args[0].uid && !args[1].uid) {
-      return new PIL2JS.Box.Constant(args[0].FETCH() == args[1].FETCH());
+      cc(new PIL2JS.Box.Constant(args[0].uid == args[1].uid));
     } else {
-      return new PIL2JS.Box.Constant(false);
+      cc(new PIL2JS.Box.Constant(false));
+    }
+  }
+)')($a, $b) }
+
+sub infix:<eqv>($a, $b) is primitive { JS::inline('new PIL2JS.Box.Constant(
+  function (args) {
+    var cxt = args.shift(),  cc  = args.pop();
+    var a = args[0].FETCH(), b = args[1].FETCH();
+
+    if(a instanceof PIL2JS.Ref && b instanceof PIL2JS.Ref) {
+      cc(new PIL2JS.Box.Constant(a.referencee == b.referencee));
+    } else if(!(a instanceof PIL2JS.Ref) && !(b instanceof PIL2JS.Ref)) {
+      cc(new PIL2JS.Box.Constant(a == b));
+    } else {
+      cc(new PIL2JS.Box.Constant(false));
     }
   }
 )')($a, $b) }
 
 sub prefix:<*>(@array) {
-  if not @array.isa("Array") {
-    # Slightly hacky, needed for *(3), for example.
-    @array;
-  } else {
-    JS::inline('new PIL2JS.Box.Constant(function (args) {
-      // We\'ve to [].concat here so we don\'t set .flatten_me of caller\'s
-      // original array.
-      var array = [].concat(args[1].FETCH());
-      array.flatten_me = true;
-      var ret = new PIL2JS.Box.Constant(array);
-      // Hack! Returning flattened things the official way doesn\'t work (the
-      // flattenessness isn\'t preserved...).
-      throw(new PIL2JS.ControlException.ret(5, ret));
-    })')(@array);
-  }
+  JS::inline('new PIL2JS.Box.Constant(function (args) {
+    // We\'ve to [].concat here so we don\'t set .flatten_me of caller\'s
+    // original array.
+    var cc    = args.pop();
+    var array = [].concat(args[1].FETCH());
+
+    array.flatten_me = true;
+    var ret = new PIL2JS.Box.Constant(array);
+    throw function () { cc(ret) };
+  })')(@array);
 }
 
 sub JS::Root::eval(Str ?$code, Str +$lang = 'Perl6') {
@@ -82,7 +99,19 @@ use Prelude::JS::Operators;
 # typechecking etc. I renamed the parameters to $__a and $__b. HAAACK!
 sub infix:<~>(Str $__a, Str $__b) is primitive {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
-    var a = args[1].FETCH(), b = args[2].FETCH();
-    return new PIL2JS.Box.Constant(String(a) + String(b));
+    var a = args[1].FETCH(), b = args[2].FETCH(), cc = args.pop();
+    cc(new PIL2JS.Box.Constant(String(a) + String(b)));
   })')(~$__a, ~$__b);
+}
+
+sub Pugs::Internals::symbolic_deref (Str $sigil, Str *@parts) is rw {
+  JS::inline('new PIL2JS.Box.Constant(function (args) {
+    var varname = args[1].toNative(), cc = args.pop();
+    cc(PIL2JS.resolve_callervar(1, varname));
+  })')($sigil ~ join "::", @parts);
+}
+
+sub Pugs::Internals::but_block ($obj is rw, Code $code) is primitive {
+  $code($obj);
+  $obj;
 }

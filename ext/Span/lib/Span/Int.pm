@@ -12,20 +12,16 @@ method empty_span ($class: ?$density = 1 ) {
     return $class.new( start => undef, end => undef, density => $density );
 }
 
-method is_empty () { return ! defined( $.start ) }
-
-multi method size () returns Object {
-    return $.end - $.start + $.density;
-}
-
-method start_is_closed () { return bool::true }
+method is_empty        () { ! defined( $.start ) }
+method size            () { $.end - $.start + $.density }
+method start_is_closed () { return bool::true  }
 method start_is_open   () { return bool::false }
-method end_is_closed   () { return bool::true }
+method end_is_closed   () { return bool::true  }
 method end_is_open     () { return bool::false }
 
 method intersects ( Span::Int $span ) returns bool {
-    my $i_start = $.start < $span.start ?? $span.start :: $.start;
-    my $i_end =   $.end > $span.end     ?? $span.end   :: $.end;
+    my $i_start = $.start < $span.start ?? $span.start !! $.start;
+    my $i_end =   $.end > $span.end     ?? $span.end   !! $.end;
     return $i_start <= $i_end;
 }
 
@@ -47,16 +43,16 @@ method union ($self: Span::Int $span )
 {
     return ( $self, $span ) if $.end + $.density     < $span.start;
     return ( $span, $self ) if $span.end + $.density < $.start;
-    my $i_start = $.start > $span.start ?? $span.start :: $.start;
-    my $i_end =   $.end   < $span.end   ?? $span.end   :: $.end;
+    my $i_start = $.start > $span.start ?? $span.start !! $.start;
+    my $i_end =   $.end   < $span.end   ?? $span.end   !! $.end;
     return $self.new( start => $i_start, end =>   $i_end, density => $.density );
 }
 
 method intersection ($self: $span ) {
     return $span.intersection( $self )
         if $span.isa( 'Span::Code' ) || $span.isa( 'Span::Num' );
-    my $i_start = $.start < $span.start ?? $span.start :: $.start;
-    my $i_end =   $.end > $span.end     ?? $span.end   :: $.end;
+    my $i_start = $.start < $span.start ?? $span.start !! $.start;
+    my $i_end =   $.end > $span.end     ?? $span.end   !! $.end;
     return () if $i_start > $i_end;
     return $self.new( start => $i_start, end =>   $i_end, density => $.density );
 }
@@ -107,7 +103,7 @@ Span::Int - An object representing a single span, with a simple functional API.
 
   use Span::Int;
 
-  $span = new( start => $start, end => $end );
+  $span = Span::Int.new( start => $start, end => $end );
 
 = DESCRIPTION
 

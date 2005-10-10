@@ -15,9 +15,9 @@ import Pugs.Embed.Perl5
 import Pugs.Bind
 import Pugs.Prim.List (op2Fold, op1HyperPrefix, op1HyperPostfix, op2Hyper)
 import Pugs.Prim.Param (foldParam)
-import Pugs.Context
 import Pugs.Pretty
 import Pugs.Config
+import Pugs.Monads
 
 findVar :: Var -> Eval (Maybe VRef)
 findVar name = do
@@ -291,13 +291,22 @@ findSub name' invs args = do
         typ <- evalExpType y
         return $ deltaType cls x typ
 
+{-|
+Take an expression, and attempt to predict what type it will evaluate to
+/without/ actually evaluating it.
+-}
 evalExpType :: Exp -> Eval Type
 evalExpType (Var var) = do
     rv  <- findVar var
     case rv of
         Nothing  -> return $ typeOfSigil (head var)
-        Just ref -> evalValType (VRef ref)
-evalExpType (Val val) = evalValType val
+        Just ref -> do
+            let typ = refType ref
+            cls <- asks envClasses
+            if isaType cls "List" typ
+                then return typ
+                else fromVal =<< readRef ref
+evalExpType (Val val) = fromVal val
 evalExpType (App (Val val) _ _) = do
     sub <- fromVal val
     return $ subReturns sub
@@ -309,7 +318,7 @@ evalExpType (App (Var name) invs args) = do
         Nothing     -> return $ mkType "Any"
 evalExpType exp@(Syn syn _) | (syn ==) `any` words "{} []" = do
     val <- evalExp exp
-    evalValType val
+    fromVal val
 evalExpType (Cxt cxt _) | typeOfCxt cxt /= (mkType "Any") = return $ typeOfCxt cxt
 evalExpType (Cxt _ exp) = evalExpType exp
 evalExpType (Pos _ exp) = evalExpType exp
@@ -351,22 +360,39 @@ posSym f = fmap (Just . castV . f) $ asks envPos
 constSym :: String -> Eval (Maybe Val)
 constSym = return . Just . castV
 
-findSyms :: Var -> Eval [(String, Val)]
+findSyms :: Var -> Eval [(Var, Val)]
 findSyms name = do
-    lex  <- asks envLexical
-    glob <- askGlobal
-    pkg  <- asks envPackage
-    let names = nub [name, toPackage pkg name, toGlobal name]
-    syms <- forM [lex, glob] $ \pad -> do
-        forM names $ \name' -> do
-            case lookupPad name' pad of
-                Just tvar -> do
-                    refs  <- liftSTM $ mapM readTVar tvar
+        runMaybeT (findLexical `mplus` findPackage `mplus` findGlobal) >>= \ret ->
+            case ret of
+                Nothing -> return []
+                Just xs -> return xs
+    where
+        findLexical :: MaybeT Eval [(Var, Val)]
+        findLexical = do
+            lex <- lift $ asks envLexical
+            padSym lex name
+            
+        findPackage :: MaybeT Eval [(Var, Val)]
+        findPackage = do
+            glob <- lift $ askGlobal
+            pkg  <- lift $ asks envPackage
+            padSym glob name `mplus` padSym glob (toPackage pkg name)
+
+        findGlobal :: MaybeT Eval [(Var, Val)]
+        findGlobal = do
+            glob <- lift $ askGlobal
+            padSym glob (toGlobal name)
+
+        padSym :: Pad -> Var -> MaybeT Eval [(Var, Val)]
+        padSym pad var = do
+            case lookupPad var pad of
+                Just tvar -> lift $ do
+                    refs <- liftSTM $ mapM readTVar tvar
                     forM refs $ \ref -> do
                         val <- readRef ref
-                        return (name', val)
-                Nothing -> return []
-    return $ concat (concat syms)
+                        return (var, val)
+                Nothing -> mzero
+        
 
 toGlobal :: String -> String
 toGlobal name

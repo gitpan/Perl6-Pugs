@@ -20,6 +20,11 @@ so it looks like a pugs-pcre interface bug.
 
 =cut
 
+unless "a" ~~ rx:P5/a/ {
+  skip_rest "skipped tests - P5 regex support appears to be missing";
+  exit;
+}
+
 "a" ~~ rx:perl5/a|(b)/;
 is($0, undef, 'An unmatched capture should be false.');
 my $str = "http://foo.bar/";

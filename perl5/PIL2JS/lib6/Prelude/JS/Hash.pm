@@ -2,6 +2,7 @@ sub circumfix:<{}>(*@pairs) is primitive { \hash(*@pairs) }
 sub hash(*@pairs) is primitive {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
     var cxt   = args.shift();
+    var cc    = args.pop();
     var pairs = args[0].FETCH();
     var hash  = new PIL2JS.Hash();
 
@@ -31,16 +32,17 @@ sub hash(*@pairs) is primitive {
       }
     }
 
-    return new PIL2JS.Box.Constant(hash);
+    cc(new PIL2JS.Box.Constant(hash));
   })')(@pairs);
 }
 
-method postcircumfix:<{}>(%self: *@keys) {
+method postcircumfix:<{}>(%self: *@keys) is rw {
   die "Can't use object of type {%self.ref} as a hash!"
     unless %self.isa("Hash");
 
   JS::inline('new PIL2JS.Box.Constant(function (args) {
     var cxt  = args.shift();
+    var cc   = args.pop();
     var hash = args[0].FETCH();
     var keys = args[1].FETCH();
 
@@ -70,7 +72,10 @@ method postcircumfix:<{}>(%self: *@keys) {
       // .BINDTO is special: %hash{$key} := $foo should work.
       ret.BINDTO = function (other) {
         if(!hash.exists(key))
-          PIL2JS.die("Can\'t rebind undefined!");
+          hash.add_pair(new PIL2JS.Pair(
+            new PIL2JS.Box.ReadOnly(key),
+            new PIL2JS.Box(undefined)
+          ));
 
         return hash.get_value(key).BINDTO(other);
       };
@@ -79,7 +84,7 @@ method postcircumfix:<{}>(%self: *@keys) {
     };
 
     if(keys.length == 1) {
-      return proxy_for(keys[0]);
+      cc(proxy_for(keys[0]));
     } else {
       var ret = [];
       for(var i = 0; i < keys.length; i++) {
@@ -87,7 +92,7 @@ method postcircumfix:<{}>(%self: *@keys) {
       }
 
       // Needed for %a<a b> = <c d>.
-      return new PIL2JS.Box.Proxy(
+      var proxy = new PIL2JS.Box.Proxy(
         function ()  { return ret },
         function (n) {
           var arr = new PIL2JS.Box([]).STORE(n).FETCH();
@@ -98,6 +103,52 @@ method postcircumfix:<{}>(%self: *@keys) {
           return this;
         }
       );
+      proxy.BINDTO = function (other) {
+        var arr = other.FETCH();
+
+        if(!(arr instanceof Array)) {
+          PIL2JS.die("Can\'t bind hash slice to non-array object!");
+        }
+
+        var backup_arr = [];
+        for(var i = 0; i < arr.length; i++) {
+          backup_arr[i]        = new PIL2JS.Box;
+          backup_arr[i].FETCH  = arr[i].FETCH;
+          backup_arr[i].STORE  = arr[i].STORE;
+          backup_arr[i].BINDTO = arr[i].BINDTO;
+        }
+
+        for(var i = 0; i < backup_arr.length; i++) {
+          ret[i].BINDTO(backup_arr[i]);
+        }
+
+        return this;
+      };
+
+      cc(proxy);
     }
   })')(%self, @keys);
+}
+
+# Hash autovification
+# Needs PIL2 and MMD to be done without hacks
+sub PIL2JS::Internals::Hacks::hash_postcircumfix_for_undefs (
+  $hash is rw, *@keys
+) is primitive is rw {
+  if defined $hash {
+    die "\"$hash\" can't be autovivified to a hash!";
+  }
+
+  $hash = hash();
+  $hash{*@keys};
+}
+
+sub PIL2JS::Internals::Hacks::init_undef_hash_postcircumfix_method () is primitive {
+  JS::inline('(function () {
+    PIL2JS.addmethod(
+      _3amain_3a_3aItem,
+      "postcircumfix:{}",
+      _26PIL2JS_3a_3aInternals_3a_3aHacks_3a_3ahash_postcircumfix_for_undefs
+    );
+  })')();
 }

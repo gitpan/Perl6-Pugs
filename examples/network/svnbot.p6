@@ -18,8 +18,8 @@ debug "  Will connect as...                  $nick";
 debug "  to...                               $host:$port";
 debug "  checking for new revisions of...    $repository";
 debug "  every...                            $interval seconds.";
-debug "  Branch information will {$show_branch ?? "" :: "not "}be shown.";
-debug "  There {$sep_header ?? "will" :: "won't"} be a separate header line.";
+debug "  Branch information will {$show_branch ?? "" !! "not "}be shown.";
+debug "  There {$sep_header ?? "will" !! "won't"} be a separate header line.";
 debug "To change any of these parameters, restart $*PROGRAM_NAME";
 debug "and supply appropriate arguments:";
 debug "  $*PROGRAM_NAME nick host[:port] interval repository show_branch sep_header";
@@ -57,7 +57,7 @@ sub on_privmsg($event) {
         debug "Received a ?-request from $event<from>: $event<rest>"
             if substr($event<rest>, 0, 1) eq "?";
 
-        my $reply_to = substr($event<object>, 0, 1) eq "#" ?? $event<object> :: $event<from_nick>;
+        my $reply_to = substr($event<object>, 0, 1) eq "#" ?? $event<object> !! $event<from_nick>;
         my $reply    = { $bot<privmsg>(to => $reply_to, text => $^text) };
 
         when rx:P5/^\?help/ {
@@ -161,7 +161,7 @@ sub svn_commits() {
         when rx:P5/^   [MAUDCGR] / {
             $branch = $_ ~~ rx:P5:i{branches/([^/]+)}
                 ?? $0
-                :: "trunk";
+                !! "trunk";
             $commits ~~ s:P5:g/$subst/$branch/;
         }
 
@@ -171,7 +171,7 @@ sub svn_commits() {
             # commits.
             next if $0 == $cur_svnrev;
             $cur_svnrev = +$0 if $0 > $cur_svnrev;
-            $commits ~= "{$cur_entry}{$show_branch ?? " | $subst" :: ""}:\n"
+            $commits ~= "{$cur_entry}{$show_branch ?? " | $subst" !! ""}:\n"
                 if $sep_header;
         }
 
@@ -180,7 +180,7 @@ sub svn_commits() {
               $_ ~~ rx:P5/^(.*)$/;
               $commits ~= $sep_header
                   ?? ": "
-                  :: "$cur_entry | {$show_branch ?? "$branch | " :: ""}";
+                  !! "$cur_entry | {$show_branch ?? "$branch | " !! ""}";
               $commits ~= "$0\n";
            }
        }
@@ -195,3 +195,56 @@ sub svn_headrev() {
     svn_commits();
     debug "done, current HEAD revision: $cur_svnrev";
 }
+
+
+=head1 NAME
+
+svnbot
+
+=head1 DESCRIPTION
+
+This is a small IRC bot using C<Net::IRC> capable of relaying new commits to a
+Subversion repository to IRC.
+
+=head1 SYNOPSIS
+
+  $ ./svnbot.p6 nick host[:port] interval repository show_branch sep_header
+
+where
+
+=over
+
+=item C<repository>
+
+is the path to the SVN repository (e.g. F<.> or L<http://svn.perl.org/parrot/>,
+
+=item C<show_branch>
+
+specifies whether branch information should be shown (C<true>|C<false>), and
+
+=item C<sep_header>
+
+specifies whether a separate header line should be outputted (C<true>|C<false>).
+
+=back
+
+=head1 INSTALLATION
+
+There's no separate installation step needed, simply run C<svnbot.p6> and
+supply appropriate options.
+
+=head1 FAQ
+
+"I configured svnbot to check for new commits every I<n> seconds, but the
+commits usually take much more time to show up. Why is this so?"
+
+If you look at svnbot's source, you'll see that it really I<tries> to check the
+SVN repository after I<n> seconds elapsed. The problem is, that svnbot doesn't
+have a chance to check, because C<Net::IRC> is busy reading from the socket to
+the IRC server. Unfortunately, the call to C<.readline> C<Net::IRC> issues is
+I<blocking>, meaning that the operating system will suspend C<svnbot.p6> until
+it receives some data from the IRC server.
+
+In Perl 5, the problem would be easy to remedy, as perl5 allows you to set
+timeouts. But, as Pugs doesn't have a mechanism to set timeouts yet, there's
+nothing C<Net::IRC> can do about it.

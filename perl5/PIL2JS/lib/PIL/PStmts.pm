@@ -7,41 +7,52 @@ use warnings;
 use strict;
 
 sub fixup {
-  die unless @{ $_[0] } == 2;
+  die unless keys %{ $_[0] } == 2;
 
-  return bless [
-    $_[0]->[0]->fixup,
-    $_[0]->[1]->fixup,
-  ] => "PIL::PStmts";
+  no warnings "recursion";
+  return bless {
+    pStmt  =>
+      ($_[0]->{pStmt}  eq "PNoop" ? bless {} => "PIL::PNoop" : $_[0]->{pStmt})->fixup,
+    pStmts =>
+      ($_[0]->{pStmts} eq "PNil"  ? bless {} => "PIL::PNil"  : $_[0]->{pStmts})->fixup,
+  } => "PIL::PStmts";
 }
 
 sub as_js {
   my $self = shift;
+  no warnings "recursion";
 
-  # Update $?POSITION.
-  my $pos =
-    sprintf "_24main_3a_3a_3fPOSITION.STORE(new PIL2JS.Box.Constant(%s))",
-    PIL::doublequote $PIL::CUR_POS;
+  my ($head, $tail) = @$self{qw< pStmt pStmts >};
+  my $cc;
 
   # Add a &return() to the last statement of a sub.
-  if($PIL::IN_SUBLIKE and $self->[1]->isa("PIL::PNil")) {
-    my $js = $self->[0]->as_js;
-    # Note: Purely cosmetical hacking on the generated JS! (else it would be
-    # eevil).
-    $js =~ s/\n$//;
-    if($PIL::IN_SUBLIKE >= PIL::SUBROUTINE) {
-      return "$pos;\n_26main_3a_3areturn.FETCH()([PIL2JS.Context.ItemAny, $js]);";
-    } elsif($PIL::IN_SUBLIKE >= PIL::SUBBLOCK) {
-      return "$pos;\n_26main_3a_3aleave.FETCH()([PIL2JS.Context.ItemAny, $js]);";
+  if($PIL::IN_SUBLIKE and $tail->isa("PIL::PNil")) {
+    $head = $head->unwrap;  # (That's also a cosmetical fix.)
+    my $default = sub {
+      my $cxt   = "PIL2JS.Context.ItemAny";
+      my $retcc = PIL::cur_retcc;
+      $cc = PIL::Cont->new(argname => "retval", body => sub {
+        "PIL2JS.generic_return($retcc).FETCH()([$cxt, retval, 'dummycc']);"
+      });
+    };
+
+    if($head->isa("PIL::PApp") and $head->{pFun}->unwrap->isa("PIL::PVar")) {
+      my $name = $head->{pFun}->unwrap->{origName} || "";
+      if($name eq "&return") {
+        $cc = PIL::Cont->new(argname => "", body => sub { "" });
+      } elsif($name eq "&yield") {
+        $cc = PIL::RawJS->new("initial_entrypoint");
+      } else {
+        $default->();
+      }
     } else {
-      # !!! *Never* do a native JS return(), as it defeats var restore.
-      return "$pos;\n_26PIL2JS_3a_3aInternals_3a_3asmallreturn.FETCH()([PIL2JS.Context.ItemAny, $js]);";
+      $default->();
     }
   } else {
-    my @js = ($self->[0]->as_js, $self->[1]->as_js);
-    $js[0] =~ s/\n$//;
-    return "$pos;\n$js[0];\n$js[1]";
+    $cc = PIL::Cont->new(argname => "", body => $tail);
   }
+
+  return PIL::possibly_ccify $head, $cc;
 }
 
 1;

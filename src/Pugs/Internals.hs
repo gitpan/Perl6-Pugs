@@ -64,13 +64,14 @@ module Pugs.Internals (
     encodeUTF8,
     forM,
     forM_,
-    tryIO,
     combine,
     modifyTVar,
     unsafePerformSTM,
     possiblyFixOperatorName,
     maybeM,
     safeMode,
+    warn,
+    die,
 ) where
 
 import UTF8
@@ -146,6 +147,15 @@ internalError :: String -> a
 internalError s = error $
     "Internal error:\n    " ++ s ++ "\nPlease file a bug report."
 
+die :: (MonadIO m, Show a) => String -> a -> m b
+die x y = do
+    warn x y
+    liftIO $ exitFailure
+
+warn :: (MonadIO m, Show a) => String -> a -> m ()
+warn str val = liftIO $ do
+    hPutStrLn stderr $ "*** " ++ str ++ ":\n    " ++ show val
+
 split :: (Eq a) => [a] -> [a] -> [[a]]
 split []  _   = internalError "splitting by an empty list"
 split sep str =
@@ -212,9 +222,6 @@ forM_ :: (Monad m)
       -> (a -> m b) -- ^ The \'body\' of the for loop
       -> m ()
 forM_ = flip mapM_
-
-tryIO :: (MonadIO m) => a -> IO a -> m a
-tryIO err = liftIO . (`catch` (const $ return err))
 
 {-|
 Compose a list of @(a -> a)@ transformer functions into a single chained

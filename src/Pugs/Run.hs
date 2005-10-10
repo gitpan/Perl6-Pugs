@@ -21,16 +21,18 @@ import Pugs.Run.Args
 import Pugs.Run.Perl5 ()
 import Pugs.Internals
 import Pugs.Config
-import Pugs.Context
 import Pugs.AST
 import Pugs.Types
 import Pugs.Eval
 import Pugs.Prim
 import Pugs.Embed
 import Data.IORef
+import System.FilePath
 import qualified Data.Map as Map
 
+
 #include "PreludePC.hs"
+
 
 {-|
 Run 'Main.run' with command line args. 
@@ -143,6 +145,7 @@ prepareEnv name args = do
         , genSym "$=POD"        $ MkRef $ constScalar (VStr "")
         -- To answer the question "what revision does evalbot run on?"
         , genSym "$?PUGS_VERSION" $ MkRef $ constScalar (VStr $ getConfig "pugs_version")
+        , genSym "$?PUGS_BACKEND" $ MkRef $ constScalar (VStr "BACKEND_PUGS")
         , genSym "$*OS"         $ hideInSafemode $ MkRef $ constScalar (VStr $ getConfig "osname")
         , genSym "&?BLOCK_EXIT" $ codeRef $ mkPrim
             { subName = "&?BLOCK_EXIT"
@@ -193,5 +196,7 @@ getLibs = do
                  , getConfig "privlib"
                  , getConfig "sitearch"
                  , getConfig "sitelib"
+                 , foldl1 joinFileName [getConfig "privlib", "auto", "pugs", "perl6", "lib"]
+                 , foldl1 joinFileName [getConfig "sitelib", "auto", "pugs", "perl6", "lib"]
                  ]
               ++ [ "." ]

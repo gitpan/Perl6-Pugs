@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 11;
+plan 14;
 
 =pod
 
@@ -13,38 +13,70 @@ L<S06/"Lvalue subroutines">
 
 =cut
 
-my $val1 = 1;
-my $val2 = 2;
+# Lvalue subrefs
+{
+  my $var1 = 1;
+  my $var2 = 2;
 
-sub lastval is rw { return $val2; }
-sub prevval is rw { return lastval(); }
+  my $lastvar = sub () is rw { return $var2      };
+  my $prevvar = sub () is rw { return $lastvar() };
 
-lastval() = 3;
-is($val2, 3); # simple
+  $lastvar() = 3;
+  is $var2, 3, "lvalue subroutine references work (simple)";
 
-prevval() = 4;
-is($val2, 4); # nested
+  $prevvar() = 4;
+  is $var2, 4, "lvalue subroutine references work (nested)";
+}
 
-# S6 says that lvalue subroutines are marked out by 'is rw'
-sub notlvalue { return $val1; } # without rw
+{
+  my $var = 42;
+  my $notlvalue = sub () { return $var };
 
-notlvalue() = 5;
-is $val1, 1, 'non-rw subroutines should not support assignment', :todo<bug>;
-isnt $val1, 5, 'non-rw subroutines should not assign', :todo<bug>;
+  dies_ok { $notlvalue() = 23 },
+    "assigning to non-rw subrefs should die", :todo<bug>;
+  is $var, 42,
+    "assigning to non-rw subrefs shouldn't modify the original variable", :todo<bug>;
+}
+
+{
+  my $var1 = 1;
+  my $var2 = 2;
+
+  sub lastvar is rw { return $var2; }
+  sub prevvar is rw { return lastvar(); }
+
+  lastvar() = 3;
+  is($var2, 3, "lvalue subroutines work (simple)");
+
+  prevvar() = 4;
+  is($var2, 4, "lvalue subroutines work (nested)");
+}
+
+{
+  my $var = 42;
+
+  # S6 says that lvalue subroutines are marked out by 'is rw'
+  sub notlvalue { return $val1; } # without rw
+
+  dies_ok { notlvalue() = 5 },
+    "assigning to non-rw subs should die";
+  is $var, 42,
+    "assigning to non-rw subs shouldn't modify the original variable";
+}
 
 sub check ($passwd) { return $password eq "fish"; };
 
 eval 'sub checklastval ($passwd) is rw {
-	my $proxy is Proxy(
-		FETCH => sub ($self) {
-			    return lastval();
-			 },
-		STORE => sub ($self, $val) {
-			    die "wrong password" unless check($passwd);
-			    lastval() = $val;
-			 }
-        );
-	return $proxy;
+    my $proxy is Proxy(
+    FETCH => sub ($self) {
+            return lastval();
+         },
+    STORE => sub ($self, $val) {
+            die "wrong password" unless check($passwd);
+            lastval() = $val;
+         }
+    );
+    return $proxy;
 };';
 
 my $errors;
@@ -59,12 +91,13 @@ eval '$resultval = checklastval("fish");';
 is($resultval, 12, 'proxy lvalue subroutine FETCH works', :todo<feature>);
 
 my $realvar = "foo";
-eval_ok 'sub proxyvar ($prefix) is rw {
-	    return new Proxy:
-		FETCH => { $prefix ~ lc($realvar) },
-		STORE => { lc($realvar = $^val) };
-        }; 1', 'defining lvalue sub using `new Proxy: ` works', :todo<feature>;
-eval_is 'proxyvar("PRE")', 'PREfoo', 'proxy lvalue subroutine FETCH works', :todo<feature>;
+sub proxyvar ($prefix) is rw {
+    return Proxy.new(
+        FETCH => { $prefix ~ lc($realvar) },
+        STORE => { lc($realvar = $^val) },
+    );
+}
+is try { proxyvar("PRE") }, 'PREfoo', 'proxy lvalue subroutine FETCH works', :todo<feature>;
 # Return value of assignments of Proxy objects is decided now.
 # See thread "Assigning Proxy objects" on p6l,
 # http://www.nntp.perl.org/group/perl.perl6.language/21838.
@@ -75,6 +108,6 @@ eval_is 'proxyvar("PRE")', 'PREfoo', 'proxy lvalue subroutine FETCH works', :tod
 #       say $nonproxy = 40;
 #   
 #   should do.
-eval_is 'proxyvar("PRE") = "BAR"', 'BAR',
+is try { proxyvar("PRE") = "BAR" }, 'BAR',
     'proxy lvalue subroutine STORE works and returns the correct value', :todo<feature>;
 is $realvar, 'BAR', 'variable was modified', :todo<feature>;

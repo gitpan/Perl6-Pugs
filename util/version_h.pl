@@ -34,8 +34,8 @@ elsif (-r $svn_entries) {
     open FH, $svn_entries or die $!;
     while (<FH>) {
         /^ *committed-rev=.(\d+)./ or next;
-	$revision = $1;
-	last;
+        $revision = $1;
+        last;
     }
     close FH;
 } elsif (my @info = qx/svk info/ and $? == 0) {
@@ -58,8 +58,8 @@ if ($revision != $old_revision) {
 
   if ($revision != 0) {
     # rebuild Help.hs to show new revision number
-    unlink "$base/src/Pugs/Version.hi";
-    unlink "$base/src/Pugs/Version.o";
+    unlink "$base/dist/build/src/Pugs/Version.hi";
+    unlink "$base/dist/build/src/Pugs/Version.o";
     exit;
   }
 } elsif ($revision) {

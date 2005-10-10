@@ -1,3 +1,4 @@
+#!/usr/bin/pugs
 #  -*- perl -*-
 
 use v6;
@@ -14,7 +15,7 @@ dies_ok { Perldoc::DOM::Node.new(); }, "Perldoc::DOM::Node.new() - dies",
 # build from the bottom...
 my $node;
 lives_ok{ $node = Perldoc::DOM::Element.new( :name<sect1>,
-					     :source("=head1 ") ); },
+                                             :source("=head1 ") ); },
     "::Element.new()";
 isa_ok($node, "Perldoc::DOM::Element", "Element.new()");
 
@@ -58,7 +59,7 @@ lives_ok{ $node.traverse(sub { push @nodes, $^node }) },
 #is(@nodes.join(","), "Perldoc::DOM::Element", "can walk Tree");
 
 #is_deeply(\@nodes, [$node, $title, $text, $gap, $para, $foo, $pi],
-	  #"walk_down");
+          #"walk_down");
 
 #is_deeply($kwom, eval($kwom.perl), "Perldoc::DOM trees .perl'able");
 #nstore $kwom, 't/kwom.pm3';

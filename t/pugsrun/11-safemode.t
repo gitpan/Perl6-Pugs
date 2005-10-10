@@ -31,19 +31,23 @@ my @tests = (
         my $in_blarb;
         sub blarb () is unsafe { $in_blarb++ }
         try { blarb() };
-        Pugs::Safe::safe_print($in_blarb ?? "nok" :: "ok");
+        Pugs::Safe::safe_print($in_blarb ?? "nok" !! "ok");
     ',
     { $^a eq "ok" },
 
     # Safe Prelude.pm functions should be visible.
-    'Pugs::Safe::safe_print(eval(\'&Carp::longmess\') ?? "ok" :: "nok")',
+    'Pugs::Safe::safe_print(eval(\'&Carp::longmess\') ?? "ok" !! "nok")',
     { $^a eq "ok" },
     # Unsafe Prelude.pm functions should not be visible.
-    'Pugs::Safe::safe_print(eval(\'&Pipe::open3\') ?? "nok" :: "ok")',
+    'Pugs::Safe::safe_print(eval(\'&Pipe::open3\') ?? "nok" !! "ok")',
     { $^a eq "ok" },
 );
 
 plan +@tests / 2;
+if $*OS eq "browser" {
+  skip_rest "Programs running in browsers don't have access to regular IO.";
+  exit;
+}
 
 diag "Running under $*OS";
 

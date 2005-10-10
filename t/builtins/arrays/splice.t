@@ -23,7 +23,7 @@ is equivalent to:
 
 =cut
 
-plan 32;
+plan 33;
 
 my (@a,@b,@res);
 
@@ -125,11 +125,14 @@ is( @a, [6,7,8], "Explicit call/assignment gives the expected results");
 is( @b, [6,7,8], "Implicit context gives the expected results" );
 
 my @tmp = (1..10);
-@a = scalar splice @tmp, 5, 3;
+@a = item splice @tmp, 5, 3;
 is( @a, [8], "Explicit scalar context returns the last element");
 
 ## test some error conditions
 
-# un comment this to test, but now it causes a fatal error
 @a = splice([], 1);
 is +@a, 0, '... empty arrays are not fatal anymore';
+# But this should generate a warning, but unfortunately we can't test for
+# warnings yet.
+
+dies_ok({ 42.splice }, '.splice should not work on scalars', :todo<bug>);

@@ -7,41 +7,44 @@ use Test;
 
 Test handling of C<-V> and C<-V:option>.
 
-
 =cut
 
 # cf. unspecced/config.t for the same list
 my @config = <
-  archlib archname
-	bin
-	exe_ext
-	file_sep
-	installarchlib
-	installbin
-	installprivlib
-	installscript
-	installsitearch
-	installsitebin
-	installsitelib
-	osname
-	pager
-	path_sep
-	perl_revision
-	perl_subversion
-	perl_version
-	prefix
-	privlib
-	pugspath
-	scriptdir
-	sitearch
-	sitebin
-	sitelib
-	pugs_versnum
-	pugs_version
+    archlib archname
+    bin
+    exe_ext
+    file_sep
+    installarchlib
+    installbin
+    installprivlib
+    installscript
+    installsitearch
+    installsitebin
+    installsitelib
+    osname
+    pager
+    path_sep
+    perl_revision
+    perl_subversion
+    perl_version
+    prefix
+    privlib
+    pugspath
+    scriptdir
+    sitearch
+    sitebin
+    sitelib
+    pugs_versnum
+    pugs_version
     pugs_revision
 >;
 
 plan 1+@config*2+2;
+if $*OS eq "browser" {
+  skip_rest "Programs running in browsers don't have access to regular IO.";
+  exit;
+}
 
 diag "Running under $*OS";
 

@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 20;
+plan 31;
 
 # L<S04/"The Relationship of Blocks and Declarations" /function has been renamed/>
 {
@@ -12,7 +12,7 @@ plan 20;
     temp $a = 23;
     is $a, 23, "temp() changed the variable (1)";
   }
-  is $a, 42, "temp() restored the variable (1)", :todo<feature>;
+  is $a, 42, "temp() restored the variable (1)";
 }
 
 # Test that temp() restores the variable at scope exit, not at subroutine
@@ -25,7 +25,75 @@ plan 20;
     is $a,       23, "temp() changed the variable (2-1)";
     is $get_a(), 23, "temp() changed the variable (2-2)";
   }
-  is $a, 42, "temp() restored the variable (2)", :todo<feature>;
+  is $a, 42, "temp() restored the variable (2)";
+}
+
+# temp() shouldn't change the variable containers
+{
+  my $a     = 42;
+  my $get_a = { $a };
+  {
+    temp $a = 23;
+    ok $a =:= $get_a(), "temp() shouldn't change the variable containers";
+  }
+}
+
+{
+  our $pkgvar = 42;
+  {
+    temp $pkgvar = 'not 42';
+    is $pkgvar, 'not 42', "temp() changed the package variable (3-1)";
+  }
+  is $pkgvar, 42, "temp() restored the package variable (3-2)";
+}
+
+# Test that temp() restores variable even when not exited regularly (using a
+# (possibly implicit) call to return()), but when left because of an exception.
+{
+  my $a = 42;
+  try {
+    temp $a = 23;
+    is $a, 23, "temp() changed the variable in a try block";
+    die 57;
+  };
+  is $a, 42, "temp() restored the variable, the block was exited using an exception";
+}
+
+{
+  my @array = (0, 1, 2);
+  {
+    eval 'temp @array[1] = 42';
+    is @array[1], 42, "temp() changed our array element", :todo<feature>;
+  }
+  is @array[1], 1, "temp() restored our array element";
+}
+
+{
+  my %hash = (:a(1), :b(2), :c(3));
+  {
+    eval 'temp %hash<b> = 42';
+    is %hash<b>, 42, "temp() changed our hash element", :todo<feature>;
+  }
+  is %hash<b>, 2, "temp() restored our array element";
+}
+
+{
+  my $struct = [
+    "doesnt_matter",
+    {
+      doesnt_matter => "doesnt_matter",
+      key           => [
+        "doesnt_matter",
+        42,
+      ],
+    },
+  ];
+
+  {
+    eval 'temp $struct[1]<key>[1] = 23';
+    is $struct[1]<key>[1], 23, "temp() changed our nested arrayref/hashref element", :todo<feature>;
+  }
+  is $struct[1]<key>[1], 1, "temp() restored our nested arrayref/hashref element", :todo<feature>;
 }
 
 # Block TEMP{}
@@ -36,7 +104,7 @@ plan 20;
   # We stub &advance so we don't need to eval() the whole test.
   sub advance() {}
 
-  # Here is the real implementation of $advance.
+  # Here is the real implementation of &advance.
   eval 'sub advance() {
     my $curr = $next++;
     TEMP {{ $next = $curr }}  # TEMP block returns the closure { $next = $curr }
@@ -44,7 +112,7 @@ plan 20;
   }';
 
   # and later...
-									  
+
   is advance(), 0, "TEMP{} block (1)", :todo<feature>;
   is advance(), 1, "TEMP{} block (2)", :todo<feature>;
   is advance(), 2, "TEMP{} block (3)", :todo<feature>;
@@ -80,8 +148,8 @@ plan 20;
   eval '
     class WierdTemp is Int {
       method TEMP {
-	$was_in_own_temp_handler++;
-	return { $was_in_own_temp_handler++ };
+        $was_in_own_temp_handler++;
+        return { $was_in_own_temp_handler++ };
       }
   ';
 

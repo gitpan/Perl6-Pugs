@@ -17,8 +17,8 @@ my $foo=1;
 sub mods_param ($x) { $x++; }
 dies_ok  { mods_param($foo) }, 'can\'t modify parameter, constant by default';
 
-# is constant
-sub mods_param_constant ($x is constant) { $x++; }
+# is readonly
+sub mods_param_constant ($x is readonly) { $x++; }
 dies_ok  { mods_param_constant($foo) }, 'can\'t modify constant parameter, constant by default';
 
 sub mods_param_rw ($x is rw) { $x++; }
@@ -45,6 +45,6 @@ is($foo, 2, 'is ref works', :todo);
 # is context
 # Doesn't even compile, which is lucky, because I don't understand it well
 # enough to write an actual test...
-eval_ok('sub my_format (*@data is context(Scalar)) { }; 1', "is context - compile check");
+eval_ok('sub my_format (*@data is context(Item)) { }; 1', "is context - compile check");
 
 # To do - check that is context actually works

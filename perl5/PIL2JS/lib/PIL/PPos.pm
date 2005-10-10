@@ -8,21 +8,32 @@
   use strict;
 
   sub fixup {
-    die unless @{ $_[0] } == 3;
-    die unless $_[0]->[0]->isa("PIL::MkPos");
-    die unless $_[0]->[1]->isa("PIL::Noop"); # minor hack
+    die unless keys %{ $_[0] } == 3;
+    die unless $_[0]->{pPos}->isa("PIL::MkPos");
+    die if     $_[0]->{pExp};
 
-    return bless [
-      $_[0]->[0]->fixup,
-      $_[0]->[1],
-      $_[0]->[2]->fixup,
-    ] => "PIL::PPos";
+    $_[0]->{pNode} = bless {} => "PIL::PNoop" if $_[0]->{pNode} eq "PNoop";
+
+    return bless {
+      pPos  => $_[0]->{pPos}->fixup,
+      pExp  => undef,
+      pNode => $_[0]->{pNode}->fixup,
+    } => "PIL::PPos";
   }
 
   sub as_js {
-    local $PIL::CUR_POS = $_[0]->[0];
-    return $_[0]->[2]->as_js;
+    my $self = shift;
+
+    local $PIL::CUR_POS = $self->{pPos};
+    ($self->{pNode}{CC} and die) or $self->{pNode}{CC} = $self->{CC} if $self->{CC};
+
+    no warnings "recursion";
+    return sprintf
+      "_24main_3a_3a_3fPOSITION.BINDTO(new PIL2JS.Box.Constant(%s));\n%s",
+      PIL::doublequote($self->{pPos}), $self->{pNode}->as_js;
   }
+
+  sub unwrap { $_[0]->{pNode}->unwrap }
 }
 
 {
@@ -34,13 +45,14 @@
   use overload '""' => \&as_string;
 
   sub fixup {
-    die unless @{ $_[0] } == 5;
+    die unless keys %{ $_[0] } == 5;
 
-    return bless [@{ $_[0] }] => "PIL::MkPos";
+    return bless {%{ $_[0] }} => "PIL::MkPos";
   }
 
   sub as_string {
-    my ($file, $line_start, $column_start, $line_end, $column_end) = @{ $_[0] };
+    my ($file, $line_start, $column_start, $line_end, $column_end) =
+      @{ $_[0] }{qw< posName posBeginLine posBeginColumn posEndLine posEndColumn>};
     return "$file line $line_start-$line_end, column $column_start-$column_end";
   }
 }

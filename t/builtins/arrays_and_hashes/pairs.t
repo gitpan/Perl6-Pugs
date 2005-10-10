@@ -1,9 +1,9 @@
 #!/usr/bin/pugs
 
 use v6;
-
 use Test;
-plan 24;
+
+plan 30;
 
 =head1 DESCRIPTION
 
@@ -66,10 +66,40 @@ Basic C<pairs> tests, see S29.
 {
   my $hash_of_2_pairs = {'a'=>'b','c'=>'d'};
   my $hash_of_1_pair = {'a'=>'b'};
-  is( $hash_of_2_pairs.pairs.sort.join( ',' ), 'a b,c d', "pairs() on 2-elem hash, 1-depth joined" );
-  is( $hash_of_1_pair.pairs.sort.join( ',' ), 'a b', "pairs() on 1-elem hash, 1-depth joined" );
+  is( $hash_of_2_pairs.pairs.sort.join( ',' ), "a\tb,c\td", "pairs() on 2-elem hash, 1-depth joined", :todo<feature> );
+  is( $hash_of_1_pair.pairs.sort.join( ',' ), "a\tb", "pairs() on 1-elem hash, 1-depth joined", :todo<feature> );
   is( $hash_of_2_pairs.pairs.sort.map:{ .key~'='~.value }.join( ',' ), 'a=b,c=d', 
-  	"pairs() on 2-elem hash, 2-depth joined" );
-  is( $hash_of_1_pair.pairs.sort.map:{ .key~'='~.value }.join( ',' ), 'a=b', 
-  	"pairs() on 1-elem hash, 2-depth joined" );
+    "pairs() on 2-elem hash, 2-depth joined" );
+  is( try { $hash_of_1_pair.pairs.sort.map:{ .key~'='~.value }.join( ',' ) }, 'a=b', 
+    "pairs() on 1-elem hash, 2-depth joined", :todo<bug> );
+}
+
+{
+    my %hash = (:a(1), :b(2), :c(3));
+
+    lives_ok { for %hash.pairs -> $pair {
+        $pair.value += 100;
+    } }, 'aliases returned by %hash.pairs should be rw (1)', :todo<bug>;
+
+    is %hash<b>, 102, 'aliases returned by %hash.pairs should be rw (2)', :todo<bug>;
+}
+
+{
+    my @array = (17, 23, 42);
+
+    lives_ok { for @array.pairs -> $pair {
+        $pair.value += 100;
+    } }, 'aliases returned by @array.pairs should be rw (1)', :todo<bug>;
+
+    is @array[1], 123, 'aliases returned by @array.pairs should be rw (2)', :todo<bug>;
+}
+
+{
+    my $pair = (a => 42);
+
+    lives_ok { for $pair.pairs -> $p {
+        $p.value += 100;
+    } }, 'aliases returned by $pair.value should be rw (1)', :todo<bug>;
+
+    is $pair.value, 142, 'aliases returned by $pair.kv should be rw (2)', :todo<bug>;
 }

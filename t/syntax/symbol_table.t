@@ -3,13 +3,21 @@
 use v6;
 use Test;
 
+plan 1;
+# See thread "Packages, Modules and Classes" on p6l
+# started by Stevan Little:
+# http://www.nntp.perl.org/group/perl.perl6.language/23019
+skip_rest "test needs to be rewritten because of recent design changes";
+
+=begin obsolete
+
 plan 28;
 
 =kwid
 
 Namespaces, symbol tables and symbolic references.
 
-=cut
+#=cut
 
 # fail("%:: parse", :todo);
 eval_ok('%::', '%:: parses', :todo);
@@ -61,21 +69,21 @@ ok(try {!defined(%MY::<nosuch>)},              "unknown lexical lookup");
 ok(try {!defined(%MY::<nosuch>)},              "unknown lexical lookup doesn't autovivify");
 
 {
-	# fail("package keyword", :todo);
-	ok eval('package Other1;'), "package keyword parses", :todo;
+    # fail("package keyword", :todo);
+    ok eval('package Other1;'), "package keyword parses", :todo;
 
-	ok eval('%:: eq $symhash'), "package declaration changes current package", :todo;
+    ok eval('%:: eq $symhash'), "package declaration changes current package", :todo;
 
-	our $new_global =         "It is I.";
+    our $new_global =         "It is I.";
 
-	my $lex = "carrot";       # hiding "bar".
-	is(try {$::("MY::$lex_s")},     "carrot",  "loopup of hiding lexical", :todo);
+    my $lex = "carrot";       # hiding "bar".
+    is(try {$::("MY::$lex_s")},     "carrot",  "loopup of hiding lexical", :todo);
 
-	ok(try {!defined(%::('$' ~ $global_s))}, "lookup of global in wrong package", :todo); # XXX: error? warning? silent?
-	my $a = try {$::($global_s)};
-	my $b = try {$::("*Main::$global_s")};
+    ok(try {!defined(%::('$' ~ $global_s))}, "lookup of global in wrong package", :todo); # XXX: error? warning? silent?
+    my $a = try {$::($global_s)};
+    my $b = try {$::("*Main::$global_s")};
 
-	ok(defined $a && defined $b && $a eq $b,   "package search", :todo);
+    ok(defined $a && defined $b && $a eq $b,   "package search", :todo);
 
 }
 

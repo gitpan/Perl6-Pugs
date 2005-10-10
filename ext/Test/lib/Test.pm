@@ -60,7 +60,7 @@ sub is_deeply(Any $wanted, Any $got, Str ?$desc, +$todo, +$depends) returns Bool
 
 sub isnt (Str $got, Str $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
     my $test := not($got eq $expected);
-    Test::proclaim($test, "Should not match: $desc", $todo, $got, $expected, $depends);
+    Test::proclaim($test, "Should not match: $desc", $todo, $got, $expected, $depends, :negate);
 }
 
 ## like
@@ -74,7 +74,7 @@ sub like (Str $got, Rule $expected, Str ?$desc, +$todo, +$depends) returns Bool 
 
 sub unlike (Str $got, Rule $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
     my $test := not($got ~~ $expected);
-    Test::proclaim($test, $desc, $todo, $got, $expected, $depends);
+    Test::proclaim($test, $desc, $todo, $got, $expected, $depends, :negate);
 }
 
 ## eval_ok
@@ -82,11 +82,11 @@ sub unlike (Str $got, Rule $expected, Str ?$desc, +$todo, +$depends) returns Boo
 sub eval_ok (Str $code, Str ?$desc, +$todo, +$depends) returns Bool is export {
     my $result := eval $code;
     if (defined $!) {
-	    Test::proclaim(undef, $desc, $todo, "eval was fatal: $!", :depends($depends));
+        Test::proclaim(undef, $desc, $todo, "eval was fatal: $!", :depends($depends));
     }
     else {
         #diag "'$desc' was non-fatal and maybe shouldn't use eval_ok()";
-	    &Test::ok.goto($result, $desc, :todo($todo), :depends($depends));
+        &Test::ok.goto($result, $desc, :todo($todo), :depends($depends));
     }
 }
 
@@ -95,11 +95,11 @@ sub eval_ok (Str $code, Str ?$desc, +$todo, +$depends) returns Bool is export {
 sub eval_is (Str $code, Str $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
     my $result := eval $code;
     if (defined $!) {
-	    Test::proclaim(undef, $desc, $todo, "eval was fatal: $!", $expected, $depends);
+        Test::proclaim(undef, $desc, $todo, "eval was fatal: $!", $expected, $depends);
     }
     else {
         #diag "'$desc' was non-fatal and maybe shouldn't use eval_is()";
-	    &Test::is.goto($result, $expected, $desc, :todo($todo), :depends($depends));
+        &Test::is.goto($result, $expected, $desc, :todo($todo), :depends($depends));
     }
 }
 
@@ -113,7 +113,7 @@ sub cmp_ok (Str $got, Code &compare_func, Str $expected, Str ?$desc, +$todo, +$d
 ## isa_ok
 
 sub isa_ok (Any|Junction|Pair $ref is rw, Str $expected_type, Str ?$desc, +$todo, +$depends) returns Bool is export {
-    my $out := defined($desc) ?? $desc :: "The object is-a '$expected_type'";
+    my $out := defined($desc) ?? $desc !! "The object is-a '$expected_type'";
     my $test := $ref.isa($expected_type);
     Test::proclaim($test, $out, $todo, $ref.ref, $expected_type, $depends);
 }
@@ -126,11 +126,11 @@ sub use_ok (Str $module, +$todo, +$depends) is export {
     eval "package $caller; require $module";
     
     #try {
-    #	&::($module)::import.goto();
+    #    &::($module)::import.goto();
     #};
     
     if ($!) {
-	    Test::proclaim(undef, "require $module;", $todo, "Import error when loading $module: $!", :depends($depends));
+        Test::proclaim(undef, "require $module;", $todo, "Import error when loading $module: $!", :depends($depends));
     }
     else {
         &Test::ok.goto(1, "$module imported OK", :todo($todo), :depends($depends));
@@ -142,10 +142,10 @@ sub use_ok (Str $module, +$todo, +$depends) is export {
 sub throws_ok (Code &code, Any $match, Str ?$desc, +$todo, +$depends) returns Bool is export {
     try { code() };
     if ($!) {
-        &Test::ok.goto($! ~~ $match, $desc, $todo, $depends);            
+        &Test::ok.goto($! ~~ $match, $desc, :todo($todo), :depends($depends));
     }
     else {
-	    Test::proclaim(undef, $desc, $todo, "No exception thrown", :depends($depends));
+        Test::proclaim(undef, $desc, $todo, "No exception thrown", :depends($depends));
     }
 }
 
@@ -154,10 +154,10 @@ sub throws_ok (Code &code, Any $match, Str ?$desc, +$todo, +$depends) returns Bo
 sub dies_ok (Code &code, Str ?$desc, +$todo, +$depends) returns Bool is export {
     try { code() };
     if ($!) {
-        &Test::ok.goto(1, $desc, $todo);
+        &Test::ok.goto(1, $desc, :todo($todo));
     }
     else {
-	    Test::proclaim(undef, $desc, $todo, "No exception thrown", :depends($depends));
+        Test::proclaim(undef, $desc, $todo, "No exception thrown", :depends($depends));
     }
 }
 
@@ -169,7 +169,7 @@ sub lives_ok (Code &code, Str ?$desc, +$todo, +$depends) returns Bool is export 
         Test::proclaim(undef, $desc, $todo, "An exception was thrown : $!", :depends($depends));
     }
     else {
-        &Test::ok.goto(1, $desc, $todo, :depends($depends));
+        &Test::ok.goto(1, $desc, :todo($todo), :depends($depends));
     }
 }
 
@@ -181,7 +181,12 @@ multi sub skip (Str ?$reason, +$depends) returns Bool is export {
 
 multi sub skip (Int $count, Str $reason, +$depends) returns Bool is export {
     for (1 .. $count) {
-        Test::skip $reason, :depends($depends);
+        # Hack -- PIL2JS doesn't support multisubs correctly yet
+        if $*OS eq "browser" {
+            Test::proclaim(1, "", "skip $reason", :depends($depends));
+        } else {
+            Test::skip $reason, :depends($depends);
+        }
     }
 }
 
@@ -199,13 +204,13 @@ sub fail (Str ?$desc, +$todo, +$depends) returns Bool is export {
 
 sub diag (Str $diag) is export {
     for (split("\n", $diag)) -> $line {
-	    say "# $line";
+        say "# $line";
     }
 }
 
 ## 'private' subs
 
-sub proclaim (Bool $cond, Str ?$desc is copy, ?$todo, Str ?$got, Str ?$expected, ?$depends) returns Bool {
+sub proclaim (Bool $cond, Str ?$desc is copy, ?$todo, Str ?$got, Str ?$expected, ?$depends, ?$negate) returns Bool {
     $Test::testing_started = 1;
     $Test::num_of_tests_run++;
 
@@ -215,54 +220,55 @@ sub proclaim (Bool $cond, Str ?$desc is copy, ?$todo, Str ?$got, Str ?$expected,
     # Check if we have to forcetodo this test 
     # because we're preparing for a release.
     $context = "TODO for release"
-	if $Test::num_of_tests_run == $Test::force_todo_test_junction;
+        if $Test::num_of_tests_run == $Test::force_todo_test_junction;
 
     if $todo {
         if (substr($todo, 0, 4) eq 'skip') {
             $context = $todo;        
         }
         else {
-            $context =  "TODO" ~ ($todo.isa('Str') ?? " $todo" :: '');
-	    if ( $cond ) {
-		$Test::num_of_tests_badpass ++;
-	    }
+            $context =  "TODO" ~ ($todo.isa('Str') ?? " $todo" !! '');
+            if ( $cond ) {
+                $Test::num_of_tests_badpass ++;
+            }
         }
     }
 
     if ( $depends ) {
-	$context ~= " (depends on $depends working)";
+        $context ~= " (depends on $depends working)";
     }
 
-    my $out = $desc.defined ?? " - $desc" :: "";
+    my $out = $desc.defined ?? " - $desc" !! "";
     $out = "$out <pos:$?CALLER::CALLER::POSITION>" if $Test::ALWAYS_CALLER;
 
-    my $context_out = $context.defined ?? " # $context" :: "";
+    my $context_out = $context.defined ?? " # $context" !! "";
 
     print "not " unless $cond;
     say "ok ", $Test::num_of_tests_run, $out, $context_out;
 
-    Test::report_failure($context, $got, $expected) unless $cond;
+    Test::report_failure($context, $got, $expected, $negate) unless $cond;
 
     return $cond;
 }
 
-sub report_failure (Str ?$todo, Str ?$got, Str ?$expected) returns Bool {
+sub report_failure (Str ?$todo, Str ?$got, Str ?$expected, Bool ?$negate) returns Bool {
     if ($todo) {
         Test::diag("  Failed ($todo) test ($?CALLER::CALLER::CALLER::POSITION)");
     }
     else {
-	    Test::diag("  Failed test ($?CALLER::CALLER::CALLER::POSITION)");
+        Test::diag("  Failed test ($?CALLER::CALLER::CALLER::POSITION)");
         $Test::num_of_tests_failed++;
     }
+    my $wanted = $negate ?? "Unwanted" !! "Expected";
 
     # As PIL2JS doesn't support junctions yet, skip the junction part when
     # running under PIL2JS.
     if ($*OS eq "browser" or $?CALLER::CALLER::SUBNAME eq ('&Test::is' | '&Test::isnt' | '&Test::cmp_ok' | '&Test::eval_is' | '&Test::isa_ok' | '&Test::is_deeply' | '&Test::todo_is' | '&Test::todo_isnt' | '&Test::todo_cmp_ok' | '&Test::todo_eval_is' | '&Test::todo_isa_ok')) {
-        Test::diag("  Expected: '" ~ ($expected.defined ?? $expected :: "undef") ~ "'");
-        Test::diag("       Got: '" ~ ($got.defined ?? $got :: "undef") ~ "'");
+        Test::diag("  $wanted: '" ~ ($expected.defined ?? $expected !! "undef") ~ "'");
+        Test::diag("    Actual: '" ~ ($got.defined ?? $got !! "undef") ~ "'");
     }
     else {
-        Test::diag("       Got: " ~ ($got.defined ?? $got :: "undef"));
+        Test::diag("    Actual: " ~ ($got.defined ?? $got !! "undef"));
     }
 }
 
@@ -273,7 +279,7 @@ sub test_ends {
         say("1..$Test::num_of_tests_run");
     }
     elsif ($Test::num_of_tests_planned != $Test::num_of_tests_run) {
-	    $*ERR.say("# Looks like you planned $Test::num_of_tests_planned tests, but ran $Test::num_of_tests_run");
+        $*ERR.say("# Looks like you planned $Test::num_of_tests_planned tests, but ran $Test::num_of_tests_run");
     }
 
     if ($Test::num_of_tests_failed) {
@@ -517,6 +523,8 @@ Nathan Gray <kolibrie@graystudios.org>
 Max Maischein <corion@cpan.org>
 
 Ingo Blechschmidt <iblech@web.de>
+
+Gaal Yahas <gaal@forum2.org>
 
 = COPYRIGHT
 

@@ -88,11 +88,11 @@ sub setup_perl6_install {
         INSTALLARCHLIB  => $libs->{archlib},
         INSTALLPRIVLIB  => $libs->{privlib},
         INSTALLSITEARCH => $libs->{sitearch},
-        SITEARCHEXP 	=> $libs->{sitearch},
+        SITEARCHEXP     => $libs->{sitearch},
         INSTALLSITELIB  => $libs->{sitelib},
-	SITELIBEXP	=> $libs->{sitelib},
-	PERLPREFIX	=> $libs->{prefix},
-	SITEPREFIX	=> $libs->{siteprefix},
+        SITELIBEXP      => $libs->{sitelib},
+        PERLPREFIX      => $libs->{prefix},
+        SITEPREFIX      => $libs->{siteprefix},
     );
 }
 
@@ -164,7 +164,7 @@ sub assert_ghc {
     }
     my $ghc_flags = "-H0 -L. -Lsrc -Lsrc/syck -Lsrc/pcre -I. -Isrc -Isrc/pcre -Isrc/syck ";
     $ghc_flags .= " -i. -isrc -isrc/pcre -isrc/syck -static ";
-    $ghc_flags .= " -Wall "
+    $ghc_flags .= " -Wall " #  -package-name Pugs -odir dist/build/src -hidir dist/build/src "
       unless $self->is_extension_build;
     $ghc_flags .= " -fno-warn-name-shadowing ";
     $ghc_flags .= " -I../../src -i../../src "
@@ -175,11 +175,18 @@ sub assert_ghc {
                         split (' ', `$^X -MExtUtils::Embed -e ccopts,ldopts`));
     }
     chomp $ghc_flags;
-    return ($ghc, $ghc_version, $ghc_flags);
+
+    return ($ghc, $ghc_version, $ghc_flags, $self->assert_ghc_pkg);
 }
 
 sub has_ghc_package {
     my ($self, $package) = @_;
+    my $ghc_pkg = $self->assert_ghc_pkg;
+    `$ghc_pkg describe $package` =~ /package-url/;
+}
+
+sub assert_ghc_pkg {
+    my $self = shift;
     my $ghc_pkg = $ENV{GHC_PKG};
 
     unless($ghc_pkg) {
@@ -189,8 +196,12 @@ sub has_ghc_package {
         $ghc_pkg = $self->can_run($ghc_pkg) || $self->can_run('ghc-pkg');
     }
 
-    `$ghc_pkg describe $package` =~ /package-url/;
+    die "*** Cannot find ghc-pkg; please set it in your GHC_PKG environment variable.\n"
+        unless $ghc_pkg;
+
+    return $ghc_pkg;
 }
+
 
 sub fixpaths {
     my $self = shift;

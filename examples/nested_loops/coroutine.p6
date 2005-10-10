@@ -12,15 +12,15 @@ sub NestedLoop (++@loop, +$only_when, +$code) {
     my &iter = NL2(loop => @loop);
 
     sub {
-        my @next = iter;
-        return @next unless defined @next[0];
+        my $next = iter;
+        return $next unless defined $next[0];
 
         if $only_when {
-            return &?SUB() unless $only_when(@next);
+            return &?SUB() unless $only_when($next);
         }
 
-        $code(@next) if $code;
-        return @next;
+        $code($next) if $code;
+        return $next;
     }
 }
 
@@ -37,7 +37,8 @@ sub NL2 (++@loop) {
                        yield [$first, @rest];
                     }
                 }
-                yield undef while 1;
+                #yield undef while 1;
+                yield while 1;
             }
         }
     }
@@ -47,7 +48,7 @@ sub NL2 (++@loop) {
 my ($cnt, $item);
 
 my &iter = NestedLoop(loop      => @loops,
-                      only_when => sub { ++$cnt % 2 },
-                      code      => sub {say "reversed: {reverse @^group}"});
+                      only_when => { ++$cnt % 2 },
+                      code      => { say "reversed: {reverse @^group}" });
 
 say "ITER {$cnt}: {$item.perl}" while $item = iter;

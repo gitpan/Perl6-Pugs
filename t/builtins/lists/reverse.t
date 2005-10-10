@@ -9,7 +9,7 @@ tests for "reverse"
 
 =cut
 
-plan 33;
+plan 36;
 
 my @a = reverse(1, 2, 3, 4);
 my @e = (4, 3, 2, 1);
@@ -19,18 +19,46 @@ is(@a, @e, "list was reversed");
 my $a = reverse("foo");
 is($a, "oof", "string was reversed");
 
-@a = scalar(reverse("foo"));
+@a = item(reverse("foo"));
 is(@a[0], "oof", 'the string was reversed');
 @a = list(reverse("foo"));
 is(@a[0], "foo", 'the list was reversed');
 
-@a = scalar(reverse("foo", "bar"));
+@a = item(reverse("foo", "bar"));
 is(@a[0], "rab oof", 'the stringified array was reversed (stringwise)');
 @a = list reverse "foo", "bar";
 is(+@a, 2, 'the reversed list has two elements');
 is(@a[0], "bar", 'the list was reversed properly');
 
 is(@a[1], "foo", 'the list was reversed properly');
+
+{
+	my @cxt_log;
+
+	class Foo {
+		has @.n;
+		method foo () {
+			push @cxt_log, want();
+			(1, 2, 3)
+		}
+		method bar () {
+			push @cxt_log, want();
+			return @.n = do {
+				push @cxt_log, want();
+				reverse $?SELF.foo;
+			}
+		}
+	}
+
+	my @n = do {
+		push @cxt_log, want();
+		Foo.new.bar;
+	};
+
+	is(~@cxt_log, ~("List (Any)" xx 4), "contexts were passed correctly around masak's bug", :todo<bug>);
+	is(+@n, 3, "list context reverse in masak's bug", :todo<bug>);
+	is(~@n, "3 2 1", "elements seem reversed");
+}
 
 {    
     my @a = "foo";

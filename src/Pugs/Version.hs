@@ -2,6 +2,12 @@
 
 {-|
     Version information.
+
+>   Tree and flower and leaf and grass,
+>   Let them pass! Let them pass!
+>   Hill and water under sky,
+>   Pass them by! Pass them by!
+
 -}
 
 #include "pugs_config.h"
@@ -23,7 +29,7 @@ name       = "Perl6 User's Golfing System"
 versnum :: String
 versnum    = PUGS_VERSION
 date :: String
-date	   = PUGS_DATE
+date       = PUGS_DATE
 version :: String
 version    = name ++ ", version " ++ versnum ++ ", " ++ date ++ revision
 copyright :: String

@@ -8,31 +8,32 @@ sub fixup {
   my $self = shift;
   local $_;
 
-  die unless @$self == 2;
-  die unless ref $self->[0] eq "ARRAY";
-  die unless @{ $self->[0] } == 1;
+  die unless keys %$self == 2;
+  die unless ref $self->{pLHS} eq "ARRAY";
+  die unless @{ $self->{pLHS} } == 1;
 
-  return bless [
-    [map { $_->fixup } @{ $self->[0] }],
-    $self->[1]->fixup,
-  ] => "PIL::PAssign";
+  return bless {
+    pLHS => $self->{pLHS}->[0]->fixup,
+    pRHS => $self->{pRHS}->fixup,
+  } => "PIL::PAssign";
 }
 
 sub as_js {
   my $self = shift;
+  no warnings "recursion";
 
-  # Hack? Fully qualified variables don't need a declaration, but JavaScript
-  # needs one.
-  if($self->[0]->[0]->isa("PIL::PVar")) {
-    my $varname = $self->[0]->[0]->[0];
-    if($varname =~ /::/) {
-      $PIL::UNDECLARED_VARS{$varname}++;
-    }
-  }
-
-  return sprintf "%s.STORE(%s)",
-    $self->[0]->[0]->as_js,
-    $self->[1]->as_js;
+  return PIL::possibly_ccify $self->{pLHS}, sub {
+    my $dest = shift;
+    return PIL::possibly_ccify $self->{pRHS}, sub {
+      my $src = shift;
+      sprintf "%s(%s.STORE(%s))",
+      $self->{CC}->as_js,
+      $dest,
+      $src;
+    };
+  };
 }
+
+sub unwrap { $_[0] }
 
 1;

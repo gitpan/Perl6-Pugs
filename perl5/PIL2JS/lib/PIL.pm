@@ -6,23 +6,31 @@ use strict;
 
 # State:
 use constant {
-  SUBTHUNK   => 1,
-  SUBPRIM    => 2,
-  SUBBLOCK   => 3,
-  SUBPOINTY  => 4,
-  SUBROUTINE => 5,
-  SUBMETHOD  => 6,
-  SUBMACRO   => 7,
+  SUBTHUNK     => 1,
+  SUBPRIM      => 2,
+  SUBBLOCK     => 3,
+  SUBPOINTY    => 4,
+  SUBROUTINE   => 5,
+  SUBMETHOD    => 6,
+  SUBMACRO     => 7,
+  SUBCOROUTINE => 8,
 };
 
 # Are we in a sublike thing? If yes, what sublevel does that thing have?
 our $IN_SUBLIKE = undef;
+our @IN_SUBLIKES;
 
 # What's the name of the sub we're currently in?
 our $CUR_SUBNAME;
 
 # Our current pos?
-our $CUR_POS  = bless [ "<unknown>", (0) x 4 ] => "PIL::MkPos";
+our $CUR_POS  = bless {
+  posName => "<unknown>",
+  posBeginLine   => 0,
+  posBeginColumn => 0,
+  posEndLine     => 0,
+  posEndColumn   => 0,
+} => "PIL::MkPos";
 
 # Are we in pilGlob?
 our $IN_GLOBPIL;
@@ -41,12 +49,50 @@ our @CUR_LEXSCOPES;
 # ID supply
 our $CUR_LEXSCOPE_ID;
 our $LEXSCOPE_PREFIX;
-# We've to backup some wars to make nested subcalls work (as we don't use JS'
+# We've to backup some vars to make nested subcalls work (as we don't use JS'
 # "lexical" vars anymore).
 our @VARS_TO_BACKUP;
+our $CORO_ID;
+# XXX PIL1 hack
+our @PIL1_HACK_CLASSDECLS;
 
 # Guard against reentrancy.
 our $PROCESSING_HAS_STARTED;
+
+my $possibly_ccify_argid = 0;
+sub possibly_ccify {
+  my ($thing, $sub) = @_;
+  my $unwrapped = $thing->unwrap;
+  no warnings "recursion";
+
+  if(
+    not $thing->isa("PIL::PPos") and (
+      $unwrapped->isa("PIL::PLit")   or
+      $unwrapped->isa("PIL::PVar")   or
+      $unwrapped->isa("PIL::PCode")  or
+      $unwrapped->isa("PIL::PThunk") or
+      0
+    )
+  ) {
+    if(ref $sub eq "CODE") {
+      return $sub->($thing->as_js);
+    } else {
+      return sprintf "%s(%s)", $sub->as_js, $thing->as_js;
+    }
+  } else {
+    die "Internal error: \$unwrapped->{CC} already defined!"
+      if $unwrapped->{CC};
+    if(ref $sub eq "CODE") {
+      my $argname = "ret" . $possibly_ccify_argid++;
+      $unwrapped->{CC} = PIL::Cont->new(argname => $argname, body => sub {
+        $sub->($argname);
+      });
+    } else {
+      $unwrapped->{CC} = $sub;
+    }
+    return $thing->as_js;
+  }
+}
 
 sub lookup_var {
   my $name = shift;
@@ -64,28 +110,67 @@ sub lookup_var {
 
 sub fail { die "*** $_[0]\n    at $CUR_POS\n" }
 
-sub generic_catch {
-  my ($level, $body, @vars_to_restore) = @_;
-
-  $body = add_indent(1, $body);
+sub generic_cc {
+  my ($name, $lvalue, @vars_to_restore) = @_;
 
   my $restores = join "; ", map {
     sprintf "%s = backup_%s", name_mangle($_), name_mangle($_);
   } @vars_to_restore;
 
-  return sprintf <<EOF, $body, @vars_to_restore ? $restores : ""; }
-try {
-%s
-} catch(err) {
-  PIL2JS.call_chain.pop();
-  %s;
-  if(err instanceof PIL2JS.ControlException.ret && $level >= err.level) {
-    return err.return_value;
-  } else {
-    throw err;
+  return sprintf <<EOF, $name, $restores, $lvalue ? "" : "new PIL2JS.Box.ReadOnly(", $lvalue ? "" : ")" }
+var __returncc = args.pop();
+var block_leave_hooks = [];
+var %s = function (retval) {
+  for(var i = 0; i < block_leave_hooks.length; i++) {
+    block_leave_hooks[i](retval);
   }
-}
+
+  PIL2JS_callchain.pop(); PIL2JS_subpads.pop();
+  %s;
+  throw function () { __returncc(%sretval%s) };
+};
 EOF
+
+sub coro_cc {
+  my ($coro_id, $lvalue, @vars_to_restore) = @_;
+
+  my $restores = join "; ", map {
+    sprintf "%s = backup_%s", name_mangle($_), name_mangle($_);
+  } @vars_to_restore;
+
+  my @lvalue_fix = $lvalue
+    ? ("", "")
+    : ("new PIL2JS.Box.ReadOnly(", ")");
+
+  return <<EOF;
+var __returncc = args.pop();
+var subreturncc = function (retval) {
+  PIL2JS_callchain.pop(); PIL2JS_subpads.pop();
+  PIL2JS.coro_entrypoints[$coro_id] = undefined;
+  $restores;
+  throw function () { __returncc($lvalue_fix[0]retval$lvalue_fix[1]) };
+};
+var coroyieldcc = function (retval, cc) {
+  PIL2JS.coro_entrypoints[$coro_id] = function (new_returncc) {
+    __returncc = new_returncc;
+    cc(new PIL2JS.Box.Constant(undefined));
+  };
+  PIL2JS_callchain.pop(); PIL2JS_subpads.pop();
+  $restores;
+  throw function () { __returncc($lvalue_fix[0]retval$lvalue_fix[1]) };
+};
+EOF
+}
+
+sub cur_retcc {
+  die "Internal error: There doesn't exist a return continuation outside a sub!"
+    unless $PIL::IN_SUBLIKE;
+
+  return "subreturncc"   if $PIL::IN_SUBLIKE >= PIL::SUBROUTINE;
+  return "blockreturncc" if $PIL::IN_SUBLIKE >= PIL::SUBBLOCK;
+  return "smallreturncc" if $PIL::IN_SUBLIKE >= PIL::SUBTHUNK;
+  die;
+}
 
 sub fixup {
   local $_;
@@ -106,45 +191,67 @@ sub as_js {
     if $PROCESSING_HAS_STARTED;
   local $PROCESSING_HAS_STARTED = 1;
   local $CUR_LEXSCOPE_ID        = 1;
+  local $CORO_ID                = 1;
   local $LEXSCOPE_PREFIX        = "";
+  local %UNDECLARED_VARS        = ();
+  local @ALL_LEXICALS           = ();
+  local @PIL1_HACK_CLASSDECLS   = ();
   # I'll fill a unique id of the file we're processing in, to fix var stomping:
   # A.pm: my $a = 3          # ==> my $a_1 = 3;
   # B.pm: use A; my $a = 4;  # ==> my $a_1 = 4; XXX!
 
+  #{
+  #  my %seen;
+  #  $self->{pilGlob} = [grep { not $seen{$_->{pSubName}}++ } @{ $self->{pilGlob} }];
+  #}
+
   my $fixed_tree = $self->fixup;
-  warn "# Number of lexical scopes: $CUR_LEXSCOPE_ID\n";
+  #warn "# Number of lexical scopes: $CUR_LEXSCOPE_ID\n";
 
   $IN_GLOBPIL++;
-  my @glob_js = map { $_->as_js } @{ $fixed_tree->{"pilGlob"} };
+  my @glob_js = map { $_->as_js || () } @{ $fixed_tree->{"pilGlob"} };
   $IN_GLOBPIL = 0;
   my $main_js = $fixed_tree->{pilMain}->as_js;
 
   my $decl_js =
     "// Declaration of vars:\n" .
     join("\n", map {
-      sprintf "var %s = %s;",
+      sprintf "if(!%s) var %s = %s;",
+        name_mangle($_),
         name_mangle($_),
         undef_of($_);
-    } keys %UNDECLARED_VARS, @ALL_LEXICALS, map { $_->[0] } @{ $fixed_tree->{"pilGlob"} }) .
+    } keys %UNDECLARED_VARS, @ALL_LEXICALS, map { $_->{pSubName} } @{ $fixed_tree->{"pilGlob"} }) .
     "\n// End declaration of vars.\n";
-  %UNDECLARED_VARS = ();
-  @ALL_LEXICALS    = ();
+  $decl_js .=
+    "// Declaration of classes (PIL1 hack):\n" .
+    join("\n", @PIL1_HACK_CLASSDECLS) .
+    "\n// End declaration of classes.\n";
 
   my $init_js =
     "// Initialization of global vars and exportation of subs:\n" .
     join("\n", map {
-      my $name = $_->[0];
-      $name =~ /^(?:__init_|__export_)/ && $name !~ /import$/
-        ? sprintf("%s.FETCH()([PIL2JS.Context.Void]);", PIL::name_mangle $name)
+      my $name = $_->{pSubName};
+      $name =~ /^(?:__init_|__export_|&PIL2JS::Internals::Hacks::init)/ && $name !~ /import$/
+        ? sprintf("PIL2JS.cps2normal(%s.FETCH(), [PIL2JS.Context.Void]);", PIL::name_mangle($name))
         : ();
     } @{ $fixed_tree->{"pilGlob" } })  .
     "\n// End of initialization of global vars and exportation of subs.\n";
 
-  return sprintf <<EOF, $decl_js, add_indent(1, join "\n", @glob_js, $init_js, $main_js);
+  return sprintf <<EOF, $decl_js, add_indent(3, join "\n", @glob_js, $init_js, $main_js);
 %s
 PIL2JS.catch_all_exceptions(function () {
+  PIL2JS.catch_end_exception(function() {
+    PIL2JS.runloop(function () {
+      var PIL2JS = AlsoPIL2JS_SpeedupHack;
+      var pad = {}; PIL2JS_subpads.push(pad);
+      pad['\$?POSITION'] = _24main_3a_3a_3fPOSITION;
+      pad['\$_']         = _24main_3a_3a_;
+
 %s
+    });
+  });
 });
+PIL2JS_subpads.pop();
 EOF
 }
 
@@ -153,15 +260,15 @@ EOF
   package PIL::TCxt;
   
   sub cxt  { $_[0] }
-  sub type { $_[0]->cxt->[0]->[0] }
+  sub type { $_[0]->cxt->[0] }
 
   sub fixup { $_[0] }
 
   sub as_js {
-    return sprintf "new PIL2JS.Box.Constant(new PIL2JS.Context({ main: %s, type: %s }))",
+    return sprintf "new PIL2JS.Context({ main: %s, type: %s })",
       PIL::doublequote($_[0]->main),
       defined $_[0]->type
-        ? PIL::doublequote($_[0]->type)
+        ? PIL::doublequote($_[0]->type->as_string)
         : "undefined";
   }
 }
@@ -175,18 +282,21 @@ EOF
   
   our @ISA = qw<PIL::TCxt>;
 
-  sub cxt  { $_[0]->[0]->cxt  }
+  sub cxt  { ($_[0]->[0] eq "TCxtVoid" ? bless [] => "PIL::TCxtVoid" : $_[0]->[0])->cxt }
   sub main { $_[0]->cxt->main }
 }
 
 # Possible subroutine types:
 { package PIL::SubType }
-{ package PIL::SubRoutine; our @ISA = qw<PIL::SubType>; sub as_constant { PIL::SUBROUTINE } }
-{ package PIL::SubPrim;    our @ISA = qw<PIL::SubType>; sub as_constant { PIL::SUBPRIM } }
-{ package PIL::SubBlock;   our @ISA = qw<PIL::SubType>; sub as_constant { PIL::SUBBLOCK } }
-{ package PIL::SubPointy;  our @ISA = qw<PIL::SubType>; sub as_constant { PIL::SUBPOINTY } }
-{ package PIL::SubMethod;  our @ISA = qw<PIL::SubType>; sub as_constant { PIL::SUBMETHOD } }
-{ package PIL::SubMacro;   our @ISA = qw<PIL::SubType>; sub as_constant { PIL::SUBMACRO } }
+{
+  foreach my $type (qw<
+    SubRoutine SubPrim SubBlock SubPointy SubMethod SubMacro SubCoroutine
+  >) {
+    no strict "refs";
+    *{"PIL::$type\::ISA"}         = [qw<PIL::SubType>];
+    *{"PIL::$type\::as_constant"} = *{"PIL::" . uc $type};
+  }
+}
 
 # Returns the undef/zero/default container for a given variable type.
 #   my $x;   # Really my $x = undef
@@ -210,8 +320,8 @@ sub undef_of($) {
 sub doublequote($) {
   my $str = shift;
 
-  $str =~ s/((?:[^\w0-9_,.=:; ()\[\]{}+\*\/~\-]|\n))/
-    ord $1 > 255
+  $str =~ s/((?:[^a-zA-Z0-9_,.=:; ()\[\]{}+\*\/~\-]|\n))/
+    ord $1 > 127
       ? sprintf "\\u%04x", ord $1
       : sprintf "\\x%02x", ord $1;
   /eg;
@@ -229,6 +339,11 @@ sub name_mangle($) {
   # ::JS::native_js_function
   } elsif($str =~ /^[\&\$\@\+\%\:]\*?JS::(.+)$/) {
     return $1;
+  } elsif($str =~ /^([\&\$\@\+\%\:])([?*=]?)(CALLER::)+(.+)$/) {
+    my $name  = "$1$2$4";
+    my $delta = () = $3 =~ /CALLER::/g;
+    return sprintf "PIL2JS.resolve_callervar($delta, %s)",
+      doublequote($name);
   # No qualification? Use "main" as package name. XXX! Lexical variables?
   } elsif($str !~ /::/) {
     $str = 
@@ -238,17 +353,22 @@ sub name_mangle($) {
   }
 
   # Finally, escape special chars.
-  $str =~ s/([^\w0-9])/sprintf "_%02x", ord $1/eg;
+  $str =~ s/([^a-zA-Z_0-9])/sprintf "_%02x", ord $1/eg;
   return $str;
 }
 
 # Add indentation to input text $text.
-sub add_indent {
+sub add_indent { 
   my ($i, $text) = @_;
   local $_;
 
+  return $text unless $ENV{PIL2JS_INDENT};
+
   my $INDENT = 2;
-  return join "\n", map { " " x ($i * $INDENT) . $_ } split "\n", $text;
+  my $spaces = " " x ($i * $INDENT);
+
+  $text =~ s/^/$spaces/gm;
+  return $text;
 }
 
 use PIL::PApp;
@@ -266,5 +386,10 @@ use PIL::PStmts;
 use PIL::PVal;
 use PIL::PVar;
 use PIL::Subs;
+use PIL::RawJS;
+use PIL::Cont;
+use PIL::Types;
+use PIL::P5Macro;
+use Prelude::JS;
 
 1;

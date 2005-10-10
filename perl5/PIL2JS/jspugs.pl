@@ -5,9 +5,14 @@ use strict;
 
 use FindBin;
 use File::Spec;
-use lib File::Spec->catfile($FindBin::Bin, "lib");
+use lib File::Spec->catdir($FindBin::Bin, "lib");
+use lib File::Spec->catdir($FindBin::Bin);
 use PIL2JS;
+use PIL::Parser;
 use Term::ReadLine;
+use Getopt::Long;
+use Encode;  # needed by pil2js.pl, better die now than later
+             # (user-friendlyness etc.)
 
 my $term = Term::ReadLine->new("jspugs");
 
@@ -23,19 +28,55 @@ EOF
 our %cfg;
 *cfg = \%PIL2JS::cfg;
 $cfg{output} = "output.html";
-$cfg{verbose}++;
-command_conf(pugs      => $cfg{pugs});
-command_conf(pil2js    => $cfg{pil2js});
-command_conf(preludepc => $cfg{preludepc});
-command_conf(prelude   => $cfg{prelude});
-command_conf(output    => $cfg{output});
+#$cfg{verbose}++;
+
+my (@runjs_args, @pugs_args);
+{
+  while(@ARGV) {
+    my $arg = shift @ARGV;
+
+    # Ignore -B JS and -BJS
+    if(uc $arg eq "-B") {
+      shift @ARGV;
+      next;
+    } elsif(uc $arg eq "-BJS") {
+      next;
+    } elsif($arg eq "--") {
+      push @pugs_args, splice @ARGV;
+    } elsif($arg =~ /^--/) {  # treat all --options as belonging to runjs
+      push @runjs_args, $arg;
+    } else {
+      push @pugs_args, $arg;
+    }
+  }
+
+  @ARGV = @runjs_args;
+}
+
+GetOptions(
+  "js=s"          => \$cfg{js},
+  "pugs=s"        => \$cfg{pugs},
+  "pil2js=s"      => \$cfg{pil2js},
+  "p6preludepc=s" => \$cfg{preludepc},
+  "p6prelude=s"   => \$cfg{prelude},
+  "testpc=s"      => \$cfg{testpc},
+  "output=s"      => \$cfg{output},
+  "metamodel-base=s" => \$cfg{metamodel_base},
+) or warn "Unknown options ignored.\n";
+
+command_conf(pugs           => $cfg{pugs});
+command_conf(metamodel_base => $cfg{metamodel_base});
+command_conf(pil2js         => $cfg{pil2js});
+command_conf(preludepc      => $cfg{preludepc});
+command_conf(prelude        => $cfg{prelude});
+command_conf(output         => $cfg{output});
 
 while(defined($_ = $term->readline($prompt))) {
   next unless /\S/;
   $term->addhistory($_);
   s/\s*$//;
 
-  if(my ($cmd, $arg) = /^:([hq]|pil(?:\.yaml)?|conf|precomp|js|l)\s*(.*)$/) {
+  if(my ($cmd, $arg) = /^:([hq]|pil(?:\.yaml)?|conf|precomp|js|[ecl])\s*(.*)$/) {
     no strict "refs";
     $cmd =~ s/\./_/g;
     &{"command_$cmd"}($arg);
@@ -51,11 +92,13 @@ Commands available from the prompt:
 :h                      = show this help message
 :q                      = quit
 :conf thing [new_value] = set the path to thing
-                          (pugs|pil2js|preludepc|lib6|output)
+                          (pugs|pil2js|preludepc|metamodel_base|output)
 :precomp                = precompile the Prelude
 :pil <exp>              = show PIL of expression
 :pil.yaml <exp>         = show PIL of expression dumped as YAML
 <exp>                   = compile expression and save as HTML
+:c <exp>                = ditto
+:e <exp>                = compile expression and run it
 :js <exp>               = compile expression and show it
 :l filename.p6          = compile file and save as HTML
 USAGE
@@ -68,20 +111,21 @@ sub command_conf {
     pil2js    => "pil2js",
     preludepc => "the precompiled Prelude",
     prelude   => "the Prelude sourcecode",
+    metamodel_base => "Perl6.MetaModel",
     output    => "the JavaScript output",
   );
 
-  unless($what and $what =~ /^(?:pugs|pil2js|prelude(?:pc)?|output)$/) {
-    print $OUT "Usage: :conf pugs|pil2js|prelude|preludepc|lib6|output [new_value]\n";
+  unless($what and $what =~ /^(?:pugs|pil2js|prelude(?:pc)?|metamodel_base|output)$/) {
+    print $OUT "Usage: :conf pugs|pil2js|prelude|preludepc|metamodel_base|output [new_value]\n";
     return;
   }
 
   $cfg{$what} = $new if $new;
 
-  my $descr =  "$human{$what}:" . " " x (30 - length $human{$what});
+  my $descr =  "$human{$what}:" . " " x (25 - length $human{$what});
   my $path  =  $cfg{$what};
   $path     =~ s/^@{[ PIL2JS::pwd() ]}.//;
-  $path    .=  " " x (20 - length $path);
+  $path    .=  " " x (25 - length $path);
   print $OUT
     "* Path to $descr $path [" .
     (-d $cfg{$what} || (-f $cfg{$what} && -s $cfg{$what}) ? "OK" : "NOT FOUND") .
@@ -114,6 +158,7 @@ sub command_pil_yaml {
 }
 
 sub command_compile { compile("-e", $_[0]) }
+sub command_c       { command_compile(@_)  }
 sub command_l       { compile($_[0]) }
 
 sub compile {
@@ -131,4 +176,10 @@ sub command_js {
   my $pil = eval { compile_perl6_to_mini_js "-e", $_[0] };
   print $OUT $@ and return if $@;
   print $OUT "$pil\n";
+}
+
+sub command_e {
+  my $js = eval { jsbin_hack(compile_perl6_to_standalone_js("-e", shift)) };
+  print $OUT $@ and return if $@;
+  run_js($js) if $js;
 }

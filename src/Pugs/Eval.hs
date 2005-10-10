@@ -23,6 +23,7 @@ module Pugs.Eval (
     evaluate,
     emptyEnv, evaluateMain,
     enterLValue, enterRValue,
+    runWarn
 ) where
 import Pugs.Internals
 import Prelude hiding ( exp )
@@ -33,12 +34,13 @@ import Pugs.Junc
 import Pugs.Bind
 import Pugs.Prim
 import Pugs.Prim.List (op0Zip)
-import Pugs.Context
 import Pugs.Monads
 import Pugs.Pretty
 import Pugs.Types
 import Pugs.External
 import Pugs.Eval.Var
+
+import RRegex.PCRE as PCRE
 
 {-|
 Construct a new, \'empty\' 'Env' (evaluation environment).
@@ -57,6 +59,7 @@ emptyEnv name genPad = liftSTM $ do
     ref  <- newTVar Map.empty
     syms <- initSyms
     glob <- newTVar (combine (pad ++ syms) $ mkPad [])
+    init <- newTVar $ MkInitDat { initPragmas=[] }
     return $ MkEnv
         { envContext = CxtVoid
         , envLexical = mkPad []
@@ -73,9 +76,23 @@ emptyEnv name genPad = liftSTM $ do
         , envBody    = Val undef
         , envDebug   = Just ref -- Set to "Nothing" to disable debugging
         , envPos     = MkPos name 1 1 1 1
+        , envPragmas = []
+        , envInitDat = init
         }
 
 -- Evaluation ---------------------------------------------------------------
+
+{-|
+Emits a runtime warning.
+-}
+-- XXX: This should cache so that you don't warn in the same place twice
+--   (even though Perl 5 doesn't do this).
+--   It should also respond to lexical warnings pragmata.
+runWarn :: String -> Eval ()
+runWarn msg = do 
+    enterEvalContext CxtVoid $
+        App (Var "&warn") Nothing [Val (VStr msg)]
+    return ()
 
 debug :: Pretty a => String -> (String -> String) -> String -> a -> Eval ()
 debug key fun str a = do
@@ -174,10 +191,9 @@ evalRef :: VRef -> Eval Val
 evalRef ref = do
     if refType ref == (mkType "Thunk") then forceRef ref else do
     val <- callCC $ \esc -> do
-        cxt <- asks envContext
-        lv  <- asks envLValue
+        MkEnv{ envContext = cxt, envLValue = lv, envClasses = cls } <- ask
         let typ = typeOfCxt cxt
-            isCollectionRef = (refType ref /= mkType "Scalar")
+            isCollectionRef = isaType cls "List" (refType ref)
         -- If RValue, read from the reference
         unless lv $ do
             when (isCollectionRef && isItemCxt cxt) $ do
@@ -212,6 +228,8 @@ reduce (Val v) = reduceVal v
 reduce (Var name) = reduceVar name
 
 reduce (Stmts this rest) = reduceStmts this rest
+
+reduce (Prag prag exp) = reducePrag prag exp
 
 reduce (Pos pos exp) = reducePos pos exp
 
@@ -268,6 +286,11 @@ reduceStmts this rest = do
             return . VControl $ ControlEnv env
         _ -> reduce rest
 
+reducePrag :: [Pragma] -> Exp -> Eval Val
+reducePrag prag exp = do
+    local (\e -> e{ envPragmas = prag }) $ do
+        evalExp exp
+
 {-|
 Reduce a 'Pos' expression by reducing its subexpression in a new 'Env', which
 holds the 'Pos'\'s position.
@@ -292,6 +315,19 @@ reducePad SMy lex exp = do
     local (\e -> e{ envLexical = lex' `unionPads` envLexical e }) $ do
         evalExp exp
 
+reducePad STemp lex exp = do
+    tmps <- mapM (\(sym, _) -> evalExp $ App (Var "&TEMP") (Just $ Var sym) []) $ padToList lex
+    -- default to nonlocal exit
+    isNonLocal  <- liftSTM $ newTVar True
+    val <- resetT $ do
+        val' <- evalExp exp
+        -- exp evaluated without error; no need to shift out
+        liftSTM $ writeTVar isNonLocal False
+        return val'
+    mapM_ (\tmp -> evalExp $ App (Val tmp) Nothing []) tmps
+    isn <- liftSTM $ readTVar isNonLocal
+    (if isn then (shiftT . const) else id) (return val)
+
 reducePad _ lex exp = do
     local (\e -> e{ envLexical = lex `unionPads` envLexical e }) $ do
         evalExp exp
@@ -302,17 +338,19 @@ reduceSym _ "" exp = evalExp exp
 
 reduceSym scope name exp | scope <= SMy = do
     ref <- newObject (typeOfSigil $ head name)
-    sym <- case name of
-        ('&':_) -> genMultiSym name ref
-        _       -> genSym name ref
+    let (gen, name') = case name of
+            ('&':n@('&':_)) -> (genMultiSym, n)
+            _               -> (genSym, name)
+    sym <- gen name' ref
     enterLex [ sym ] $ evalExp exp
 
 reduceSym _ name exp = do
     ref     <- newObject (typeOfSigil $ head name)
-    name'   <- toQualified name
-    sym <- case name' of
-        ('&':_) -> genMultiSym name' ref
-        _       -> genSym name' ref
+    let (gen, name') = case name of
+            ('&':n@('&':_)) -> (genMultiSym, n)
+            _               -> (genSym, name)
+    qn      <- toQualified name'
+    sym     <- gen qn ref
     addGlobalSym sym
     evalExp exp
 
@@ -431,7 +469,7 @@ reduceSyn "when" [match, body] = do
     vbreak <- fromVal break
     result <- reduce $ case unwrap match of
         App _ (Just (Var "$_")) _ -> match
-        _ -> App (Var "&infix:~~") Nothing [(Var "$_"), match]
+        _ -> App (Var "&*infix:~~") Nothing [(Var "$_"), match]
     rb     <- fromVal result
     if rb
         then enterWhen (subBody vbreak) $ apply vbreak Nothing [body]
@@ -536,7 +574,7 @@ reduceSyn "val" [exp] = do
     enterRValue $ evalExp exp
 
 reduceSyn "\\{}" [exp] = do
-    v   <- enterRValue $ enterEvalContext cxtItemAny exp
+    v   <- enterRValue $ enterEvalContext cxtSlurpyAny exp
     hv  <- newObject (MkType "Hash")
     writeRef hv v
     retVal $ VRef hv
@@ -632,13 +670,12 @@ reduceSyn "rx" [exp, adverbs] = do
     flag_w  <- fromAdverb hv ["w", "words"]
     flag_s  <- fromAdverb hv ["stringify"] -- XXX hack
     adverbHash <- reduce adverbs
-    let rx | p5 = MkRulePCRE p5re g flag_s adverbHash
+    -- XXX - this fix for :global PCRE rules awaits someone with
+    --  the Haskell'Fu to write the ns line below.
+    -- let rx | p5 = MkRulePCRE p5re g ns flag_s str adverbHash
+    let rx | p5 = MkRulePCRE p5re g 1 flag_s str adverbHash
            | otherwise = MkRulePGE p6re g flag_s adverbHash
         g = ('g' `elem` p5flags || flag_g)
-        p6re = if not flag_w then str
-               else case str of
-                      ':':_ -> ":w"   ++ str
-                      _     -> ":w::" ++ str
         p5re = mkRegexWithPCRE (encodeUTF8 str) $
                     [ pcreUtf8
                     , ('i' `elem` p5flags || flag_i) `implies` pcreCaseless
@@ -646,6 +683,11 @@ reduceSyn "rx" [exp, adverbs] = do
                     , ('s' `elem` p5flags) `implies` pcreDotall
                     , ('x' `elem` p5flags) `implies` pcreExtended
                     ]
+        p6re = if not flag_w then str
+               else case str of
+                      ':':_ -> ":w"   ++ str
+                      _     -> ":w::" ++ str
+        -- ns <- liftIO $ PCRE.numSubs p5re
     retVal $ VRule rx
     where
     implies True  = id
@@ -666,9 +708,9 @@ reduceSyn "subst" [exp, subst, adverbs] = do
 reduceSyn "is" _ = do
     retEmpty
 
-reduceSyn "package" [exp] = reduceSyn "namespace" [exp, emptyExp]
+reduceSyn "package" [kind, exp] = reduceSyn "namespace" [kind, exp, emptyExp]
 
-reduceSyn "namespace" [exp, body] = do
+reduceSyn "namespace" [_kind, exp, body] = do
     val <- evalExp exp
     str <- fromVal val
     when (str `elem` words "MY OUR OUTER CALLER") $ do
@@ -703,7 +745,9 @@ reduceSyn name exps =
 
 reduceApp :: Exp -> (Maybe Exp) -> [Exp] -> Eval Val
 -- XXX absolutely evil bloody hack for context hinters
-reduceApp (Var "&hash") invs args =
+reduceApp (Var "&hash") invs args = do
+    when (length (maybeToList invs ++ args) `mod` 2 == 1) $ 
+        runWarn "Odd number of elements in hash constructor"
     enterEvalContext cxtItemAny $ Syn "\\{}" [Syn "," $ maybeToList invs ++ args]
 
 reduceApp (Var "&list") invs args =
@@ -712,13 +756,13 @@ reduceApp (Var "&list") invs args =
         [exp] -> exp
         exps  -> Syn "," exps
 
-reduceApp (Var "&scalar") invs args
+reduceApp (Var "&item") invs args
     | [exp] <- maybeToList invs ++ args = enterEvalContext cxtItemAny exp
     | otherwise = enterEvalContext cxtItemAny $ Syn "," (maybeToList invs ++ args)
 
 -- XXX absolutely evil bloody hack for "zip"
-reduceApp (Var "&zip") invs args = do
-    vals <- mapM (enterRValue . enterEvalContext (cxtItem "Array")) (maybeToList invs ++ args)
+reduceApp (Var "&zip") Nothing args = do
+    vals <- mapM (enterRValue . enterEvalContext (cxtItem "Array")) args
     val  <- op0Zip vals
     retVal val
 
@@ -839,10 +883,10 @@ cxtOfExp (Val (VRef ref))       = do
     return $ if isaType cls "List" typ
         then cxtSlurpyAny
         else CxtItem typ
-cxtOfExp (Val _)                = return cxtItemAny
-cxtOfExp (Var (sigil:_))            = return $ cxtOfSigil sigil
-cxtOfExp (App (Var "&list") _ _)   = return cxtSlurpyAny
-cxtOfExp (App (Var "&scalar") _ _) = return cxtSlurpyAny
+cxtOfExp (Val _)                 = return cxtItemAny
+cxtOfExp (Var (sigil:_))         = return $ cxtOfSigil sigil
+cxtOfExp (App (Var "&list") _ _) = return cxtSlurpyAny
+cxtOfExp (App (Var "&item") _ _) = return cxtSlurpyAny
 cxtOfExp (App (Var name) invs args)   = do
     -- inspect the return type of the function here
     env <- ask
@@ -947,8 +991,10 @@ doApply :: Env         -- ^ Environment to evaluate in
         -> Eval Val
 doApply env sub@MkCode{ subCont = cont, subBody = fun, subType = typ } invs args = do
     -- check invs and args for Pair types; if they are, reduce them fully
-    -- to stringified normal form.
-    (invs', args') <- expandPairs sub invs args
+    -- to stringified normal form.  However, real primitives are exempt.
+    (invs', args') <- case fun of
+        Prim _ | typ == SubPrim -> return (invs, args)
+        _ -> expandPairs sub invs args
     case bindParams sub invs' args' of
         Left errMsg -> fail errMsg
         Right sub   -> do

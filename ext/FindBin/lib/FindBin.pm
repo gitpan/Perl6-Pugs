@@ -22,7 +22,7 @@ sub init {
     $RealDir := $RealBin;
     if ( $*PROGRAM_NAME eq '-e' || $*PROGRAM_NAME eq '-' ) {
         $Script = $RealScript = $*PROGRAM_NAME;
-        $Bin    = $RealBin    = File::Spec::cwd();
+        $Bin    = $RealBin    = File::Spec.cwd;
     }
     else {
         my Str $script = $*PROGRAM_NAME;
@@ -30,10 +30,12 @@ sub init {
         # XXX: Insert VMS support here
 
         my Int $dosish = ( $?OS eq 'MSWin32' or $?OS eq 'os2' );
+        &readlink := { undef } if $dosish;
+
         unless ( ( $script ~~ m:P5#/# || ( $dosish && $script ~~ m:P5#\\# ) )
                  && -f $script )
         {
-            for File::Spec::path() -> $dir {
+            for File::Spec.path() -> $dir {
                 my Str $scr = catfile( $dir, $script );
                 if -r $scr && ( !$dosish || -x _ ) {
                     $script = $scr;
@@ -45,20 +47,20 @@ sub init {
             }
         }
         warn "Cannot find current script '$*PROGRAM_NAME'" unless -f $script;
-        $script = catfile( File::Spec::cwd(), $script )
+        $script = catfile( File::Spec.cwd(), $script )
           unless file_name_is_absolute($script);
         my @path = splitpath($script);
         $Script = pop @path;
         $Bin = catdir(@path);
         loop {
-            my $linktext = readlink($script);
+            my $linktext = try { readlink($script) };
             my @path = splitpath($script);
             $RealScript = pop @path;
             $RealBin = catdir(@path);
             last unless defined $linktext;
             $script = file_name_is_absolute($linktext)
               ?? $linktext
-              :: catfile( $RealBin, $linktext );
+              !! catfile( $RealBin, $linktext );
         }
         $Bin     = rel2abs($Bin)     if $Bin;
         $RealBin = rel2abs($RealBin) if $RealBin;

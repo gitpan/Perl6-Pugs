@@ -23,7 +23,7 @@ message (@Left@).
 type MaybeError a = Either String a
 
 isRequired :: Param -> Bool
-isRequired prm = not ( isOptional prm || isNamed prm )
+isRequired prm = not $ isOptional prm
 
 {-|
 Match up named arguments with named parameters, producing a list of new
@@ -181,6 +181,10 @@ bindParams :: VCode       -- ^ A code object to perform bindings on
            -> [Exp]       -- ^ List of arguments (actual params) to bind
            -> MaybeError VCode -- ^ Returns either a new 'VCode' with all the
                                --     bindings in place, or an error message
+-- Special case: 'close $fh' should be bound as '$fh.close'
+bindParams sub Nothing [inv]
+    | (p:_) <- subParams sub, isInvocant p
+    = bindParams sub (Just inv) []
 bindParams sub invExp argsExp = do
     case bindSomeParams sub invExp argsExp of
         Left errMsg -> Left errMsg

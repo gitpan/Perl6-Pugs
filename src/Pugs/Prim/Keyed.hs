@@ -21,10 +21,8 @@ pairsFromVal (PerlSV sv) = do
     return $ VList (map castV keys)
     elems   <- mapM (hash_fetchElem sv) keys
     return $ map (VRef . MkRef . IPair) (keys `zip` elems)
-pairsFromVal v = do
-    ref  <- fromVal v
-    vals <- pairsFromRef ref
-    return vals
+pairsFromVal (VRef ref) = pairsFromRef ref
+pairsFromVal v = retError "Not a keyed reference" v
 
 keysFromVal :: Val -> Eval Val
 keysFromVal VUndef = return $ VList []

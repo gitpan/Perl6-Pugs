@@ -34,13 +34,11 @@ fixup_concurrency();
 $Test::Harness::Verbose  = 1;
 $Config{"output-file"} ||= "tests.yml";
 $Config{"recurse"} = 1 if not defined $Config{"recurse"};
+# Needed for smokeserv
+$Config{"pugs-path"} = $ENV{HARNESS_PERL};
 push @{$Config{"exclude"}}, 'Disabled' if not $Config{"exclude"} or not @{$Config{"exclude"}};
 if(!@ARGV) {
-  if($ENV{PUGS_RUNTIME} and $ENV{PUGS_RUNTIME} eq 'JS') {
-    @ARGV = < t/ >;
-  } else {
     @ARGV = glob "t/ ext/*/t/";
-  }
 }
 
 _build_ext_re();
@@ -55,10 +53,10 @@ exit 0;
 sub fixup_concurrency {
     $Config{"concurrent"} ||= $ENV{PUGS_TESTS_CONCURRENT} || 1;
     if ($^O =~ /MSWin32|msys/) { # On cygwin we are okay.
-		warn "Sorry, concurrency not supported on your platform\n";
-		$Config{"concurrent"} = 1;
-		return;
-	}
+        warn "Sorry, concurrency not supported on your platform\n";
+        $Config{"concurrent"} = 1;
+        return;
+    }
     require POSIX;
 }
 
@@ -73,9 +71,9 @@ sub all_in {
             next if $file eq File::Spec->updir || $file eq File::Spec->curdir;
             next if $file eq ".svn";
             next if $file eq "CVS";
-            next if $Config{exclude_re} && $file =~ $Config{exclude_re};
-
             my $currfile = File::Spec->catfile( $start, $file );
+            next if $Config{exclude_re} && $currfile =~ $Config{exclude_re};
+
             if ( -d $currfile ) {
                 push( @hits, all_in( $currfile ) ) if $Config{recurse};
             } else {
@@ -124,7 +122,7 @@ sub set_build_info {
 }
 
 sub _build_exclude_re {
-    my $excl = join "|", map { quotemeta }
+    my $excl = join "|", # map { quotemeta }
         map { split /,/ } @{ $Config{exclude} };
     $Config{exclude_re} = qr/($excl)/ if $excl;
 }
@@ -143,7 +141,7 @@ sub _init {
     $self->get_smoker;
     $self->get_revision;
     
-	$Config{shuffle}+=0;
+    $Config{shuffle}+=0;
     $self->{_config} = \%Config;
     $self->{_timing}{start} = time;
 
@@ -238,7 +236,7 @@ sub gather_results {
         push @{ $self->{meat}{test_files} }, @{$chunk->{test_files}};
         unlink $file or die "unlink: $!";
     }
-	warn "all chunks completed.\n";
+    warn "all chunks completed.\n";
 }
 
 sub run_test {

@@ -13,6 +13,7 @@ our $Conf;
 our %DEFAULTS = (
     optimization          => '-O',
     smoke_concurrent      => 1,
+    smoke_upload          => '',
     inline_prelude_source => 0,
     precompile_prelude    => 1,
     precompile_modules    => [],
@@ -35,22 +36,40 @@ sub pretty_print {
 
 sub read {
     my($class, $filename) = @_;
+    my $config_default    = 'config.yml';
+    my $config_template   = 'util/config-template.yml';
+    $filename           ||= $ENV{PUGS_BUILD_CONFIG} || $config_default;
     my $stream;
     
-    if (!-e ($filename ||= "config.yml")) {
+    if (!-e $filename) {
         require File::Copy;
-        File::Copy::copy ('util/config-template.yml', $filename) or
+        File::Copy::copy ($config_template, $filename) or
             die "copy: $!";
-        warn <<".";
-Default build config file created. Edit your settings in $filename.
+        print <<".";
+*** Default build config file created. Edit your settings in $filename.
+
 .
     }       
 
     open my $fh, $filename or die "open: $filename: $!";
     { local $/; $stream = <$fh> }
     my $conf = $YAML->load($stream);
-    $class->env_override($conf);
     
+    if (-M $filename > -M $config_template) {
+        print <<".";
+*** Build config file '$filename' is older than template
+    '$config_template'.  I will merge them in memory, but
+    you may wish to check for new settings and edit the old
+    config file by hand.
+
+.
+        open my $tpl, $config_template or die "open: $config_template: $!";
+        my $tpl_stream = do { local $/; <$tpl> };
+        my $tpl_config = $YAML->load($stream);
+        $conf = { %$tpl_config, %$conf };
+    }
+
+    $class->env_override($conf);
     $class->defaults($conf);
     return $conf;
 }
@@ -69,8 +88,8 @@ sub defaults {
 
 sub lookup {
     my($class, $what) = @_;
+    die "unknown option: $what" unless exists $Conf->{$what};
     my $value = $Conf->{$what};
-    die "unknown option: $what" unless defined $value;
     return $value;
 }
 

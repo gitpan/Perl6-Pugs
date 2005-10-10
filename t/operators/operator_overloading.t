@@ -25,9 +25,11 @@ is ± "fish", "AROUNDfish", 'prefix operator overloading for new operator (unico
 sub prefix:<(+-)> ($thing) { return "ABOUT$thing"; };
 is (+-) "fish", "ABOUTfish", 'prefix operator overloading for new operator (nasty)';
 
-sub prefix:<->($thing) { return "CROSS$thing"; };
-is(-"fish", "CROSSfish",
-   'prefix operator overloading for existing operator');
+{
+  my sub prefix:<->($thing) { return "CROSS$thing"; };
+  is(-"fish", "CROSSfish",
+     'prefix operator overloading for existing operator (but only lexically so we don\'t mess up runtime internals (needed at least for PIL2JS, probably for PIL-Run, too)');
+}
 
 sub infix:<×> ($a, $b) { $a * $b }
 is(5 × 3, 15, "infix Unicode operator");
@@ -65,8 +67,8 @@ sub prefix:<Σ> (@x) { [+] *@x }
 is(Σ [1..10], 55, "sum prefix operator");
 
 # check that the correct overloaded method is called
-sub postfix:<!> ($x) { [*] 1..$x }
-sub postfix:<!> (Str $x) { return($x.uc ~ "!!!") }
+multi postfix:<!> ($x) { [*] 1..$x }
+multi postfix:<!> (Str $x) { return($x.uc ~ "!!!") }
 
 is(10!, 3628800, "factorial postfix operator");
 is("boobies"!, "BOOBIES!!!", "correct overloaded method called");
@@ -117,9 +119,9 @@ is("boobies"!, "BOOBIES!!!", "correct overloaded method called");
       method prefix:<~> { "hi" }
       method prefix:<+> { 42   }
       method coerce:<as>($self, OtherClass $to) {
-	my $obj = $to.new;
-	$obj.x = 23;
-	return $obj;
+        my $obj = $to.new;
+        $obj.x = 23;
+        return $obj;
       }
     }
 

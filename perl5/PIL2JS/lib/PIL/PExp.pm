@@ -4,11 +4,22 @@ use warnings;
 use strict;
 
 sub fixup {
-  die unless @{ $_[0] } == 1;
+  my $self = shift;
+  die unless keys %$self == 1;
+  die unless $self->{pLV};
 
-  return bless [ $_[0]->[0]->fixup ] => "PIL::PExp";
+  return bless { pLV => $self->{pLV}->fixup } => "PIL::PExp";
 }
 
-sub as_js { $_[0]->[0]->as_js }
+sub as_js {
+  my $self = shift;
+
+  ($self->{pLV}{CC} and die) or $self->{pLV}{CC} = $self->{CC} if $self->{CC};
+
+  no warnings "recursion";
+  return $self->{pLV}->as_js;
+}
+
+sub unwrap { $_[0]->{pLV} }
 
 1;

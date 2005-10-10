@@ -1,5 +1,7 @@
 use v6;
 
+my $DEBUG = 0;
+
 multi *prompt (?$prompt) {
     print $prompt;
     my $input = =<>; 
@@ -24,7 +26,7 @@ multi *prompt ($prompt, @options is copy) {
     return $choice.param // $choice.key;
 }
 
-sub *cls { system(($?OS eq any<MSWin32 mingw>) ?? 'cls' :: 'clear'); }
+sub *cls { system(($?OS eq any<MSWin32 mingw>) ?? 'cls' !! 'clear'); }
 
 #random number between $low and $high, ($low..$high).pick but easier on memory
 sub *random ($low,$high) {int( rand($high - $low) + $low ) + 1; };
@@ -42,7 +44,7 @@ class wObject {
     has Str $.last_location is rw;
     has Int $.plural;
     method where () {
-        "$.name {$.plural ?? 'are' :: 'is'} currently in the $.location";
+        "$.name {$.plural ?? 'are' !! 'is'} currently in the $.location";
     };
 }
    
@@ -57,10 +59,10 @@ class Room is wObject {
    has Str     @.exits is rw;
    method are_monsters () { @.monsters // 0 }
    method monster ()      {
-      say '@.monsters : ', @.monsters.perl;
+      say '@.monsters : ', @.monsters.perl if $DEBUG;
       my $x = shift @.monsters;
-      say 'shifted    : ', $x.perl;
-      say '@.monsters : ', @.monsters.perl;
+      say 'shifted    : ', $x.perl if $DEBUG;
+      say '@.monsters : ', @.monsters.perl if $DEBUG;
       $x;
     }
 };
@@ -148,7 +150,7 @@ class Person is Mortal {
 class Monster is Mortal { }
 
 my $person = Person.new(:life(100),:max_life(100),
-	:weapons((Weapon.new(:name<sword>, :power(4), :powerRange(2)),
+    :weapons((Weapon.new(:name<sword>, :power(4), :powerRange(2)),
              Weapon.new(:name<spell>, :power(0), :powerRange(7)))),
 );
 
@@ -178,7 +180,7 @@ $person.name = capitalize(prompt("What is your name: "));
 say "Greetings, $person.name()!";
 say $person.where;
 until ($person.dead) {
-  %world.{$person.location}.perl.say;
+  %world.{$person.location}.perl.say if $DEBUG;
   if (%world.{$person.location}.are_monsters){ 
      my $monster = %world.{$person.location}.monster;
      unless ( $person.battle($monster) ) {

@@ -11,35 +11,22 @@ has bool   $.end_is_open;
 
     * open-set could be "start = object but true" and
       closed-set could be "start = object but false"
-    * compare
-        - tests
-    * complete POD
-
-    * mark as "internal" class
 
 =cut
 
-submethod BUILD ( $.start, $.end, ?$.start_is_open = bool::false, ?$.end_is_open = bool::false ) {}
+submethod BUILD (
+    $.start, 
+    $.end, 
+    ?$.start_is_open = bool::false, 
+    ?$.end_is_open   = bool::false, 
+) 
+{}
 
-method empty_span ($class: ) {
-    return $class.new( start => undef, end => undef );
-}
-
-method is_empty () { return ! defined( $.start ) }
-
-method size () returns Object {
-    return $.end - $.start;
-}
-
-method start_is_closed () returns bool {
-    return ! $.start_is_open;
-}
-
-method end_is_closed () returns bool {
-    return ! $.end_is_open;
-}
-
-method density () { return undef }
+method empty_span ($class: ) { $class.new( start => undef, end => undef ) }
+method is_empty        () returns bool   { ! defined( $.start ) }
+method size            () returns Object { $.end - $.start }
+method start_is_closed () returns bool   { ! $.start_is_open }
+method end_is_closed   () returns bool   { ! $.end_is_open }
 
 method intersects ( Span::Functional $span ) returns bool {
     my ($i_start, $i_end);
@@ -124,7 +111,7 @@ method union ($self: Span::Num $span )
     }
     elsif ($cmp == 0) {
         $i_start = $.start;
-        $open_start = $.start_is_open ?? $span.start_is_open :: 0;
+        $open_start = $.start_is_open ?? $span.start_is_open !! 0;
     }
     else {
         $i_start = $.start;
@@ -138,7 +125,7 @@ method union ($self: Span::Num $span )
     }
     elsif ($cmp == 0) {
         $i_end = $.end;
-        $open_end = $.end_is_open ?? $span.end_is_open :: 0;
+        $open_end = $.end_is_open ?? $span.end_is_open !! 0;
     }
     else {
         $i_end = $.end;
@@ -201,9 +188,9 @@ method stringify () returns String {
     my $tmp1 = "$.start";
     my $tmp2 = "$.end";
     return $tmp1 if $tmp1 eq $tmp2;
-    return ( $.start_is_open ?? '(' :: '[' ) ~
+    return ( $.start_is_open ?? '(' !! '[' ) ~
            $tmp1 ~ ',' ~ $tmp2 ~
-           ( $.end_is_open   ?? ')' :: ']' );
+           ( $.end_is_open   ?? ')' !! ']' );
 }
 
 method compare ( Span::Num $span ) returns int {
@@ -248,13 +235,14 @@ Span::Num - An object representing a single span, with a simple functional API.
 
   use Span::Num;
 
-  $span = new( start => $start, end => $end, start_is_open => bool::false, end_is_open => bool::false );
+  $span = Span::Num.new( start => $start, end => $end, start_is_open => bool::false, end_is_open => bool::false );
 
 = DESCRIPTION
 
 This class represents a single span.
 
-It is intended mostly for "internal" use by the Span class. For a more complete API, see `Span`.
+It is intended mostly for "internal" use by the Span class. 
+For a more complete API, see `Span`.
 
 The `start` value must be less than or equal to `end`. There is no checking.
 

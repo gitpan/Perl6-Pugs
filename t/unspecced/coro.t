@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 11;
+plan 12;
 
 # Standard function of fp
 sub take(Int $n, Code &f) { (1..$n).map:{ f() } }
@@ -21,13 +21,20 @@ sub take(Int $n, Code &f) { (1..$n).map:{ f() } }
   is ~take(5, &foo), "42 23 42 23 42", "named coroutines work";
 }
 
+# return() resets the entrypoint
+{
+  my $coro  = coro { yield 42; yield 23; return 13; yield 19 };
+  my @elems = take 7, $coro;
+  is ~@elems, "42 23 13 42 23 13 42", "return() resets the entrypoint", :todo<bug>;
+}
+
 # Coroutines stored in an array
 {
   my @array = take 5, {
     coro {
       my $num;
       while 1 {
-	yield ++$num;
+        yield ++$num;
       }
     };
   };
@@ -44,8 +51,8 @@ sub take(Int $n, Code &f) { (1..$n).map:{ f() } }
   my @array = take 5, {
     coro {
       while 1 {
-	state $num;
-	yield ++$num;
+        state $num;
+        yield ++$num;
       }
     };
   };
@@ -59,10 +66,10 @@ sub take(Int $n, Code &f) { (1..$n).map:{ f() } }
 try {
   my @array = take 5, {
     coro {
-	(sub {
+        (sub {
           while 1 {
-	    state $num;
-	    yield ++$num;
+            state $num;
+            yield ++$num;
           }
         })();
     };

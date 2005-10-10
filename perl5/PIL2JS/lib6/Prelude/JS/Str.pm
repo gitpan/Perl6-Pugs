@@ -1,43 +1,77 @@
-sub JS::Root::substr(Str $str, Int $a, Int ?$b = chars $str) is primitive {
-  JS::inline('function (str, a, b) {
-    return String(str).substr(Number(a), Number(b));
-  }')(~$str, +$a, +$b < 0 ?? +$b + chars $str :: +$b);
+method JS::Root::substr(Str $str is rw: Int $a, Int ?$b = chars $str) is rw {
+  JS::inline('new PIL2JS.Box.Constant(function (args) {
+    var str  = args[1],
+        a    = Number(args[2].toNative()),
+        b    = Number(args[3].toNative()),
+        cc   = args.pop();
+    if(str.FETCH().referencee && str.FETCH().autoderef) str = str.FETCH().referencee;
+
+    var proxy = new PIL2JS.Box.Proxy(
+      function () {
+        var str_ = String(PIL2JS.cps2normal(
+          _26main_3a_3aprefix_3a_7e.FETCH(),
+          [ PIL2JS.Context.ItemAny, str ]
+        ).toNative());
+
+        return str_.substr(a, b);
+      },
+      function (n) {
+        var str_ = String(PIL2JS.cps2normal(
+          _26main_3a_3aprefix_3a_7e.FETCH(),
+          [ PIL2JS.Context.ItemAny, str ]
+        ).toNative());
+        var repl = String(PIL2JS.cps2normal(
+          _26main_3a_3aprefix_3a_7e.FETCH(),
+          [ PIL2JS.Context.ItemAny, n ]
+        ).toNative());
+
+        str.STORE(new PIL2JS.Box.Constant(
+          str_.substr(0, a) +
+          repl +
+          str_.substr(a + b)
+        ));
+      }
+    );
+
+    cc(proxy);
+  })')($str, +$a, +$b < 0 ?? +$b - $a + chars $str !! +$b);
 }
 
 method split(Str $self: Str $splitter) { split $splitter, $self }
 sub JS::Root::split(Str $splitter, Str $str) is primitive {
-  JS::inline('
+  JS::inline('(
     function (splitter, str) {
       return String(str).split(String(splitter));
     }
-  ')(~$splitter, ~$str);
+  )')(~$splitter, ~$str);
 }
 
-method uc(Str $self:) { JS::inline('function (str) { return str.toUpperCase() }')(~$self) }
-method lc(Str $self:) { JS::inline('function (str) { return str.toLowerCase() }')(~$self) }
+# XXX! ?$self = $CALLER::_ is a hack!!
+method uc(Str ?$self = $CALLER::_:) { JS::inline('(function (str) { return str.toUpperCase() })')(~$self) }
+method lc(Str ?$self = $CALLER::_:) { JS::inline('(function (str) { return str.toLowerCase() })')(~$self) }
 
-method lcfirst(Str $self:) { lc(substr $self, 0, 1) ~ substr($self, 1) }
-method ucfirst(Str $self:) { uc(substr $self, 0, 1) ~ substr($self, 1) }
+method lcfirst(Str ?$self = $CALLER::_:) { lc(substr $self, 0, 1) ~ substr($self, 1) }
+method ucfirst(Str ?$self = $CALLER::_:) { uc(substr $self, 0, 1) ~ substr($self, 1) }
 
 # Of course, &bytes, &codes, &graphs will have to change. Dunno how to do
 # different Unicode levels in browsers.
-method bytes  (Str $self:) { JS::inline('function (str) { return str.length }')(~$self) }
-method chars  (Str $self:) { JS::inline('function (str) { return str.length }')(~$self) }
-method codes  (Str $self:) { JS::inline('function (str) { return str.length }')(~$self) }
-method graphs (Str $self:) { JS::inline('function (str) { return str.length }')(~$self) }
+method bytes  (Str $self:) { JS::inline('(function (str) { return str.length })')(~$self) }
+method chars  (Str $self:) { JS::inline('(function (str) { return str.length })')(~$self) }
+method codes  (Str $self:) { JS::inline('(function (str) { return str.length })')(~$self) }
+method graphs (Str $self:) { JS::inline('(function (str) { return str.length })')(~$self) }
 
 method index(Str $self: Str $substr, Int ?$pos = 0) {
-  JS::inline('function (str, substr, pos) {
+  JS::inline('(function (str, substr, pos) {
     return str.indexOf(substr, pos);
-  }')(~$self, ~$substr, +$pos);
+  })')(~$self, ~$substr, +$pos);
 }
 method rindex(Str $self: Str $substr, Int ?$pos = chars $self) {
   if $self eq "" and $substr ne "" {
     -1;
   } else {
-    JS::inline('function (str, substr, pos) {
+    JS::inline('(function (str, substr, pos) {
       return str.lastIndexOf(substr, pos);
-    }')(~$self, ~$substr, +$pos);
+    })')(~$self, ~$substr, +$pos);
   }
 }
 
@@ -48,6 +82,8 @@ method chomp(Str $self:) {
     ~$self;
   }
 }
+
+method chop(Str $self:) { substr $self, 0, -1 }
 
 sub infix:<x>    (Str $a, Int $count) is primitive {
   my $ret = "";

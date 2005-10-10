@@ -15,8 +15,11 @@ pugs::hack - How to hack on Pugs
     $ make
 
     # Test
-    $ make test       # or
-    $ make smoke      # generates a smoke.html
+    $ make test                            # or
+    $ sudo cpan Bundle::Pugs::SmokeKit     # (once)
+    $ make smoke                           # generates a smoke.html
+    # Optionally, submit your smoke report to the public smokeserver:
+    $ perl util/smokeserv/smokeserv-client.pl smoke.html
 
 =head1 DESCRIPTION
 
@@ -35,8 +38,8 @@ The Pugs source tree includes several major sections:
     |-- ext          Perl 6 modules that are installed with Pugs
     |-- inc          Perl 5 modules needed for build/test/install
     |-- lib          Perl 5 modules that are installed with Pugs
-    |-- modules      Perl 6 modules not working today; -> FreePAN
-    |-- perl5        Perl 5 modules not installed with Pugs
+    |-- misc         Other modules, not directly used by Pugs
+    |-- perl5        Internal Perl 5 modules for Pugs (compiler backends)
     |-- script       pugscc, the Pugs Compiler Collection
     |-- src          Source code for Pugs itself
     |-- t            Perl 6 test suite
@@ -49,6 +52,23 @@ Expanding this one level deeper:
     |-- LICENSE            Licenses that apply to the Pugs distribution
     |
     |-- debian             Packaging rules for dpkg-based systems
+    |  |-- changelog           Changelog for Debian specific changes
+    |  |-- compat              Sets debhelper compatibility version
+    |  |-- control             File containing package definitions/dependencies
+    |  |-- copyright           Debian copyright notice
+    |  |-- patches             Debian specific patches
+    |  |   |-- 00list          List of patches
+    |  |   `-- 10smoker.dpatch Patch to djust smoker.yml path
+    |  |-- pugs-doc.dirs       Directories to be created in the pugs-doc package
+    |  |-- pugs-modules.dirs   Directories to be created in the pugs-modules
+    |  |-- pugs-modules.install  Installation rules for the pugs-modules package
+    |  |-- pugs-modules.lintian-overrides  Lintian overrides for pugs-modules
+    |  |-- pugs.dirs           Directories to be created in the pugs package
+    |  |-- pugs.docs           Documentation to be installed in the pugs package
+    |  |-- pugs.install        Installation rules for the pugs package
+    |  |-- pugs.links          List of links to be installed in the pugs package
+    |  |-- rules               Makefile for building the Debian package
+    |  `-- smoker.yml          Configuration file for smoke runs
     |
     |-- docs               Documentation relating to Pugs/Perl 6/Haskell
     |   |-- AES                Drafts of Perl6::Bible chapters
@@ -94,6 +114,7 @@ Expanding this one level deeper:
     |   |-- Config-Tiny        Pre-Pugs-OO .ini file reader
     |   |-- DateTime           Port of Perl 5 DateTime, with API changes
     |   |-- DateTime-Set       Port of Perl 5 DateTime::Set/Span/SpanSet
+    |   |-- FA-DFA             Simple Deterministic Finite Automata
     |   |-- File-Find          Traverse a directory tree
     |   |-- File-Spec          Portable File handling
     |   |-- FindBin            Find directory of Perl script
@@ -105,6 +126,8 @@ Expanding this one level deeper:
     |   |-- Module-Pluggable-Fast  Find and load plugin modules
     |   |-- Net-IRC            IRC protocol implementation
     |   |-- Perl-Compiler      A Perl 6 port of Pugs
+    |   |-- Perl6-Container-Array  Perl 6 implementation of Perl 6 lazy arrays
+    |   |-- Perl6-Value-List   Perl 6 implementation of Perl 6 lazy lists
     |   |-- Perldoc            Event-based API for Perldoc DOM
     |   |-- Pod-Event-Parser   Event-based API (like XML SAX) for POD
     |   |-- Recurrence         Recurrence operations
@@ -131,29 +154,38 @@ Expanding this one level deeper:
     |   |-- Perl6              Perl6::MakeMaker, Perl6::Pugs
     |   `-- pugs               POD docs for Pugs itself
     |
-    |-- modules            Perl 6 modules not working today; -> FreePAN
+    |-- misc               Other modules, not directly used by Pugs
+    |   |-- Blondie            Intermediate language and compiler collection
+    |   |                      used to demonstrate a possible approach to
+    |   |                      compilation
     |   |-- Class-Events       Redesign of Perl 5's Class::Publisher
     |   |-- Date               Date/calendar calculations
     |   |-- Grammars           Perl 6 grammer written as Perl 6 rules
+    |   |-- JavaScript-FrontEnd  JavaScript Frontend
+    |   |-- org.perl6.metamodel  Prototype Perl 6 metaclass model: Java
+    |   |-- Perl-MetaModel     Prototype Perl 6 metaclass model: Perl 5,
+    |   |                      version 1.0
     |   |-- POE                Beginning of an experimental port of Perl 5 POE
-    |   |-- Perl-MetaModel     Sketch of Perl 6 Object Meta Model
-    |   `-- Sample-Module      Sample module for Perl 6 authors
-    |
-    |-- perl5              Perl 5 modules not installed with Pugs
-    |   |-- Code-Perl          Helper module for Perl 5 code generation
-    |   |-- PIL-Run            PIL virtual machine in Perl 5
-    |   |-- PIL2JS             PIL to JavaScript compiler
-    |   |-- Perl6-MetaModel    Prototype Perl 6 metaclass model: Perl 5
-    |   |-- Perl6.MetaModel    Prototype Perl 6 metaclass model: JS
+    |   |-- Rosetta-Incubator  Rigorous Database Portability
     |   |-- T2-Perl6           T2 (Tangram::Schema redesign) -> Perl6::Class 
-    |   `-- org.perl6.metamodel  Prototype Perl 6 metaclass model: Java
+    |   |-- XML-Sax            Simple API for XML
+    |
+    |-- perl5              Internal Perl 5 modules for Pugs (compiler backends)
+    |   |-- Perl6-Container    Perl 6 containers implemented using the Perl 5
+    |   |                      metamodel
+    |   |-- Perl6-MetaModel    Prototype Perl 6 metaclass model: Perl 5,
+    |   |                      version 2.0
+    |   |-- Perl6-Value        Perl 6 values implemented using the Perl 5
+    |   |                      metamodel
+    |   |-- PIL-Run            PIL virtual machine in Perl 5
+    |   `-- PIL2JS             PIL to JavaScript compiler
     |
     |-- script             pugscc, the Pugs Compiler Collection
     |
     |-- src                Haskell source for pugs itself
     |   |-- Data               Syck-based YAML parser
     |   |-- Emit               Parrot PIR backend
-    |   |-- IMC                Parrot IMC backend
+    |   |-- PIL                PIL2 implementation
     |   |-- Pugs               Core Pugs engine
     |   |-- RRegex             PCRE-based regular expressions support
     |   |-- pcre               Import of PCRE source
@@ -164,6 +196,8 @@ Expanding this one level deeper:
     |
     |-- t                  Pugs/Perl 6 test library
     |   |-- 01-sanity          Sanity checks that testing can proceed
+    |   |-- Synopsis           Pointers to online AES docs and tests
+    |   |-- Test-Less          Test index for test-less utility
     |   |-- builtins           Builtin function tests
     |   |-- data_types         Basic data type tests
     |   |-- examples           Make examples/ tree act as tests
@@ -181,9 +215,7 @@ Expanding this one level deeper:
     |   |-- subroutines        Block/Code/Sub/etc. tests
     |   |-- syntax             Basic syntax tests
     |   |-- unspecced          Tests for Pugs extensions to Perl 6
-    |   |-- var                Variable declaration tests
-    |   |-- Synopsis           Pointers to online AES docs and tests
-    |   `-- Test-Less          Test index for test-less utility
+    |   `-- var                Variable declaration tests
     |
     |-- t_disabled         Disabled tests
     |   |-- Dialects           Perl 6 non-standard dialects
@@ -249,6 +281,67 @@ is the name of the Perl 5 interpreter.
 
 =back
 
+=head2 Editing
+
+There is a F<util/perl6.vim> Vim syntax file.  There is an
+F<util/cperl6-mode.el> Emacs mode. If you don't use it, then perl-mode
+works better than cperl-mode.
+
+Where applicable, conventions documented in Damian Conway's "Perl Best
+Practices" book (O'Reilly, 2005) should be followed by default.  At the very
+least, all indenting should be done with spaces (4 per indent level) rather than
+tabs, so the code and documentation looks the same to everyone.
+
+If you use Vim, you may want to set the following settings:
+
+    set shiftwidth=4 autoindent expandtab smarttab softtabstop=1
+
+This will cause Vim to insert four spaces instead of a real tab upon pressing
+C<< <Tab> >>.  The equivalent settings for Emacs are:
+
+    c-indentation-style: bsd
+    c-basic-offset: 4
+    indent-tabs-mode: nil
+
+If you use Emacs with cperl6-mode, you can set these code conventions
+in your config file with:
+
+     (add-hook 'cperl6-mode-hook
+               '(lambda () (cperl6-set-style "Pugs")))
+
+If you use BBEdit, you can configure it to auto-expand tabs like this:
+
+=over
+
+=item 0.
+
+Launch the BBEdit application.
+
+=item 1.
+
+In the 'BBEdit' (application) menu, choose 'Preferences'.
+
+=item 2.
+
+In the resulting dialog box, choose 'Editor Defaults' from the left col.
+
+=item 3.
+
+In the resulting panel, ensure 'Auto-Expand Tabs' is checked.
+
+=item 4.
+
+Also ensure the 'Default Font' is set to '4 spaces per tab'.
+
+=item 5.
+
+Close the dialog box.
+
+=back
+
+These exact settings apply to BBEdit 8, the newest version; older versions of
+the program may store the same configuration options elsewhere.
+
 =head2 Testing
 
 See L<pugs::run> and F<t/README>.  If you wish to use the C<prove> utility
@@ -258,14 +351,47 @@ the following environment variables first:
     $ export HARNESS_PERL=./pugs
     $ export PERL6LIB=blib6/lib
 
+You can also just say C<./pugs -Iblib6/lib t/.../mumble.t>.
+
+=head3 Regex testing
+
+Using the Parrot distribution, PGE can be tested interactively with
+
+    $ ./parrot compilers/pge/demo.pir
+
+and with tests like those in F<t/p6rules/>.
+
+Using the PCRE distribution, PCRE can be tested interactively with
+
+    $ ./pcretest
+
 =head2 Resources
 
 =over
 
-=item *
+=item L<http://www-users.cs.york.ac.uk/~ndm/hoogle/>
 
-L<http://www-users.cs.york.ac.uk/~ndm/hoogle/> A cross index of
-standard Haskell libraries. It is searchable by type signature, name,
-etc.
+A cross index of standard Haskell libraries.  It is searchable by type
+signature, name, etc.
+
+=item L<http://rt.openfoundry.org/Foundry/Project/Source/index.html/pugs/browse/>
+
+Browsable Pugs VCS.  You sometimes get a blank page the first time you access a
+URL (a timeout) - just click again.
+
+=item L<http://svn.perl.org/perl6/pugs/trunk/>
+
+Mirror of Pugs VCS head.  Usually faster and more reliable than the OpenFoundry
+browser, but doesn't show diffs between revisions.
+
+=item L<http://m19s28.vlinux.de/cgi-bin/pugs-smokeserv.pl>
+
+Pugs Smoke Reports Server.  List of recently uploaded smoke reports sorted by
+the runcore used (normal Haskell backend, PIL2JS, PIL-Run, PIR, etc.), see
+F<util/smokeserv/README> for more information.
 
 =back
+
+=head1 SEE ALSO
+
+L<Perl6::Pugs>, L<pugs::run>

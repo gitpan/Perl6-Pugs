@@ -4,6 +4,7 @@
 ^\.settings
 ^pugs
 ^tags
+^throw_away
 ^MANIFEST.bak$
 Makefile$
 Makefile.old$
@@ -29,3 +30,5 @@ svn-commit\.tmp$
 ^debian/
 ^t_disabled/
 ^t/builtins/system/
+^Setup(?!\.lhs)
+^throw_away/

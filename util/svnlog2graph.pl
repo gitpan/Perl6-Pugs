@@ -56,7 +56,7 @@ $graph->set(
   x_label      => "Days",
   y_label      => "Commits/Developers",
   x_label_skip => 10,
-  y_max_value  => 7000,
+  y_max_value  => (int(@commits / 500) + 1) * 500,
 ) or die $graph->error;
 
 my @data = (
@@ -79,7 +79,7 @@ sub dayify {
 
     if($cur_day != $#till_day) {
       push @till_day, $till_day[-1] || 0
-	while $#till_day < $cur_day;
+        while $#till_day < $cur_day;
     } else {
       $till_day[-1]++;
     }

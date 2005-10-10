@@ -11,18 +11,20 @@ INIT {
   if($ENV{PIL2JS_RESOURCE_GUARD}) {
     require BSD::Resource;
     import BSD::Resource;
-    setrlimit(RLIMIT_CPU(), 35, 45) or die "Couldn't setrlimit: $!\n";
+    setrlimit(RLIMIT_CPU(), 43, 47) or die "Couldn't setrlimit: $!\n";
     warn "*** Limited CPU resources.\n";
   }
 }
 
 use FindBin;
 use File::Spec;
-use lib File::Spec->catfile($FindBin::Bin, "lib");
+use lib File::Spec->catdir($FindBin::Bin, "lib");
+use lib File::Spec->catdir($FindBin::Bin);
 use PIL2JS qw< run_pugs >;
 use Getopt::Long;
 use PIL::Parser;
 use PIL;
+use Encode;
 
 sub slurp;
 sub unslurp;
@@ -39,6 +41,7 @@ GetOptions(
   "output=s"           => \$output,
   "yaml-dump"          => \$yaml_dump,
   "pugs=s"             => \$PIL2JS::cfg{pugs},
+  "metamodel-base=s"   => \$PIL2JS::cfg{metamodel_base},
   "help"               => sub { usage() },
 ) or usage();
 my @input = @ARGV;
@@ -52,19 +55,19 @@ unless($link) {
   warn "*** Reading input from \"$input[0]\"...\n" if $verbose;
 
   my $pil  = $input[0] =~ /\.(?:pl|p6|pm|p6m|t)$/i
-    ? run_pugs("-CPIL", $input[0])
+    ? decode "utf-8", run_pugs("-CPerl5", $input[0])
     : slurp $input[0];
   my $tree = PIL::Parser->parse($pil);
 
   if($yaml_dump) {
     require YAML;
-    print YAML::Dump($tree);
+    print encode "utf-8", YAML::Dump($tree);
     exit;
   }
 
   warn "*** Compiling PIL to JavaScript...\n" if $verbose;
   my $load_check = <<EOF;
-try { PIL2JS } catch(err) {
+try { PIL2JS.Box } catch(err) {
   var error = new Error("PIL2JS.js not loaded; aborting.");
   alert(error);
   throw(error);
@@ -79,6 +82,20 @@ EOF
   my @components;
   # unshift @input, ($link eq "html" ? "~" : "") . guess_jsprelude_path();
 
+  @input = map {
+    /^(~?)METAMODEL$/
+      ? map { $1 . $PIL2JS::cfg{metamodel_base} . join("/", split /\./, $_) . ".js" } qw<
+          Perl6.MetaModel
+          Perl6.Attribute
+          Perl6.Method
+          Perl6.MultiMethod
+          Perl6.MetaClass.Dispatcher Perl6.MetaClass
+          Perl6.Class Perl6.Instance
+          Perl6.Object
+        >
+      : ($_)
+  } @input;
+
   my $js;
   foreach my $file (@input) {
     my $mode = $file =~ s/^~// ? "link" : "inline";
@@ -92,11 +109,17 @@ EOF
   }
 
   push @components, [inline => <<EOF];
+// Trigger running of all END blocks.
 PIL2JS.catch_all_exceptions(function () {
-  var blocks = _40main_3a_3a_2aEND.FETCH();
-  for(var i = 0; i < blocks.length; i++) {
-    blocks[i].FETCH()([PIL2JS.Context.Void]);
-  }
+  PIL2JS.catch_end_exception(function() {
+    PIL2JS.runloop(function () {
+      _26main_3a_3aexit.FETCH()([
+        PIL2JS.Context.ItemAny,
+        new PIL2JS.Box.Constant(undefined),
+        function () { 'dummycc' }
+      ]);
+    });
+  });
 });
 EOF
 
@@ -162,12 +185,16 @@ Usage: pil2js.pl [options] -- input_files
 
 Available options (options may be abbreviated to uniqueness):
   --verbose         Be verbose.
+
+  --pugs=/path/to/pugs
+  --metamodel-base=/path/to/Perl6.MetaModel/lib/
+
   --output=...      Output to the given filename.
                     Use "-" if you want the result to go to STDOUT.
   --link=html|js    Link precompiled files into one standalone JavaScript
                     file ("js") or into a HTML file ("html").
+
   --yaml-dump       Only output the input PIL as YAML; don't compile anything.
-  --html            Output the JavaScript packed in an HTML page.
 
 When compiling (--link option not given), there has to be only one input file.
 In linking mode, multiple input files may be specified. If a filename is
@@ -179,17 +206,19 @@ Recommended usage:
   \$ cd perl5/PIL2JS
   \$ ./pil2js.pl -o Prelude.js lib6/Prelude/JS.pm
   \$ ./pil2js.pl -o test.js test.pl
-  \$ ./pil2js.pl --link=html -o test.html ~libjs/PIL2JS.js ~Prelude.js test.js
+  \$ ./pil2js.pl -o test.js test.pil
+  \$ ./pil2js.pl --link=js   -o full.js    METAMODEL  libjs/PIL2JS.js  Prelude.js test.js
+  \$ ./pil2js.pl --link=html -o test.html ~METAMODEL ~libjs/PIL2JS.js ~Prelude.js test.js
 USAGE
 
 sub slurp {
-  open my $fh, "< $_[0]"  or die "Couldn't open \"$_[0]\" for reading: $!\n";
+  open my $fh, "< $_[0]" or die "Couldn't open \"$_[0]\" for reading: $!\n";
   local $/;
-  return <$fh>;
+  return decode "utf-8", <$fh>;
 }
 
 sub unslurp {
-  open my $fh, "> $_[0]"  or die "Couldn't open \"$_[0]\" for writing: $!\n";
-  print $fh $_[1]         or die "Couldn't write to \"$_[0]\": $!\n";
-  close $fh               or die "Couldn't close \"$_[0]\": $!\n";
+  open my $fh, "> $_[0]"          or die "Couldn't open \"$_[0]\" for writing: $!\n";
+  print $fh encode "utf-8", $_[1] or die "Couldn't write to \"$_[0]\": $!\n";
+  close $fh                       or die "Couldn't close \"$_[0]\": $!\n";
 }

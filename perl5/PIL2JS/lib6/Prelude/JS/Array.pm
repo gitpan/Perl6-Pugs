@@ -1,56 +1,62 @@
 # EVIL hacks here! E.g. method map and sub JS::Root::map!
 
-method JS::Root::shift(@self:) {
+method JS::Root::shift(@self:) is rw {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
-    var array = args[1].FETCH();
+    var array = args[1].FETCH(), cc = args.pop();
     var ret   = array.shift();
-    return ret == undefined ? new PIL2JS.Box.Constant(undefined) : ret;
+    cc(ret == undefined ? new PIL2JS.Box.Constant(undefined) : ret);
   })')(@self);
 }
 
-method JS::Root::pop(@self:) {
+method JS::Root::pop(@self:) is rw {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
-    var array = args[1].FETCH();
+    var array = args[1].FETCH(), cc = args.pop();
     var ret   = array.pop();
-    return ret == undefined ? new PIL2JS.Box.Constant(undefined) : ret;
+    cc(ret == undefined ? new PIL2JS.Box.Constant(undefined) : ret);
   })')(@self);
 }
 
-method JS::Root::unshift(@self: *@things) {
+method JS::Root::unshift($self is rw: *@things) is rw {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
-    var array = args[1].FETCH(), add = args[2].FETCH();
+    var array = args[1].FETCH(), add = args[2].FETCH(), cc = args.pop();
+    if(array == undefined) args[1].STORE(new PIL2JS.Box.Constant(array = []));
+    if(array.referencee && array.autoderef) array = array.referencee.FETCH();
+
     for(var i = add.length - 1; i >= 0; i--) {
       array.unshift(new PIL2JS.Box(add[i].FETCH()));
     }
-    return new PIL2JS.Box.Constant(array.length);
-  })')(@self, @things);
+    cc(new PIL2JS.Box.Constant(array.length));
+  })')($self, @things);
 }
 
-method JS::Root::push(@self: *@things) {
+method JS::Root::push($self is rw: *@things) is rw {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
-    var array = args[1].FETCH(), add = args[2].FETCH();
+    var array = args[1].FETCH(), add = args[2].FETCH(), cc = args.pop();
+    if(array == undefined) args[1].STORE(new PIL2JS.Box.Constant(array = []));
+    if(array.referencee && array.autoderef) array = array.referencee.FETCH();
+
     for(var i = 0; i < add.length; i++) {
       array.push(new PIL2JS.Box(add[i].FETCH()));
     }
-    return new PIL2JS.Box.Constant(array.length);
-  })')(@self, @things);
+    cc(new PIL2JS.Box.Constant(array.length));
+  })')($self, @things);
 }
 
 method join(@self: Str $sep) { join $sep, *@self }
 sub JS::Root::join(Str $sep, *@things) is primitive {
-  JS::inline('
+  JS::inline('(
     function (arr, sep) {
       return arr.join(String(sep));
     }
-  ')(@things.map:{ ~$_ }, $sep);
+  )')(@things.map:{ ~$_ }, $sep);
 }
 
 method JS::Root::elems(@self:) {
-  JS::inline('function (arr) { return arr.length }')(@self);
+  JS::inline('(function (arr) { return arr.length })')(@self);
 }
 
 method JS::Root::end(@self:) {
-  JS::inline('function (arr) { return arr.length - 1 }')(@self);
+  JS::inline('(function (arr) { return arr.length - 1 })')(@self);
 }
 
 method map(@self is rw: Code $code) { map $code, *@self }
@@ -96,12 +102,12 @@ sub JS::Root::sort(Code ?$cmp is copy = &infix:<cmp>, *@array) is primitive {
 
   JS::inline('new PIL2JS.Box.Constant(function (args) {
     // [].concat(...): Defeat modifying of the original array.
-    var array = [].concat(args[1].FETCH()), cmp = args[2].FETCH();
+    var array = [].concat(args[1].FETCH()), cmp = args[2].FETCH(), cc = args.pop();
     var jscmp = function (a, b) {
-      return cmp([PIL2JS.Context.ItemAny, a, b]).toNative();
+      return PIL2JS.cps2normal(cmp, [PIL2JS.Context.ItemAny, a, b]).toNative();
     };
     array.sort(jscmp);
-    return new PIL2JS.Box.Constant(array);
+    cc(new PIL2JS.Box.Constant(array));
   })')(@array, $cmp);
 }
 
@@ -143,13 +149,13 @@ sub JS::Root::max(Code ?$cmp = &infix:«<=>», *@array) is primitive {
   }
 
   my $max = @array.shift;
-  $max = ($cmp($max, $_)) < 0 ?? $_ :: $max for @array;
+  $max = ($cmp($max, $_)) < 0 ?? $_ !! $max for @array;
   $max;
 }
 
 method grep(@self: Code $code) { grep $code, *@self }
 sub JS::Root::grep(Code $code, *@array) is primitive {
-  die "Code block for \"grep\" must be unary!" unless $code.arity == 1;
+  #die "Code block for \"grep\" must be unary!" unless $code.arity == 1;
 
   my @res;
   for @array -> $item is rw {
@@ -162,7 +168,8 @@ method sum(@self:) { sum *@self }
 sub JS::Root::sum(*@vals) is primitive {
   my $sum = 0;
   $sum += +$_ for @vals;
-  $sum;
+  @vals ?? $sum !! undef;
+  # We should return undef if we haven't been giving @vals to sum.
 }
 
 method reverse(*@things is copy:) {
@@ -171,9 +178,9 @@ method reverse(*@things is copy:) {
     JS::inline('(function (str) { return str.split("").reverse().join("") })')(@things[0]);
   } else {
     JS::inline('new PIL2JS.Box.Constant(function (args) {
-      var arr = args[1].FETCH();
+      var arr = [].concat(args[1].FETCH()), cc = args.pop();
       arr.reverse();
-      return new PIL2JS.Box.Constant(arr);
+      cc(new PIL2JS.Box.Constant(arr));
     })')(@things);
   }
 }
@@ -194,34 +201,39 @@ sub infix:<^..^> (Num $from, Num $to) is primitive { ($from + 1)..($to - 1) }
 sub infix:<,>(*@xs is rw) is primitive is rw {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
     var cxt   = args.shift();
+    var cc    = args.pop();
     var iarr  = args[0].FETCH();
 
-    var array = [];
-    for(var i = 0; i < iarr.length; i++) {
-      // The extra new PIL2JS.Box is necessary to make the contents of arrays
-      // readwrite, i.e. my @a = (0,1,2); @a[1] = ... should work.
-      array[i] = new PIL2JS.Box(iarr[i].FETCH());
-    }
+    // We don\'t create new containers (new PIL2JS.Boxes) *here* -- lists
+    // don\'t create new containers. Assigning to an array will take care of
+    // this.
+
+    var mk_magicalarray = function () {
+      var marray = [];
+
+      for(var i = 0; i < iarr.length; i++) {
+        marray[i] = new PIL2JS.Box(undefined).BINDTO(
+          // Slighly hacky way to determine if iarr[i] is undef, i.e.
+          // it\'s needed to make
+          //   my ($a, undef, $b) = (3,4,5);
+          // work.
+          iarr[i].isConstant && iarr[i].FETCH() == undefined
+            ? new PIL2JS.Box(undefined)
+            : iarr[i]
+        );
+      }
+
+      return marray;
+    };
 
     // Proxy needed for ($a, $b) = (3, 4) which really is
     // &infix:<,>($a, $b) = (3, 4);
     var proxy = new PIL2JS.Box.Proxy(
-      function ()  { return array },
+      function ()  { return iarr },
       function (n) {
-        var marray = [];
-        for(var i = 0; i < iarr.length; i++) {
-          marray[i] = new PIL2JS.Box(undefined).BINDTO(
-            // Slighly hacky way to determine if iarr[i] is undef, i.e.
-            // it\'s needed to make
-            //   my ($a, undef, $b) = (3,4,5);
-            // work.
-            iarr[i].isConstant && iarr[i].FETCH() == undefined
-              ? new PIL2JS.Box(undefined)
-              : iarr[i]
-          );
-        }
+        var marray = mk_magicalarray();
+        var arr    = new PIL2JS.Box([]).STORE(n).FETCH();
 
-        var arr = new PIL2JS.Box([]).STORE(n).FETCH();
         for(var i = 0; i < arr.length; i++) {
           if(marray[i]) marray[i].STORE(arr[i]);
         }
@@ -230,11 +242,40 @@ sub infix:<,>(*@xs is rw) is primitive is rw {
       }
     );
 
-    return proxy;
+    proxy.BINDTO = function (other) {
+      var arr = other.FETCH();
+
+      if(!(arr instanceof Array)) {
+        PIL2JS.die("Can\'t bind list literal to non-array object!");
+      }
+
+      var backup_arr = [];
+      for(var i = 0; i < arr.length; i++) {
+        backup_arr[i]        = new PIL2JS.Box;
+        backup_arr[i].FETCH  = arr[i].FETCH;
+        backup_arr[i].STORE  = arr[i].STORE;
+        backup_arr[i].BINDTO = arr[i].BINDTO;
+      }
+
+      for(var i = 0; i < backup_arr.length; i++) {
+        if(iarr[i].isConstant && iarr[i].FETCH() == undefined) {
+          // ($a, **undef**, $b) := (1,2,3);
+          // (i.e., do nothing)
+        } else {
+          iarr[i].BINDTO(backup_arr[i]);
+        }
+      }
+
+      return this;
+    };
+
+    cc(proxy);
   })')(@xs);
 }
+our &list := &infix:<,>;
+our &pair := &infix:<,>;  # XXX wrong
 
-sub circumfix:<[]>(*@xs) is primitive { \@xs }
+sub circumfix:<[]>(*@xs is rw) is primitive { my @copy; @copy = @xs; \@copy }
 method postcircumfix:<[]>(@self: Int *@idxs) is rw {
   die "Can't use object of type {@self.ref} as an array!"
     unless @self.isa("Array");
@@ -248,6 +289,7 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
 
   JS::inline('new PIL2JS.Box.Constant(function (args) {
     var cxt   = args.shift();
+    var cc    = args.pop();
     var array = args[0].FETCH();
     var idxs  = args[1].toNative();
     for(var i = 0; i < idxs.length; i++) {
@@ -265,8 +307,15 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
           return ret == undefined ? undefined : ret.FETCH();
         },
         function (n) {
-          if(array[idx] == undefined)
+          // Support (in a slightly hacky manner) ($a, undef, $b) = (3,4,5).
+          if(
+            array[idx] == undefined || (
+              array[idx].isConstant &&
+              array[idx].FETCH() == undefined
+            )
+          ) {
             array[idx] = new PIL2JS.Box(undefined);
+          }
           array[idx].STORE(n);
           return n;
         }
@@ -278,7 +327,7 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
       // < 1000, should not.
       ret.BINDTO = function (other) {
         if(array[idx] == undefined)
-          PIL2JS.die("Can\'t rebind undefined!");
+          array[idx] = new PIL2JS.Box(undefined);
 
         return array[idx].BINDTO(other);
       };
@@ -287,7 +336,7 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
     };
 
     if(idxs.length == 1) {
-      return proxy_for(idxs[0]);
+      cc(proxy_for(idxs[0]));
     } else {
       var ret = [];
       for(var i = 0; i < idxs.length; i++) {
@@ -295,7 +344,7 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
       }
 
       // Needed for @a[1,2] = (3,4).
-      return new PIL2JS.Box.Proxy(
+      var proxy = new PIL2JS.Box.Proxy(
         function ()  { return ret },
         function (n) {
           var arr = new PIL2JS.Box([]).STORE(n).FETCH();
@@ -306,8 +355,54 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
           return this;
         }
       );
+      proxy.BINDTO = function (other) {
+        var arr = other.FETCH();
+
+        if(!(arr instanceof Array)) {
+          PIL2JS.die("Can\'t bind array slice to non-array object!");
+        }
+
+        var backup_arr = [];
+        for(var i = 0; i < arr.length; i++) {
+          backup_arr[i]        = new PIL2JS.Box;
+          backup_arr[i].FETCH  = arr[i].FETCH;
+          backup_arr[i].STORE  = arr[i].STORE;
+          backup_arr[i].BINDTO = arr[i].BINDTO;
+        }
+
+        for(var i = 0; i < backup_arr.length; i++) {
+          ret[i].BINDTO(backup_arr[i]);
+        }
+
+        return this;
+      };
+
+      cc(proxy);
     }
   })')(@self, @idxs);
+}
+
+# Array autovification
+# Needs PIL2 and MMD to be done without hacks
+sub PIL2JS::Internals::Hacks::array_postcircumfix_for_undefs (
+  $array is rw, Int *@idxs,
+) is primitive is rw {
+  if defined $array {
+    die "\"$array\" can't be autovivified to an array!";
+  }
+
+  $array = [];
+  $array[*@idxs];
+}
+
+sub PIL2JS::Internals::Hacks::init_undef_array_postcircumfix_method () is primitive {
+  JS::inline('(function () {
+    PIL2JS.addmethod(
+      _3amain_3a_3aItem,
+      "postcircumfix:[]",
+      _26PIL2JS_3a_3aInternals_3a_3aHacks_3a_3aarray_postcircumfix_for_undefs
+    );
+  })')();
 }
 
 # Code from Prelude::PIR
@@ -318,8 +413,8 @@ sub splice (@a is rw, ?$offset=0, ?$length, *@list) is primitive {
 
     $off += $size if $off < 0;
     if $off > $size {
-	warn "splice() offset past end of array\n";
-	$off = $size;
+        warn "splice() offset past end of array\n";
+        $off = $size;
     }
     # $off is now ready
 
@@ -334,46 +429,46 @@ sub splice (@a is rw, ?$offset=0, ?$length, *@list) is primitive {
     my @result;
 
     if 1 {
-	my $i = $off;
-	my $stop = $off + $len;
-	while $i < $stop {
-	    push(@result,@a[$i]);
-	    $i++;
-	}
+        my $i = $off;
+        my $stop = $off + $len;
+        while $i < $stop {
+            push(@result,@a[$i]);
+            $i++;
+        }
     }
 
     if $size_change > 0 {
-	my $i = $size + $size_change -1;
-	my $final = $off + $size_change;
-	while $i >= $final {
-	    @a[$i] = @a[$i-$size_change];
-	    $i--;
-	}
+        my $i = $size + $size_change -1;
+        my $final = $off + $size_change;
+        while $i >= $final {
+            @a[$i] = @a[$i-$size_change];
+            $i--;
+        }
     } elsif $size_change < 0 {
-	my $i = $off;
-	my $final = $size + $size_change -1;
-	while $i <= $final {
-	    @a[$i] = @a[$i-$size_change];
-	    $i++;
-	}
-	# +@a = $size + $size_change;
-	#   doesnt exist yet, so...
-	my $n = 0;
-	while $n-- > $size_change {
-	    pop(@a);
-	}
+        my $i = $off;
+        my $final = $size + $size_change -1;
+        while $i <= $final {
+            @a[$i] = @a[$i-$size_change];
+            $i++;
+        }
+        # +@a = $size + $size_change;
+        #   doesnt exist yet, so...
+        my $n = 0;
+        while $n-- > $size_change {
+            pop(@a);
+        }
     }
 
     if $listlen > 0 {
-	my $i = 0;
-	while $i < $listlen {
-	    @a[$off+$i] = @list[$i];
-	    $i++;
-	}
+        my $i = 0;
+        while $i < $listlen {
+            @a[$off+$i] = @list[$i];
+            $i++;
+        }
     }
 
-    #  want.List ?? *@result :: pop(@result)
-    #  want.List ?? *@result :: +@result ?? @result[-1] :: undef;
+    #  want.List ?? *@result !! pop(@result)
+    #  want.List ?? *@result !! +@result ?? @result[-1] !! undef;
     #  *@result;
     @result;
 }

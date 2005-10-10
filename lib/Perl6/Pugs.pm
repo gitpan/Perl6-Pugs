@@ -2,9 +2,7 @@ package Perl6::Pugs;
 use 5.006;
 use strict;
 
-our $VERSION = 6.002009;
-
-=pod
+our $VERSION = 6.002010;
 
 =head1 NAME
 
@@ -12,7 +10,7 @@ Perl6::Pugs - A Perl 6 Implementation
 
 =head1 VERSION
 
-This document describes version 6.2.9 of Pugs, released August 3, 2005.
+This document describes version 6.2.10 of Pugs, released October 10, 2005.
 
 =head1 SYNOPSIS
 
@@ -46,8 +44,8 @@ F<docs/quickref/README>.
 
 =head2 Talks
 
-There're various talks about Perl 6 and/or Pugs at F<docs/talks/>. Please refer
-see F<docs/talks/README>.
+There're various talks about Perl 6 and/or Pugs in F<docs/talks/>. Look into
+F<docs/talks/README> for links to rendered versions (HTML, PDF).
 
 =head2 Examples
 
@@ -75,7 +73,8 @@ L<http://www.nntp.perl.org/group/perl.perl6.compiler> and available via NNTP at
 L<nntp://nntp.perl.org/perl.perl6.compiler>.
 
 You can also read the list via Google Groups at
-L<http://groups-beta.google.com/group/perl.perl6.compiler>.
+L<http://groups-beta.google.com/group/perl.perl6.compiler> or GMane at
+L<http://news.gmane.org/gmane.comp.lang.perl.perl6.compiler>.
 
 Please submit bug reports to C<E<lt>pugsbugs@perl.orgE<gt>>.
 

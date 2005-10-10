@@ -5,12 +5,12 @@ Pugs needs the Glasgow Haskell Compiler (GHC) 6.4 or above.  To install GHC,
 download a binary build from http://haskell.org/ghc/.  Although source code
 for GHC is available, it will take a very long time to build by yourself. 
 
-Pugs needs Parrot 0.2.2 or above to support Perl 6 Rules and PIR evaluation.
+Pugs needs Parrot 0.3.0 or above to support Perl 6 Rules and PIR evaluation.
 To install Parrot, follow the instructions at http://www.parrotcode.org/.
 
-http://www.jwcs.net/~jonathan/perl6/ has binary builds for Win32.  If you'd
-like to build by hand, http://wiki.kn.vutbr.cz/mj/?Perl%206%20and%20Parrot has
-instructions (and binaries, too).
+http://www.jwcs.net/~jonathan/perl6/ and http://pxperl.com/ both have 
+binary builds for Win32.  If you'd like to build Pugs by hand,
+http://wiki.kn.vutbr.cz/mj/?Perl%206%20and%20Parrot has some instructions.
 
 For dynamic loading/inlining of Haskell modules, you should install the
 hs-plugin library, available here:
@@ -33,6 +33,9 @@ Makefile.PL like so:
 XXX NOTE!!!!!!!!
 PREFIX doesn't actually work right now. So ignore what I just said. But if
 it did work, that's how you would do it.
+
+Do not set PREFIX to your Perl 5 installation dir, as that would overwrite
+some of the files there with their Pugs counterparts.
 
 ENVIRONMENT VARIABLES
 ---------------------
@@ -113,6 +116,11 @@ The options you can control there include:
   itself runs out of memory while building pugs, you can set this to a low
   value (but turn off optimization and precompilation too).
 
+- install_dir: if set, `make install` will put everything under this
+  directory. Do not set this to your Perl 5 installation, since that
+  will overwrite some of the files there with the Pugs counterparts
+  (as will make install PREFIX= as noted above.)
+
 You can override values set in this file temporarily via the single
 PUGS_BUILD_OPTS environment variable. For example, if you normally do
 precompile Prelude.pm but want a faster build just this once:
@@ -123,6 +131,20 @@ See `util/config-template.yml` for more information.
 
 [1] See <http://yaml.org/>. Only a subset of the YAML syntax is permitted
 at the moment, to avoid a dependency on the full parser.
+
+CAVEATS FOR ALL USERS
+---------------------
+
+Parrot is used to provide Perl6-style regular expressions.
+Perl5-style regular expressions (eg, rx:perl5/foo/) can be used
+without any parrot at all.  Pugs can be built to use parrot external
+(the default), or embedded.  External is recommended.
+
+Embedding parrot currently requires a parrot version later than 0.3.0.
+Parrot 0.3.0 is unfortunately, as of Oct 10 2005, the latest parrot
+release.  It had a bug which has since been fixed.  More recent but
+unreleased and unstable copies of parrot can be obtained from
+http://www.parrotcode.org/source.html .
 
 CAVEATS FOR Win32 USERS
 -------------------------
@@ -161,65 +183,6 @@ Try building a new Parrot with gcc 3.3, then compile Pugs again.
 CAVEATS FOR x86_64 MACHINES
 ---------------------------
 
-Until GHC 6.4.1 is released, Linux users with x86_64 (64 bit Athlon) CPUs
-should consider using a development snapshot of GHC:
+GHC 6.4.1 or later is required.
 
-    http://www.haskell.org/ghc/dist/stable/dist/
-    
-Look for files ending with "x86_64-unknown-linux", for example:
-
-    ghc-6.4.1.20050711-x86_64-unknown-linux.tar.bz2
-
-GHC 6.4 had bugs on x86_64 which broke garbage collection and rules (regexps).
-These bugs were fixed in GHC CVS by around 11-May.  There are hints on using
-snapshots at the end of this section.
-
-Here are the known problems:
-
-(1) GHC 6.4 has a garbage collector bug on x86_64 (64 bit Athlon) machines;
-users may see crashes complaining about "strange objects".
-
-A partial workaround is to avoid GC by requesting a large heap, using either
-command line arguments:
-
-    ./pugs +RTS -A200M -RTS
-
-or an environment variable:
-
-    GHCRTS='-A200M'
-
-These request a 200 MB heap, which is sufficient to run most programs.
-
-Running all tests unfortunately requires a lot more memory (perhaps 1000M).
-A possible alternative, which someone could explore and report on, would be
-to try using a 32-bit GHC instead.
-
-(2) Rules (regexps) may not work with GHC 6.4 on x86_64.  Users may see
-"internal error: adjustor creation not supported on this platform".
-There is no known workaround.  This bug has been fixed in current
-development snapshots.
-
-Hints on using a development snapshot of GHC:
-
-By far the simplest alternative is to use a "Stable" binary snapshot as
-described above.  Once you untar it, see INSTALL.  It's basically just
-
-    ./configure
-    make in-place   or   make install
-
-You could instead build from source.  Note that this will take a long time,
-and that it may not work.  Your best bet is to use a recent "Stable" source
-snapshot.  Alternately, you might use cvs to grab your own snapshot:
-
-    CVSROOT=:pserver:anoncvs@glass.cse.ogi.edu:/cvs; export CVSROOT
-    cvs login     # password cvs
-    cvs checkout fpconfig
-    cd fptools
-    cvs checkout ghc hslibs libraries happy alex
-
-    autoreconf
-    ./configure
-    make
-    make install
-
-There are no guarantees with a CVS snapshot.  It may not even compile.
+There is currently an undiagnosed bug in eval_yaml().

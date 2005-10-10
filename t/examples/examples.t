@@ -8,13 +8,13 @@ use Test;
 Test examples
 
 This loads some of the scripts of the examples/ dir and compares their output
-with a expected output.
+with the expected output (stored in examples/output/).
 
 =cut
 
 my @examples = <
   functional/fp functional/reverse
-  algorithms/hanoi algorithms/quicksort
+  algorithms/hanoi algorithms/quicksort algorithms/lambda-calculus
   junctions/1 junctions/3 junctions/all-all junctions/all-any junctions/any-any
   junctions/any-any2 junctions/grades
   vmethods/escape vmethods/bytes vmethods/time vmethods/math
@@ -22,6 +22,11 @@ my @examples = <
 >;
 
 plan +@examples;
+
+if $*OS eq "browser" {
+  skip_rest "Programs running in browsers don't have access to regular IO.";
+  exit;
+}
 
 # We can't run under win32 because of C<\> as path separator instead of C</>
 # -- awaiting v6 File::Spec

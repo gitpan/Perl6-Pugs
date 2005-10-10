@@ -9,7 +9,7 @@ basic Number tests
 
 =cut
 
-plan 44;
+plan 45;
 
 my $a = 1; "$a";
 isa_ok($a, 'Int');
@@ -77,24 +77,26 @@ my $a = "1.01";
 isa_ok(+$a, "Num");
 is(+$a, 1.01, "1.01 numifies to 1.01");
 
-my $a = "01.01";
+my $a = "0d01.01";
 isa_ok(+$a, "Num");
-is(+$a, 1.01, "01.01 numifies to 1.01", :todo<bug>);
+is(+$a, 1.01, "0d01.01 numifies to 1.01", :todo<bug>);
 
 my $a = "1.01";
 isa_ok(int($a), "Int");
 is(int($a), 1, "1.01 intifies to 1");
 
-my $a = "0101";
+my $a = "0d0101";
 isa_ok(+$a, "Num");
-is(+$a, 101, "0101 numifies to 101", :todo<bug>);
+is(+$a, 101, "0d0101 numifies to 101");
 
 my $a = 2 ** 65; # over the 64 bit limit too
 is($a, 36893488147419103232, "we have bignums, not weeny floats");
 
-eval_is('42_000', 42000, 'underscores allowed (and ignored) in numeric literals', :todo);
-eval_is('42_127_000', 42127000, 'multiple underscores ok', :todo);
-eval_is('42.0_1', 42.01, 'underscores in fraction ok', :todo);
-eval_is('4_2.01', 42.01, 'underscores in whole part ok', :todo);
-eval_is('4_2__.__0_1___', 42.01, 'lots of underscores are ok', :todo);
+is(42_000,     42000,    'underscores allowed (and ignored) in numeric literals');
+is(42_127_000, 42127000, 'multiple underscores ok');
+is(42.0_1,     42.01,    'underscores in fraction ok');
+is(4_2.01,     42.01,    'underscores in whole part ok');
+
+dies_ok({ 4_2__.__0_1___ }, 'lots of underscores are not ok directly after the dot');
+is(4_2__.0__1___, 42.01,    'lots of underscores are ok');
 

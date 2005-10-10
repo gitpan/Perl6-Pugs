@@ -166,10 +166,10 @@ class HTTP::Cookies-0.0.1 {
                     # results in a domain with no leading dot, it is for
                     # Netscape cookie compatibility only:
                     #
-                    # a.b.c.net	Any cookie
-                    # .b.c.net	Any cookie
-                    # b.c.net	Netscape cookie only
-                    # .c.net	Any cookie
+                    # a.b.c.net Any cookie
+                    # .b.c.net  Any cookie
+                    # b.c.net   Netscape cookie only
+                    # .c.net    Any cookie
                     
                     if ($domain ~~ s:P5/^\.+//) {
                         $netscape_only = 1;
@@ -369,7 +369,7 @@ class HTTP::Cookies-0.0.1 {
         given ($str) {
             s:P5:g/%([0-9a-fA-F][0-9a-fA-F])/{
                 my $x = $0.uc;
-                $x eq "2F"|"25" ?? "%$x" :: pack("C", hex($x));
+                $x eq "2F"|"25" ?? "%$x" !! pack("C", hex($x));
             }/;
             s:P5:g/([\0-\x20\x7f-\xff])/{ ord($0).as('%%%02X') }/;
         }

@@ -4,280 +4,215 @@ package Perl6::MetaModel;
 use strict;
 use warnings;
 
-use Scalar::Util 'blessed';
 use Carp 'confess';
 
-use Perl6::Role;
-use Perl6::Class;
+our $VERSION = '2.00';
 
 sub import {
-    shift;
-    return if @_; # return if anything is passed    
+    # load the meta-model ..
+    require Perl6::MetaModel::Genesis;
+    
+    # export &class
     no strict 'refs';
+    my $pkg = caller;
+    *{"${pkg}::class"} = \&class;
+    *{"${pkg}::role"}  = \&role;   
     
-    my $caller_pkg = caller();
-    
-    # meta model helpers
-    *{$caller_pkg . '::class'} = \&class;
-    *{$caller_pkg . '::role'}  = \&role;
-    
-    # instance attribute access helpers
-    *{$caller_pkg . '::_'} = \&_; 
-    # class attribute access helpers
-    *{$caller_pkg . '::__'} = \&__; 
-}
-
-our @CURRENT_DISPATCHER = ();
-
-## this just makes sure to clear the invocant when
-## something dies, it is not pretty, but it works
-$SIG{'__DIE__'} = sub { 
-    @Perl6::Method::CURRENT_INVOCANT_STACK = (); 
-    @Perl6::Method::CURRENT_CLASS_STACK    = ();     
-    @Perl6::MetaModel::CURRENT_DISPATCHER     = ();
-    CORE::die @_; 
-};
-
-## GLOBAL META FUNCTIONS
-
-sub ::meta {
-    my ($class) = @_;
-    confess "::meta called without a class" unless defined $class;
-    $class = blessed($class) || $class;
-    no strict 'refs';
-    return ${"${class}::META"};
-}
-
-sub ::dispatch {
-    my ($self) = @_;    
-    # deal with the MetaClass special case ...
-    if ((blessed($self) && blessed($self) eq 'Perl6::MetaClass')) {
-         goto &_metaclass_dispatch;
-    }
-    else {
-        goto &_normal_dispatch;
-    }
-}
-
-# this dispatch routine avoids
-# all method calls since that 
-# could cause issues.
-sub _metaclass_dispatch {
-    my ($self, $label) = (shift, shift);    
-
-    return if ($label =~ /DESTROY/);
-
-    my $method_table_name;
-    # check the private methods
-    if ($label =~ /^_/) {
-        $method_table_name = '%:private';
-    }
-    else {
-        $method_table_name = '%:class_definition';
-    }
-    # we need to just access stuff directly here
-    # so as to avoid the method call ... but this
-    # is only needed in this package to avoid the
-    # circularity
-
-    my $meta_meta = ::meta($self);
-    # XXX - we are checking the non local table for 
-    # private methods, which is not okay, that part
-    # needs to be fixed. (but at least we are checking
-    # everything here ... )
-    foreach my $meta ($meta_meta, @{$meta_meta->{instance_data}->{'@:superclasses'}}) {
-        my $method_table = $meta->{instance_data}->{$method_table_name}->{methods};
-        return $method_table->{$label}->do($self, @_) if (exists $method_table->{$label});             
-    }
-    confess "Method ($label) not found for instance ($self)";  
-}
-
-sub _normal_dispatch {
-    my ($self, $label) = (shift, shift);     
-    # NOTE:
-    # DESTROYALL is what should really be called
-    # so we just deal with it like this :)
-    if ($label =~ /DESTROY/) {
-        $label = 'DESTROYALL';
-    }
-
-    my @return_value;
-
-    # check if this is a private method
-    if ($label =~ /^_/) {
-        (::dispatch(::meta($self), 'has_method', ($label, (for => 'private'))))
-            || confess "Private Method ($label) not found for instance ($self)";        
-        my $method = ::dispatch(::meta($self), 'get_method', ($label, (for => 'private')));
-        @return_value = $method->do($self, @_);             
-    }
-    else {      
-
-        # get the dispatcher instance ....
-        my $dispatcher = ::dispatch(::meta($self), 'dispatcher', (':canonical'));
-        
-
-        # this needs to be fully qualified for now
-        my $method = ::WALKMETH($dispatcher, $label, (
-                blessed($self) ? 
-                    (blessed($self) eq 'Perl6::Class' ?
-                        (for => 'Class')
-                        :
-                        ()) 
-                    : 
-                    (for => 'Class')
-            )
-        );
-        (blessed($method) && $method->isa('Perl6::Method'))
-            || confess "Method ($label) not found for instance ($self)";        
-
-        push @CURRENT_DISPATCHER => [ $dispatcher, $label, $self, @_ ];
-
-        @return_value = $method->do($self, @_);     
-
-        # we can dispose of this value, as it 
-        # should never be called outside of 
-        # a method invocation
-        pop @CURRENT_DISPATCHER;
-    }
-    # return our values
-    return wantarray ?
-                @return_value
-                :
-                $return_value[0];     
-}
-
-## these get exported to the caller's namespace ...
-
-sub __ {
-    my ($label, $value) = @_;
-    my $class = ::CLASS();
-    my $prop = ::dispatch(::meta($class), 'find_attribute_spec', ($label, for => 'Class'))
-        || confess "Cannot locate class property ($label) in class ($class)";    
-    $prop->set_value($value) if defined $value;    
-    $prop->get_value();    
+    *{"${pkg}::__"}  = \&__;        
 }
 
 sub _ {
-    my ($label, $value) = @_;
-    my $self = ::SELF();
-    if (defined $value) {
-        my $prop = ::dispatch(::meta($self), 'find_attribute_spec', ($label))
-            || confess "Perl6::Attribute ($label) not found";
-        # do some basic container type checking here
-        (ref($value) eq 'ARRAY') 
-            || confess "You can only asssign an ARRAY ref to the label ($label)"
-                if $prop->is_array();
-        (ref($value) eq 'HASH') 
-            || confess "You can only asssign a HASH ref to the label ($label)"
-                if $prop->is_hash();
-        $self->{instance_data}->{$label} = $value;         
-    }
-    # now return it ...
-    $self->{instance_data}->{$label};
+    my $attr = shift;
+    ($::SELF != $::CLASS)
+        || confess 'You cannot change an attribute in $::CLASS using this function';
+    ($::CLASS->find_attribute_spec($attr))
+        || confess "Attribute ($attr) is not a valid attribute for $::SELF";
+    ::opaque_instance_attr($::SELF => $attr) = shift if @_;
+    ::opaque_instance_attr($::SELF => $attr);    
 }
 
-sub role {
-    my ($name, $role) = @_;
-    Perl6::Role->add_role($name, $role);
+sub __ {
+    my $attr = shift;
+    $::CLASS->STORE($attr => shift) if @_;
+    $::CLASS->FETCH($attr);  
 }
 
 sub class {
-    my ($name, $params) = @_;
-    my $class = Perl6::Class->new($name, $params);
-    $class->_apply_class_to_environment();
-    return $class;
+    my ($full_name, $body) = @_;
+    # support generic classes here ...
+    if (defined($body) && defined($_[2]) && ref($body) && ref($body) =~ 'ARRAY') {
+        my ($body, @param_names) = ($_[2], @{$_[1]});
+        my ($name, $version, $authority) = split '-' => $full_name;       
+        return sub {
+            confess "No parameters passed, looking for { "  . (join ", " => @param_names) . " }"
+                unless @_;
+            my %params = @_;
+            return _build_class($name, $version, $authority, sub { $body->(%params) });
+        };
+    }
+    # support anon-classes here ....
+    if (!defined($body) && ref($full_name) && ref($full_name) =~ /HASH|CODE/) {
+        return _build_class('', undef, undef, $full_name);
+    }
+    my ($name, $version, $authority) = split '-' => $full_name;       
+    my $new_class = _build_class($name, $version, $authority, $body);
+    $::{'*'}->STORE('::' . $new_class->name => $new_class);
+    return $new_class;
 }
 
-## GLOBAL FUNCTIONS
-
-sub ::next_METHOD {
-    my ($dispatcher, $label, $self, @args) = @{$CURRENT_DISPATCHER[-1]};             
-    my $method = ::WALKMETH($dispatcher, $label); 
-    return $method->do($self, @args);    
+sub role {
+    my ($full_name, $body) = @_;
+    # support anon-role here
+    if (!defined($body) && ref($full_name) && ref($full_name) =~ /HASH|CODE/) {
+        return _build_role(undef, undef, undef, $full_name);
+    }
+    my ($name, $version, $authority) = split '-' => $full_name;       
+    my $new_role = _build_role($name, $version, $authority, $body);
+    $::{'*'}->STORE('::' . $new_role->name => $new_role);    
+    return $new_role;    
 }
 
-sub ::WALKMETH {
-    my ($dispatcher, $label, %opts) = @_;
-    while (my $current = $dispatcher->next()) {
-        if (::dispatch($current, 'has_method', ($label, %opts))) {
-            return ::dispatch($current, 'get_method', ($label, %opts)) 
+sub _build_class {
+    my ($name, $version, $authority, $body) = @_;
+    
+    my $metaclass = $::Class;
+    $metaclass = $body->{metaclass} 
+        if ref($body) eq 'HASH' && exists $body->{metaclass};
+    
+    my $new_class = $metaclass->new();    
+    
+    $new_class->name($name)           if defined $name;
+    $new_class->version($version)     if defined $version;
+    $new_class->authority($authority) if defined $authority;     
+    
+    if (ref($body) eq 'CODE') {
+        local $::CLASS = $new_class;
+        $body->();
+    }
+    elsif (ref($body) eq 'HASH') {
+        $new_class->superclasses($body->{is}) if exists $body->{is};
+        $new_class->roles($body->{does}) if exists $body->{does};        
+        
+        if ($body->{attributes}) {
+            foreach my $attribute_name (@{$body->{attributes}}) {
+                $new_class->add_attribute($attribute_name => ::make_attribute($attribute_name));
+            }
         }
-    }
-    return undef;
-}
-
-sub ::WALKCLASS {
-    my ($dispatcher, %opts) = @_;
-    return $dispatcher->next();
-}
-
-sub ::SELF {
-    (@Perl6::Method::CURRENT_INVOCANT_STACK)
-        || confess "You cannot call \$?SELF from outside of a MetaModel defined Instance method";
-    $Perl6::Method::CURRENT_INVOCANT_STACK[-1];     
-}
-
-sub ::CLASS {
-    (@Perl6::Method::CURRENT_CLASS_STACK)
-        || confess "You cannot call \$?CLASS from outside of a MetaModel defined method";
-    $Perl6::Method::CURRENT_CLASS_STACK[-1];     
-}
-
-sub ::CALLONE {
-    my ($obj, $methname, $maybe, $opt, $args) = @_;
-    $opt  ||= {};
-    $args ||= [];
-    my $startclass = ::dispatch(::meta($obj), 'dispatcher');
-    push @CURRENT_DISPATCHER => [ $startclass, $methname, $obj, @{$args} ];
-    while (my $method = ::WALKMETH($startclass, $methname, %{$opt})) {
-        return $method->do($obj, @{$args});
-    }
-    confess "Can't locate method '$methname' via class '$startclass'" unless $maybe;
-    return undef;
-}
-
-
-sub ::CALLALL {
-    my ($obj, $methname, $maybe, $force, $opt, $args) = @_;
-    $opt  ||= {};
-    $args ||= [];
-    my $startclass = ::dispatch(::meta($obj), 'dispatcher');
-    push @CURRENT_DISPATCHER => [ $startclass, $methname, $obj, @{$args} ];    
-    my @results;
-    if ($force) {
-        # NOTE:
-        # I am not sure the usefulness of :force, unless
-        # it is to override any 'last METHOD' or other 
-        # calls, because it forces itself into the class
-        # dispatch table, which can only lead to bad thing
-        # if the method is not there ... 
-        while (my $class = ::WALKCLASS($startclass, $methname, %{$opt})) {
-            # redispatch (we don't have symbol tables, so we need to do meta-stuff)
-            return ::dispatch(::meta($class), 'get_method', ($methname)->do($obj, @{$args}));
-        }            
-    }
-    else {
-        while (my $method = ::WALKMETH($startclass, $methname, %{$opt})) {
-            push @results => [ $method->do($obj, @{$args}) ];
+        if ($body->{class_attributes}) {
+            foreach my $attr_name (@{$body->{class_attributes}}) {
+                $new_class->STORE($attr_name => ($attr_name =~ /^@/ ? [] : $attr_name =~ /^%/ ? {} : undef));
+            }
+        }        
+        if ($body->{methods}) {
+            foreach my $method_name (keys %{$body->{methods}}) {
+                if ($method_name =~ /^_/) {
+                    $new_class->add_method($method_name => ::make_private_method(
+                        $body->{methods}->{$method_name}
+                    ));                   
+                }
+                else {
+                    $new_class->add_method($method_name => ::make_method(
+                        $body->{methods}->{$method_name}
+                    ));
+                }
+            }
+        }
+        if ($body->{submethods}) {
+            foreach my $method_name (keys %{$body->{submethods}}) {
+                $new_class->add_method($method_name => ::make_submethod(
+                    $body->{submethods}->{$method_name}
+                ));
+            }
+        }                
+        if ($body->{class_methods}) {
+            foreach my $method_name (keys %{$body->{class_methods}}) {
+                if ($method_name =~ /^_/) {
+                    # we just add a private method in here...
+                    # there is no real distinction between the
+                    # private class method or the private instance 
+                    # method, maybe there should be, but I am not sure
+                    $new_class->add_method($method_name => ::make_private_method(
+                        $body->{class_methods}->{$method_name}
+                    ));
+                }
+                else {
+                    $new_class->add_method($method_name => ::make_class_method(
+                        $body->{class_methods}->{$method_name}
+                    ));                    
+                }
+            }
         }        
     }
-    return @results if @results;
-    return undef    if $maybe;
-    confess "Can't locate method '$methname' via class '$startclass'";
+    
+    $new_class->resolve; # if $body->{does};
+    return $new_class;
 }
 
-## BOOTSTRAPPING
-{
-    # create the Perl6::Object
-    # which in turn will also 
-    # create the Perl6::MetaClass 
-    # metaobject, thus bootstapping
-    # itself.
-    require Perl6::Object;
-    # now we can say that a MetaClass
-    # is a Object ...
-    ::dispatch(::meta('Perl6::MetaClass'), 'superclasses', [ ::meta('Perl6::Object') ]);
+
+sub _build_role {
+    my ($name, $version, $authority, $body) = @_;
+
+    my $new_role = $::Role->new();    
+
+    $new_role->name($name)           if defined $name;
+    $new_role->version($version)     if defined $version;
+    $new_role->authority($authority) if defined $authority;     
+
+    if (ref($body) eq 'CODE') {
+        local $::ROLE = $new_role;
+        $body->();
+    }
+    elsif (ref($body) eq 'HASH') {
+        $new_role->roles($body->{does}) if exists $body->{does};        
+        if ($body->{attributes}) {
+            foreach my $attribute_name (@{$body->{attributes}}) {
+                $new_role->add_attribute($attribute_name => ::make_attribute($attribute_name));
+            }
+        }     
+        if ($body->{methods}) {
+            foreach my $method_name (keys %{$body->{methods}}) {
+                if ($method_name =~ /^_/) {
+                    $new_role->add_method($method_name => ::make_private_method(
+                        $body->{methods}->{$method_name}
+                    ));                    
+                }
+                else {
+                    $new_role->add_method($method_name => ::make_method(
+                        $body->{methods}->{$method_name}
+                    ));
+                }
+            }
+        }
+        if ($body->{submethods}) {
+            foreach my $method_name (keys %{$body->{submethods}}) {
+                $new_role->add_method($method_name => ::make_submethod(
+                    $body->{submethods}->{$method_name}
+                ));
+            }
+        }  
+        if ($body->{class_methods}) {
+            foreach my $method_name (keys %{$body->{class_methods}}) {
+                if ($method_name =~ /^_/) {
+                    # we just add a private method in here...
+                    # there is no real distinction between the
+                    # private class method or the private instance 
+                    # method, maybe there should be, but I am not sure
+                    $new_role->add_method($method_name => ::make_private_method(
+                        $body->{class_methods}->{$method_name}
+                    ));
+                }
+                else {
+                    $new_role->add_method($method_name => ::make_class_method(
+                        $body->{class_methods}->{$method_name}
+                    ));                    
+                }
+            }
+        }                               
+    }
+
+    return $new_role;
 }
+
 
 1;
 
@@ -287,103 +222,34 @@ __END__
 
 =head1 NAME
 
-Perl6::MetaModel - Perl 5 Prototype of the Perl 6 Metaclass model
+Perl6::MetaModel - The Perl 6 Object Meta Model
 
 =head1 SYNOPSIS
 
-    use Perl6::MetaModel;
+  # more Macro-ish form (less typing for you)
+  class 'Foo-0.0.1-cpan:STEVAN' => {
+      is => [ $::Object ],
+      class_methods => {
+          foo => sub { "Hello from foo" },
+          bar => sub { "Hello from bar" },          
+      }
+  };
 
-    role MyRole => {
-        methods => {
-            test => sub { print 'MyRole::test' }
-        }
-    };
-
-    class 'MyClass-0.0.1-cpan:JRANDOM' => {
-        is => [ 'MyBaseClass' ],
-        does => [ 'MyRole' ],
-        class => {
-            methods => {
-                a_class_method => sub { ... }
-            }
-        },
-        instance => {
-            attrs => [ '$.foo' ],
-            BUILD => sub {
-                my ($self) = @_;
-                $self->set_value('$.foo' => 'Foo::Bar');
-            },
-            methods => {
-                tester => sub {
-                    my ($self) = shift;
-                    $self->test(); # call the role method
-                    print $self->get_value('$.foo');
-                }
-            }
-        }
-    };
-
-    my $c = MyClass->new();
-    # or 
-    my $c = 'MyClass-0.0.1-cpan:JRANDOM'->new();
-    
-    $c->foo('Testing 1 2 3');
-
-    $c->tester();
+  # class-is-a-closure form (more typing 
+  # for you, but more control)
+  class 'Foo-0.0.1-cpan:STEVAN' => sub {
+      $::CLASS->superclasses([ $::Object ]);
+      foreach my $name (qw(foo bar)) {
+          $::CLASS->add_method($name => ::make_class_method(sub { "Hello from $name" }, $::CLASS));
+      }
+  };
 
 =head1 DESCRIPTION
 
-This set of modules is a prototype for the Perl 6 Metaclass model, which is the
-model which describes the interactions of classes, objects and roles in the Perl
-6 object space. 
-
-I am prototyping this in Perl 5 as part of the Perl 6 -> PIL compiler to run on
-a Perl 5 VM.  It is currently in the early stages of a refactoring from the
-original which was just a hacked together prototype. 
-
-=head1 EXPORTED FUNCTIONS
-
-These functions are exported and are thin wrappers around the Perl6::Class and Perl6::Role
-modules to make class/role construction easier.
-
-=over 4
-
-=item B<class>
-
-=item B<role>
-
-=back
-
 =head1 SEE ALSO
-
-=over 4
-
-=item All the Perl 6 documentation. 
-
-In particular Apocolypse and Synopsis 12 which describe the object system.
-
-=item L<Class::Role>, L<Class::Roles> & L<Class::Trait>
-
-The first two are early attempts to prototype role behavior, and the last is an implementation
-of the Trait system based on the paper which originally inspired Roles.
-
-=item Any good Smalltalk book.
-
-I prefer the Brown book by Adele Goldberg and David Robinson, but any one which talks about the
-smalltalk metaclasses is a good reference.
-
-=item CLOS
-
-The Common Lisp Object System has a very nice meta-model, and plently of reference on it. In 
-particular there is a small implementation of CLOS called TinyCLOS which is very readable (if 
-you know enough Scheme that is)
-
-=back
 
 =head1 AUTHOR
 
-Stevan Little E<lt>stevan@iinteractive.comE<gt>
+Stevan Little E<gt>stevan@iinteractive.comE<lt>
 
 =cut
-
-

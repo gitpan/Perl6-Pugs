@@ -48,7 +48,7 @@ evalParrotFile file = do
 evalParrot :: String -> IO ()
 evalParrot str = do
     tmp         <- getTemporaryDirectory
-    (file, fh)  <- openTempFile tmp "pugs.imc"
+    (file, fh)  <- openTempFile tmp "pugs.pir"
     hPutStr fh str
     hClose fh
     evalParrotFile file
@@ -60,10 +60,10 @@ evalPGE path match rule subrules = do
     (`mapM` subrules) $ \(name, rule) -> do
         let nameStr = escape name
             ruleStr = escape rule
-	hPutStrLn inp $ unwords
+        hPutStrLn inp $ unwords
             ["add_rule", show (length nameStr), show (length ruleStr)]
-	hPutStrLn inp nameStr
-	hPutStrLn inp ruleStr
+        hPutStrLn inp nameStr
+        hPutStrLn inp ruleStr
     let matchStr = escape match
         ruleStr  = escape rule
     hPutStrLn inp $ unwords
@@ -73,18 +73,18 @@ evalPGE path match rule subrules = do
     hFlush inp
     rv <- hGetLine out
     case rv of
-	('O':'K':' ':sizeStr) -> do
-	    size <- readIO sizeStr
-	    rv	 <- sequence (replicate size (hGetChar out))
-	    ln	 <- hGetLine out
-	    return $ rv ++ ln
-	_ -> do
-	    errMsg  <- hGetContents err
-	    rv      <- waitForProcess pid
-	    writeIORef _ParrotInterp Nothing
-	    let msg | null errMsg = show rv
-		    | otherwise   = errMsg
-	    fail $ "*** Running external 'parrot' failed:\n" ++ msg
+        ('O':'K':' ':sizeStr) -> do
+            size <- readIO sizeStr
+            rv   <- sequence (replicate size (hGetChar out))
+            ln   <- hGetLine out
+            return $ rv ++ ln
+        _ -> do
+            errMsg  <- hGetContents err
+            rv      <- waitForProcess pid
+            writeIORef _ParrotInterp Nothing
+            let msg | null errMsg = show rv
+                    | otherwise   = errMsg
+            fail $ "*** Running external 'parrot' failed:\n" ++ msg
     where
     escape "" = ""
     escape ('\\':xs) = "\\\\" ++ escape xs
@@ -95,16 +95,16 @@ initPGE :: FilePath -> IO ParrotInterp
 initPGE path = do
     rv <- readIORef _ParrotInterp
     case rv of
-	Just interp@(_, _, _, pid) -> do
-	    gone <- getProcessExitCode pid
-	    if isNothing gone then return interp else do
-	    writeIORef _ParrotInterp Nothing
-	    initPGE path
-	Nothing -> do
-	    cmd <- findParrot
-	    interp <- runInteractiveProcess cmd ["run_pge.pir"] (Just path) Nothing 
-	    writeIORef _ParrotInterp (Just interp)
-	    return interp
+        Just interp@(_, _, _, pid) -> do
+            gone <- getProcessExitCode pid
+            if isNothing gone then return interp else do
+            writeIORef _ParrotInterp Nothing
+            initPGE path
+        Nothing -> do
+            cmd <- findParrot
+            interp <- runInteractiveProcess cmd ["run_pge.pir"] (Just path) Nothing 
+            writeIORef _ParrotInterp (Just interp)
+            return interp
 
 type ParrotInterp = (Handle, Handle, Handle, ProcessHandle)
 
@@ -185,7 +185,8 @@ loadPGE interp path = do
     if match /= nullPtr then return (match, add) else do
     cwd     <- getCurrentDirectory
     setCurrentDirectory path
-    evalParrot ".sub main\nload_bytecode 'PGE.pbc'\nload_bytecode 'PGE/Hs.pir'\n.end\n"
+    withCString "PGE.pbc" $ parrot_load_bytecode interp
+    withCString "PGE/Hs.pir" $ parrot_load_bytecode interp
     setCurrentDirectory cwd
     loadPGE interp path
 
@@ -262,6 +263,9 @@ foreign import ccall "Parrot_set_run_core"
 
 foreign import ccall "Parrot_compreg"
     parrot_compreg :: ParrotInterp -> ParrotString -> FunPtr ParrotCompilerFunc -> IO ()
+
+foreign import ccall "Parrot_load_bytecode"
+    parrot_load_bytecode :: ParrotInterp -> CString -> IO ()
 
 foreign import ccall "Parrot_call_sub"
     parrot_call_sub_vv :: ParrotInterp -> ParrotPMC -> CString -> IO ()

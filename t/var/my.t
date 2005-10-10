@@ -7,7 +7,11 @@ use Test;
 # my() declarations scopes lexically to the rest of the block; using $MY::x or
 # $::("x") in the block before the actual declaration is erroneous.
 
-plan 6;
+plan 7;
+
+{
+  is(eval('my $x; my $x; 1'), undef, "test declare my() variable twice in same scope", :todo<bug>);
+}
 
 {
   dies_ok { $x }, 'my() variable not yet visible (2)';

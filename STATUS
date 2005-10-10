@@ -6,49 +6,85 @@ would like current details, please ask on irc.freenode.net #perl6.
 = Backends
 
 - Haskell-Old  Working (delta general pugs bugs)
-- Haskell-PIL  Waiting for PIL2 redesign
-- Java         Nonexistant; metamodel implementation in progress nonetheless
-- JavaScript   Partially working (with rapid progress)
-- Perl 5       Stalled; waiting for PIL transition to settle down
-- PIR          Stalled; waiting for Parrot leo-ctx5 branch to merge
+- Haskell-PIL  Restarted 2005-10-03
+- Java         Nonexistant; partial metamodel implementation nonetheless
+- JavaScript   Passes >90% of main tests (no ext/); missing P6 rules, some
+               builtins, state (needs PIL1 fixes), full OO (needs PIL2)
+- Perl 5       Passes <50% of main tests (no ext/); currently implementing
+               run core, standard types, OO
+- PIR          Restarted 2005-10-04
 
 
 = PIL Transition
 
-* autrijus redesigning PIL format; reported 2005-07-28 that he has completed
-  research, and is ready to design PIL2 in earnest
-* iblech using current PIL format for JavaScript backend
-* Other backends stalled waiting for PIL2
+* autrijus redesigned PIL format (now 'PIL2') in late 2005-07 through 2005-08,
+  but has decided on further improvements after ICFP (beginning of 2005-10)
+* PIL2 infrastructure code restarted as of 2005-10-03
+* PIL2 includes full typing, and is required for full OO, including packages,
+  class declarations, and full use of metamodel
+* Old PIL used by JavaScript and Perl 5 backends, as PIL2 not yet ready
 
 
 = Perl 6 Object Metamodel
 
+* stevan working on MetalModel 2.0, based on MiniMetaModel, as of 2005-08-22
+* MM2 designed to be cleaner, and as minimalist as possible internally,
+  without significant changes to user-facing MM1 API
 * Completion level varies by backend -- each requires its own variant of
   the metamodel implemented in the backend language:
--- Java        In early stages
--- JavaScript  In progress; not yet used by JavaScript backend
--- Perl 5      Most complete; lacking some role functionality still
--- Perl 6      Requires complete rewrite
+-- Haskell     MM2 development and integration to begin after 6.2.10 release
+-- Java        MM1 in early stages and stalled
+-- JavaScript  MM1 integrated into JS backend, but not bootstrapped like
+               Perl 5 version; needs PIL2 for full OO
+-- Perl 5      MM2 fully integrated; also needs PIL2 for full OO
+-- Perl 6      MM2 rewrite started as of 2005-10-02
 
 
 = Embedding
 
-- Perl 5   Works, except that exports don't happen; workaround is to use
+- Parrot   Works with Parrot 0.3.0
+- Perl 5   Works, except that it leaks heavily (refcounts inc but never dec),
+           and exports don't happen -- workaround for latter is to use
            our &method1 := Perl5::Module::Name.can('method1')
-	   or
+               or
            our &method2 := eval('\&Perl5::Module::Name::method', :lang<perl5>)
-- Parrot   Works with Parrot 0.2.2, but head and leo-ctx5 branch need to be
-           merged to keep recent Parrot embedding alive
 
 
 = Laziness
 
-* Laziness not implemented in general
-* Some lazy functions exist (e.g. gather/take), but are actually non-lazy
+* Laziness doesn't currently work for some (most?) backends
+* Some lazy functions do exist (e.g. gather/take), but are actually non-lazy
+* Perl 5 backend (PIL-Run) supports laziness very well
+
+
+= Rules
+
+- Perl 5 regexen
+** Work well in default backend, handled by PCRE
+** Mostly working in JS
+** Specified via perl5 modifier, as in rx:perl5/\Afoo/
+
+- Perl 6 rules
+** Current handled by parrot's PGE, under development; much works, but:
+*** Rule names are global
+*** No support for aliases
+*** No support for embedded closures
+*** Rules do not always behave correctly
+** Other implementations in progress; putter working on several variations,
+   currently blocked on ability to return a Rul (default class that does Rule)
+** Preparing to move all Pugs-hosted Perl 6 rule tests to Parrot repository
+   as of 2005-10-04
+
+- Modifiers
+** Most are unimplemented; the working ones are:
+  :g (mostly), :i :m :s :x (yes? p5-only), :w (p6-only)
 
 
 = Test Suite
 
-* Currently around 8000 tests, including module tests
+* Currently about 10200 tests, including module tests
 * This is known to be only a small percentage of the total needed to cover
-  Perl 6
+  the currently available Perl 6 design
+* putter merged make targets for various testing methods on different backends
+  (test-perl5, test-js, smoke-perl5, etc.)
+* Automated posting to smoke server (http://smoke.pugscode.org/) now possible

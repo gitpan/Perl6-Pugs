@@ -9,7 +9,7 @@ Array refs
 
 =cut
 
-plan 42;
+plan 45;
 
 # array_ref of strings
 
@@ -96,7 +96,9 @@ is     $array9[1][1][1][0], 42, "recursive array access (3)";
 
 # changing nested array
 my $array10 = [[2]];
-is try { $array10[0][0] = 6; $array10[0][0] }, 6, "changing nested array",:todo;
+is try { $array10[0][0] = 6; $array10[0][0] }, 6, "changing nested array (1)";
+my $array11 = [[2,3]];
+is try { $array11[0][0] = 6; $array11[0][0] }, 6, "changing nested array (2)";
 
 # creating a AoA using ";" doesn't work any longer
 # As of http://www.nntp.perl.org/group/perl.perl6.language/20795:
@@ -108,3 +110,15 @@ is try { $array10[0][0] = 6; $array10[0][0] }, 6, "changing nested array",:todo;
 #is +$array11,      2, "AoA created using ';' contains correct number of elems", :todo;
 #is +$array11[0],   3, "AoA's subarray created using ';' contains correct number of elems", :todo;
 #is $array11[1][1], "e", "AoA created using ';' contains correct elem", :todo;
+
+# [] creates new containers (() does not)
+{
+  my $foo;
+  ok !([$foo][0] =:= $foo), "creating arrays using [] creates new containers (1)", :todo<bug>;
+}
+
+{
+  my $foo;
+  my $arrayref = [$foo];
+  ok !($arrayref[0] =:= $foo), "creating arrays using [] creates new containers (2)", :todo<bug>;
+}

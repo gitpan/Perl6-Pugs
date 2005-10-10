@@ -35,6 +35,7 @@ import Pugs.External
 import Pugs.Embed
 import qualified Data.Map as Map
 import Data.IORef
+import System.IO.Error (isEOFError)
 
 import Pugs.Prim.Keyed
 import Pugs.Prim.Yaml
@@ -61,7 +62,7 @@ op0 "want"  = const $ fmap VStr (asks (maybe "Void" envWant . envCaller))
 op0 "bool::true" = const $ return (VBool True)
 op0 "bool::false" = const $ return (VBool False)
 op0 "time"  = const $ do
-    clkt <- liftIO getClockTime
+    clkt <- guardIO getClockTime
     return $ VRat $ fdiff $ diffClockTimes clkt epochClkT
     where
        epochClkT = toClockTime epoch
@@ -71,17 +72,17 @@ op0 "time"  = const $ do
                    / (clocksPerSecond * clocksPerSecond)
                    + (fromIntegral $ tdSec d)
 op0 "times"  = const $ do
-    ProcessTimes _ u s cu cs <- liftIO getProcessTimes
+    ProcessTimes _ u s cu cs <- guardIO getProcessTimes
     return . VList $ map (castV . (% (clocksPerSecond :: VInt)) . toInteger . fromEnum)
         [u, s, cu, cs]
 op0 "so" = const (return $ VBool True)
 op0 "¥" = op0Zip
 op0 "Y" = op0 "¥"
 op0 "File::Spec::cwd" = const $ do
-    cwd <- liftIO getCurrentDirectory
+    cwd <- guardIO getCurrentDirectory
     return $ VStr cwd
 op0 "File::Spec::tmpdir" = const $ do
-    tmp <- liftIO getTemporaryDirectory
+    tmp <- guardIO getTemporaryDirectory
     return $ VStr tmp
 op0 "pi" = const $ return (VNum pi)
 op0 "say" = const $ op1 "IO::say" (VHandle stdout)
@@ -108,13 +109,10 @@ op1 "clone" = \x -> do
     writeIVar (IHash attrs') attrs
     return $ VObject o{ objAttrs = attrs', objId = uniq }
 op1 "chop" = \x -> do
-    ref <- fromVal x
     str <- fromVal x
     if null str
-        then return undef
-        else do
-            writeRef ref $ VStr (init str)
-            return $ VStr [last str]
+        then return $ VStr str
+        else return $ VStr $ init str
 op1 "chomp" = \x -> do
     str <- fromVal x
     if null str || last str /= '\n'
@@ -175,7 +173,7 @@ op1 "--"   = \mv -> do
     op1 "post:--" mv
     fromVal mv
 op1 "-"    = op1Numeric negate
-op1 "scalar" = return -- XXX refify?
+op1 "item" = return -- XXX refify?
 op1 "sort" = \v -> do
     args    <- fromVal v
     (valList, sortBy) <- case args of
@@ -243,9 +241,11 @@ op1 "require_parrot" = \v -> do
     return $ VBool True
 op1 "require_perl5" = \v -> do
     name    <- fromVal v
-    val     <- op1 "Pugs::Internals::eval_perl5" (VStr $ "require " ++ name ++ "; '" ++ name ++ "'");
+    val     <- op1 "Pugs::Internals::eval_perl5" (VStr $ "require " ++ name ++ "; '" ++ name ++ "'")
     evalExp $ Sym SGlobal ('$':'*':name) (Syn ":=" [Var ('$':'*':name), Val val])
-    return val
+    case val of
+        PerlSV _  -> return val
+        _         -> fail "perl5 is not available"
 op1 "Pugs::Internals::eval_parrot" = \v -> do
     code    <- fromVal v
     liftIO . evalParrot $ case code of
@@ -297,7 +297,7 @@ op1 "sign" = \v -> if defined v
 
 op1 "rand"  = \v -> do
     x    <- fromVal v
-    rand <- liftIO $ randomRIO (0, if x == 0 then 1 else x)
+    rand <- guardIO $ randomRIO (0, if x == 0 then 1 else x)
     return $ VNum rand
 op1 "say" = op2 "IO::say" (VHandle stdout)
 op1 "print" = op2 "IO::print" (VHandle stdout)
@@ -305,13 +305,11 @@ op1 "IO::say" = \v -> op2 "IO::say" v =<< readVar "$_"
 op1 "IO::print" = \v -> op2 "IO::print" v =<< readVar "$_"
 op1 "IO::next" = \v -> do
     fh  <- fromVal v
-    tryIO undef $
-        fmap (VStr . (++ "\n") . decodeUTF8) (hGetLine fh)
+    guardIO $ fmap (VStr . (++ "\n") . decodeUTF8) (hGetLine fh)
 op1 "Pugs::Safe::safe_print" = \v -> do
     str  <- fromVal v
-    tryIO undef $ do
-        hPutStr stdout $ encodeUTF8 str
-        return $ VBool True
+    guardIO $ hPutStr stdout $ encodeUTF8 str
+    return $ VBool True
 op1 "die" = \v -> do
     strs <- fromVal v
     fail (errmsg . concat $ strs)
@@ -345,19 +343,19 @@ op1 "fail_" = \v -> do
 op1 "exit" = op1Exit
 op1 "readlink" = \v -> do
     str  <- fromVal v
-    tryIO undef $ fmap VStr (readSymbolicLink str)
+    guardIO $ fmap VStr (readSymbolicLink str)
 op1 "sleep" = \v -> do
     x <- fromVal v
-    tryIO undef $ do
-       TOD t0s t0ps <- liftIO getClockTime
-       threadDelay (x * clocksPerSecond)
-       TOD t1s t1ps <- liftIO getClockTime
-       return $ VRat ((fromInteger $ t1ps - t0ps)
+    guardIO $ do
+        TOD t0s t0ps <- getClockTime
+        threadDelay (x * clocksPerSecond)
+        TOD t1s t1ps <- getClockTime
+        return $ VRat ((fromInteger $ t1ps - t0ps)
                       / (clocksPerSecond * clocksPerSecond) -- 10^12
                       + (fromInteger $ t1s - t0s))
-op1 "mkdir" = boolIO createDirectory
-op1 "rmdir" = boolIO removeDirectory
-op1 "chdir" = boolIO setCurrentDirectory
+op1 "mkdir" = guardedIO createDirectory
+op1 "rmdir" = guardedIO removeDirectory
+op1 "chdir" = guardedIO setCurrentDirectory
 op1 "-r"    = FileTest.isReadable
 op1 "-w"    = FileTest.isWritable
 op1 "-x"    = FileTest.isExecutable
@@ -379,14 +377,14 @@ op1 "unlink" = \v -> do
     return $ VInt $ sum $ map bool2n rets
 op1 "readdir" = \v -> do
     path  <- fromVal v
-    files <- liftIO $ getDirectoryContents path
+    files <- guardIO $ getDirectoryContents path
     return . VList $ map VStr files
 op1 "slurp" = \v -> do
     ifValTypeIsa v "IO"
         (do h <- fromVal v
             ifListContext
                 (op1 "=" v)
-                (fmap VStr (liftIO $ hGetContents h)))
+                (fmap VStr (guardIO $ hGetContents h)))
         (do
             fileName    <- fromVal v
             ifListContext
@@ -394,24 +392,21 @@ op1 "slurp" = \v -> do
                 (slurpScalar fileName))
     where
     slurpList file = op1 "=" (VList [VStr file])
-    slurpScalar file = tryIO VUndef $ do
-        content <- readFile file
+    slurpScalar file = do
+        content <- guardIO $ readFile file
         return $ VStr content
 op1 "opendir" = \v -> do
     str <- fromVal v
-    rv  <- tryIO Nothing . fmap Just $ openDirStream str
-    case rv of
-        Nothing     -> return undef
-        Just dir    -> do
-            obj <- createObject (mkType "IO::Dir") []
-            return . VObject $ obj{ objOpaque = Just $ toDyn dir }
-op1 "IO::Dir::closedir" = boolIO (closeDirStream . fromObject)
-op1 "IO::Dir::rewinddir" = boolIO (rewindDirStream . fromObject)
+    dir <- guardIO $ openDirStream str
+    obj <- createObject (mkType "IO::Dir") []
+    return . VObject $ obj{ objOpaque = Just $ toDyn dir }
+op1 "IO::Dir::closedir" = guardedIO (closeDirStream . fromObject)
+op1 "IO::Dir::rewinddir" = guardedIO (rewindDirStream . fromObject)
 op1 "IO::Dir::readdir" = \v -> do
     dir <- fmap fromObject (fromVal v)
     ifListContext
         (fmap castV $ readDirStreamList dir)
-        (tryIO undef $ fmap (\x -> if null x then undef else castV x) $ readDirStream dir)
+        (guardIO $ fmap (\x -> if null x then undef else castV x) $ readDirStream dir)
     where
     readDirStreamList dir = do
         this <- tryIO "" $ readDirStream dir
@@ -420,7 +415,7 @@ op1 "IO::Dir::readdir" = \v -> do
         return $ (this:rest)
 op1 "Pugs::Internals::runInteractiveCommand" = \v -> do
     str <- fromVal v
-    tryIO undef $ do
+    guardIO $ do
         (inp,out,err,phand) <- runInteractiveCommand str
         return $ VList [ VHandle inp
                        , VHandle out
@@ -436,7 +431,7 @@ op1 "Pugs::Internals::check_for_io_leak" = \v -> do
     return rv
 op1 "system" = \v -> do
     cmd         <- fromVal v
-    exitCode    <- liftIO $ system cmd
+    exitCode    <- guardIO $ system cmd
     case exitCode of
         ExitFailure x -> do
             glob    <- askGlobal
@@ -446,7 +441,7 @@ op1 "system" = \v -> do
         ExitSuccess -> return $ VBool True
 op1 "accept" = \v -> do
     socket      <- fromVal v
-    (h, _, _)   <- liftIO $ accept socket
+    (h, _, _)   <- guardIO $ accept socket
     return $ VHandle h
 op1 "detach" = \v -> do
     case v of
@@ -457,7 +452,7 @@ op1 "detach" = \v -> do
 op1 "kill" = \v -> do
     case v of
         VThread thr -> do
-            liftIO . killThread $ threadId thr
+            guardIO . killThread $ threadId thr
             return $ VBool True
         _           -> fail $ "Not a thread: " ++ show v
 op1 "join" = \v -> do
@@ -468,7 +463,7 @@ op1 "async" = \v -> do
     env     <- ask
     code    <- fromVal v
     lock    <- liftSTM $ newEmptyTMVar
-    tid     <- liftIO . (if rtsSupportsBoundThreads then forkOS else forkIO) $ do
+    tid     <- guardIO . (if rtsSupportsBoundThreads then forkOS else forkIO) $ do
         val <- runEvalIO env $ do
             enterEvalContext CxtVoid $ App (Val code) Nothing []
         liftSTM $ tryPutTMVar lock val
@@ -479,13 +474,13 @@ op1 "async" = \v -> do
         }
 op1 "listen" = \v -> do
     port    <- fromVal v
-    socket  <- liftIO $ listenOn (PortNumber $ fromInteger port)
+    socket  <- guardIO $ listenOn (PortNumber $ fromInteger port)
     return $ VSocket socket
-op1 "flush" = boolIO hFlush
+op1 "flush" = guardedIO hFlush
 op1 "close" = \v -> do
     case v of
-        (VSocket _) -> boolIO sClose v
-        _           -> boolIO hClose v
+        (VSocket _) -> guardedIO sClose v
+        _           -> guardedIO hClose v
 op1 "key" = fmap fst . (fromVal :: Val -> Eval VPair)
 op1 "value" = \v -> do
     ivar <- join $ doPair v pair_fetchElem
@@ -519,12 +514,12 @@ op1 "readline" = \v -> op1Read v (getLines) (getLine)
                 return $ VList (line:rest)
             else return $ VList []
     getLine :: VHandle -> Eval Val
-    getLine fh = tryIO undef $
+    getLine fh = guardIOexcept [(isEOFError, undef)] $
         fmap (VStr . (++ "\n") . decodeUTF8) (hGetLine fh)
 op1 "getc"     = \v -> op1Read v (getChar) (getChar)
     where
     getChar :: VHandle -> Eval Val
-    getChar fh = tryIO undef $ do
+    getChar fh = guardIOexcept [(isEOFError, undef)] $ do
         char <- hGetChar fh
         str  <- getChar' fh char
         return $ VStr $ decodeUTF8 str
@@ -563,7 +558,7 @@ op1 "gather" = \v -> do
     evl <- asks envEval
     evl (Syn "gather" [Val v])
 op1 "Thread::yield" = const $ do
-    ok <- tryIO False $ do { yield ; return True }
+    ok <- tryIO False $ do { yield ; return True } -- change to guardIO?
     return $ VBool ok
 op1 "DESTROYALL" = op1WalkAllNoArgs id "DESTROY"
 -- [,] is a noop -- It simply returns the input list
@@ -575,8 +570,16 @@ op1 "Code::body"  = op1CodeBody
 op1 "Code::pos"   = op1CodePos
 op1 "IO::tell"    = \v -> do
     h <- fromVal v
-    res <- liftIO $ hTell h
+    res <- guardIO $ hTell h
     return $ VInt res
+op1 "TEMP" = \v -> do
+    ref <- fromVal v
+    val <- readRef ref
+    return . VCode $ mkPrim
+        { subBody = Prim . const $ do
+            writeRef ref val
+            retEmpty
+        }
 op1 "Pugs::Internals::hIsOpen" = op1IO hIsOpen
 op1 "Pugs::Internals::hIsClosed" = op1IO hIsClosed
 op1 "Pugs::Internals::hIsReadable" = op1IO hIsReadable
@@ -588,17 +591,34 @@ op1 "Pugs::Internals::reduceVar" = \v -> do
 op1 "Pugs::Internals::rule_pattern" = \v -> do
     case v of
         VRule MkRulePGE{rxRule=re} -> return $ VStr re
+        VRule MkRulePCRE{rxRuleStr=re} -> return $ VStr re
         _ -> fail $ "Not a rule: " ++ show v
 op1 "Pugs::Internals::rule_adverbs" = \v -> do
     case v of
         VRule MkRulePGE{rxAdverbs=hash} -> return hash
+        VRule MkRulePCRE{rxAdverbs=hash} -> return hash
         _ -> fail $ "Not a rule: " ++ show v
+op1 "Pugs::Internals::current_pragma_value" = \v -> do
+    name <- fromVal v
+    prags <- asks envPragmas
+    return $ findPrag name prags
+    where
+        findPrag :: String -> [Pragma] -> Val
+        findPrag _ [] = VUndef
+        findPrag n (this:rest)
+            | n == pragName this = VInt $ toInteger $ pragDat this
+            | otherwise          = findPrag n rest
+op1 "Pugs::Internals::caller_pragma_value" = \v -> do
+    caller <- asks envCaller
+    case caller of
+        Just env -> local (const env) (op1 "Pugs::Internals::current_pragma_value" v)
+        _        -> return $ VUndef
 op1 other   = \_ -> fail ("Unimplemented unaryOp: " ++ other)
 
 op1IO :: Value a => (Handle -> IO a) -> Val -> Eval Val
 op1IO = \fun v -> do
     val <- fromVal v
-    fmap castV (liftIO $ fun val)
+    fmap castV (guardIO $ fun val)
 
 returnList :: [Val] -> Eval Val
 returnList vals = ifListContext
@@ -674,7 +694,7 @@ Read a char or a line from a handle.
 -}
 op1Read :: Val                   -- ^ The handle to read from (packed in a 'Val')
         -> (VHandle -> Eval Val) -- ^ The function to call in list context
-        -> (VHandle -> Eval Val) -- ^ The function to call in scalar context
+        -> (VHandle -> Eval Val) -- ^ The function to call in item context
         -> Eval Val              -- ^ The return value (a list of strings or a
                                  --   string, packed in a 'Val')
 op1Read v fList fScalar = do
@@ -701,10 +721,7 @@ op1Read v fList fScalar = do
                         writeVar "$*ARGS" (VHandle hdl)
                         return hdl
     handleOf (VStr x) = do
-        rv <- tryIO Nothing (fmap Just $ openFile x ReadMode)
-        case rv of
-            Nothing  -> retError "No such file or directory" x
-            Just hdl -> return hdl
+        return =<< guardIO $ openFile x ReadMode
     handleOf (VList [x]) = handleOf x
     handleOf v = fromVal v
 
@@ -720,19 +737,19 @@ doBoolIO f v = do
         f x
         return True
 
-boolIO :: Value a => (a -> IO b) -> Val -> Eval Val
-boolIO f v = do
-    ok <- doBoolIO f v
-    return $ VBool ok
+guardedIO :: Value a => (a -> IO b) -> Val -> Eval Val
+guardedIO f v = do
+    x <- fromVal v
+    guardIO $ f x
+    return $ VBool True
 
-boolIO2 :: (Value a, Value b)
+guardedIO2 :: (Value a, Value b)
     => (a -> b -> IO c) -> Val -> Val -> Eval Val
-boolIO2 f u v = do
+guardedIO2 f u v = do
     x <- fromVal u
     y <- fromVal v
-    tryIO (VBool False) $ do
-        f x y
-        return (VBool True)
+    guardIO $ f x y
+    return $ VBool True
 
 mapStr :: (Word8 -> Word8) -> [Word8] -> String
 mapStr f = map (chr . fromEnum . f)
@@ -751,9 +768,9 @@ mapStr2Fill f x y = map (chr . fromEnum . uncurry f) $ x `zipFill` y
 
 -- |Implementation of 2-arity primitive operators and functions
 op2 :: String -> Val -> Val -> Eval Val
-op2 "rename" = boolIO2 rename
-op2 "symlink" = boolIO2 createSymbolicLink
-op2 "link" = boolIO2 createLink
+op2 "rename" = guardedIO2 rename
+op2 "symlink" = guardedIO2 createSymbolicLink
+op2 "link" = guardedIO2 createLink
 op2 "*"  = op2Numeric (*)
 op2 "/"  = op2Divide
 op2 "%"  = op2Modulus
@@ -797,7 +814,8 @@ op2 "gt" = op2Cmp vCastStr (>)
 op2 "ge" = op2Cmp vCastStr (>=)
 op2 "~~" = op2Match
 op2 "!~" = \x y -> op1Cast (VBool . not) =<< op2Match x y
-op2 "=:=" = op2Identity
+op2 "=:=" = op2Identity -- XXX wrong, needs to compare container only
+op2 "eqv" = op2Identity -- XXX wrong, needs to compare objects only
 op2 "&&" = op2Logical (fmap not . fromVal)
 op2 "||" = op2Logical (fmap id . fromVal)
 op2 "^^" = \x y -> do
@@ -807,12 +825,6 @@ op2 "^^" = \x y -> do
         xor False False = VBool False
     op2Cast xor x y
 op2 "//" = op2Logical (return . defined)
-op2 "!!" = \x y -> callCC $ \esc -> do
-    bx <- fromVal x
-    when bx $ esc (VBool False)
-    by <- fromVal y
-    when by $ esc (VBool False)
-    return (VBool True)
 op2 ".[]" = \x y -> do
     evl <- asks envEval
     evl $ Syn "[]" [Val x, Val y]
@@ -824,7 +836,6 @@ op2 "and"= op2 "&&"
 op2 "or" = op2 "||"
 op2 "xor"= op2 "^^"
 op2 "err"= op2 "//"
-op2 "nor"= op2 "!!"
 op2 "grep" = op2Grep
 op2 "map"  = op2Map
 op2 "join" = op2Join
@@ -858,19 +869,18 @@ op2 "Str::split" = flip op2Split
 op2 "connect" = \x y -> do
     host <- fromVal x
     port <- fromVal y
-    hdl  <- liftIO $ connectTo host (PortNumber $ fromInteger port)
+    hdl  <- guardIO $ connectTo host (PortNumber $ fromInteger port)
     return $ VHandle hdl
 op2 "Pugs::Internals::hSetBinaryMode" = \x y -> do
     fh    <- fromVal x
     mode  <- fromVal y
-    liftIO $ hSetBinaryMode fh mode
+    guardIO $ hSetBinaryMode fh mode
     return $ VBool True
 op2 "Pugs::Internals::openFile" = \x y -> do
     filename <- fromVal x
     mode     <- fromVal y
-    tryIO undef $ do
-        fh <- openFile filename (modeOf mode)
-        return $ VHandle fh
+    hdl      <- guardIO $ openFile filename (modeOf mode)
+    return $ VHandle $ hdl
     where
     modeOf "r"  = ReadMode
     modeOf "w"  = WriteMode
@@ -893,16 +903,10 @@ op2 "Pugs::Internals::sprintf" = \x y -> do
        VInt i -> printf str i
        VStr s -> printf str s
        _      -> fail "should never be reached given the type declared below"
-op2 "exec" = \x y -> do
-    prog  <- fromVal x
-    args  <- fromVals y
-    tryIO (VBool False) $ do
-        executeFile prog True args Nothing
-        return $ VBool True
 op2 "system" = \x y -> do
     prog        <- fromVal x
     args        <- fromVals y
-    exitCode    <- liftIO $ rawSystem prog args
+    exitCode    <- guardIO $ rawSystem prog args
     case exitCode of
         ExitFailure x -> do
             glob    <- askGlobal
@@ -928,6 +932,16 @@ op2 "sort" = \x y -> do
 op2 "IO::say" = op2Print hPutStrLn
 op2 "IO::print" = op2Print hPutStr
 op2 "BUILDALL" = op1WalkAll reverse "BUILD"
+op2 "Pugs::Internals::install_pragma_value" = \x y -> do
+    name <- fromVal x
+    val  <- fromVal y
+    idat <- asks envInitDat
+    idatval <- liftSTM $ readTVar idat
+    --trace ("installing " ++ name ++ "/" ++ (show val)) $ return ()
+    let prag = initPragmas idatval
+    liftSTM $ writeTVar idat idatval{initPragmas = 
+        MkPrag{ pragName=name, pragDat=val } : prag }
+    return (VBool True)
 op2 other = \_ _ -> fail ("Unimplemented binaryOp: " ++ other)
 
 op2Print :: (Handle -> String -> IO ()) -> Val -> Val -> Eval Val
@@ -936,7 +950,7 @@ op2Print f h v = do
     strs   <- mapM fromVal =<< case v of
         VList vs  -> return vs
         _         -> return [v]
-    tryIO undef $ do
+    guardIO $ do
         f handle . concatMap encodeUTF8 $ strs
         return $ VBool True
 
@@ -958,6 +972,20 @@ op2Split x y = do
 
 -- |Implementation of 3-arity primitive operators and functions
 op3 :: String -> Val -> Val -> Val -> Eval Val
+op3 "Pugs::Internals::exec" = \x y z -> do
+    prog  <- fromVal x
+    shell <- fromVal y
+    args  <- fromVals z
+    exitCode    <- guardIO $ executeFile' prog shell args Nothing
+    case exitCode of
+        ExitFailure x -> do
+            glob    <- askGlobal
+            errSV   <- findSymRef "$!" glob
+            writeRef errSV (VInt $ toInteger x)
+            return $ VBool False
+        ExitSuccess -> do
+            guardIO $ exitWith ExitSuccess
+            return $ VBool True -- not reached ;-)
 op3 "Pugs::Internals::caller" = \x y z -> do
     --kind <- fromVal =<< op1 "ref" x
     kind <- case x of
@@ -1009,7 +1037,7 @@ op3 "Object::new" = \t n p -> do
     writeIVar (IHash attrs) named
     uniq    <- liftIO $ newUnique
     env     <- ask
-    unless (positionals == VList []) (fail "Can't use positionals in default new constructor")
+    unless (positionals == VList []) (fail "Must only use named arguments to new() constructor")
     let obj = VObject $ MkObject
             { objType   = typ
             , objAttrs  = attrs
@@ -1019,7 +1047,7 @@ op3 "Object::new" = \t n p -> do
     -- Now start calling BUILD for each of parent classes (if defined)
     op2 "BUILDALL" obj $ (VRef . hashRef) named
     -- Register finalizers by keeping weakrefs somehow
-    liftIO $ do
+    guardIO $ do
         objRef <- mkWeakPtr obj (Just $ objectFinalizer env obj)
         modifyIORef _GlobalFinalizer (>> finalize objRef)
     return obj
@@ -1027,7 +1055,7 @@ op3 "Pugs::Internals::localtime"  = \x y z -> do
     wantString <- fromVal x
     sec <- fromVal y
     pico <- fromVal z
-    c <- liftIO $ toCalendarTime $ TOD (offset + sec) pico
+    c <- guardIO $ toCalendarTime $ TOD (offset + sec) pico
     if wantString then return $ VStr $ calendarTimeToString c else
         returnList $ [ vI $ ctYear c
                      , vI $ (1+) $ fromEnum $ ctMonth c
@@ -1049,7 +1077,7 @@ op3 "Pugs::Internals::hSeek" = \x y z -> do
     handle <- fromVal x
     pos <- fromVal y
     mode <- fromVal z
-    liftIO $ hSeek handle (modeOf mode) pos
+    guardIO $ hSeek handle (modeOf mode) pos
     retEmpty
     where
         modeOf :: Int -> SeekMode
@@ -1269,7 +1297,7 @@ primOp sym assoc prms ret isSafe =
          = "&*" ++ fixity ++ (':':sym)
     sub  = codeRef $ mkPrim
         { subName     = sym
-        , subType     = SubPrim
+        , subType     = if sym == "Object::new" then SubMethod else SubPrim
         , subAssoc    = assoc
         , subParams   = prms
         , subReturns  = mkType ret
@@ -1318,7 +1346,7 @@ primDecl str = primOp sym assoc params ret (safe == "safe")
 
 -- op1 "perl"
 prettyVal :: Int -> Val -> Eval VStr
-prettyVal 10 _ = return "..."
+prettyVal 1024 _ = return " ... "
 prettyVal d v@(VRef r) = do
     v'  <- readRef r
     ifValTypeIsa v "Pair"
@@ -1365,7 +1393,9 @@ objectFinalizer env obj = do
 --
 -- >  ret_val   assoc   op_name [safe|unsafe] args
 initSyms :: STM [Pad -> Pad]
-initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
+initSyms = mapM primDecl syms
+    where
+    syms = filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      spre    !       safe   (Bool)\
 \\n   Num       spre    +       safe   (Num)\
 \\n   Num       pre     abs     safe   (?Num=$_)\
@@ -1402,7 +1432,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     list    safe   (List)\
 \\n   Hash      pre     hash    safe   (List)\
 \\n   List      pre     pair    safe   (List)\
-\\n   Scalar    pre     scalar  safe   (Scalar)\
+\\n   Scalar    pre     item    safe   (Scalar)\
 \\n   Any       pre     reverse safe   (rw!Any)\
 \\n   Any       pre     reverse safe   (List)\
 \\n   Int       spre    +^      safe   (Int)\
@@ -1520,7 +1550,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      pre     slurp   unsafe (?Str=$_)\
 \\n   List      pre     slurp   unsafe (Handle)\
 \\n   List      pre     readdir unsafe (Str)\
-\\n   Bool      pre     exec    unsafe (Str: List)\
+\\n   Bool      pre     Pugs::Internals::exec    unsafe (Str, Bool, List)\
 \\n   Int       pre     system  unsafe (Str)\
 \\n   Int       pre     system  unsafe (Str: List)\
 \\n   Bool      pre     binmode unsafe (IO: ?Int=1)\
@@ -1604,6 +1634,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      chain   !=      safe   (Num, Num)\
 \\n   Bool      chain   ==      safe   (Num, Num)\
 \\n   Bool      chain   =:=     safe   (rw!Any, rw!Any)\
+\\n   Bool      chain   eqv     safe   (Any, Any)\
 \\n   Bool      chain   ~~      safe   (rw!Any, Any)\
 \\n   Bool      chain   !~      safe   (Any, Any)\
 \\n   Bool      chain   <       safe   (Num, Num)\
@@ -1617,7 +1648,6 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Bool      chain   gt      safe   (Str, Str)\
 \\n   Bool      chain   ge      safe   (Str, Str)\
 \\n   Scalar    left    &&      safe   (Bool, ~Bool)\
-\\n   Scalar    left    !!      safe   (Bool, ~Bool)\
 \\n   Scalar    left    ||      safe   (Bool, ~Bool)\
 \\n   Scalar    left    ^^      safe   (Bool, Bool)\
 \\n   Scalar    left    //      safe   (Bool, ~Bool)\
@@ -1629,7 +1659,6 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   List      left    ==>     safe   (List, Code)\
 \\n   Scalar    left    and     safe   (Bool, ~Bool)\
 \\n   Scalar    left    or      safe   (Bool, ~Bool)\
-\\n   Scalar    left    nor     safe   (Bool, ~Bool)\
 \\n   Scalar    left    xor     safe   (Bool, Bool)\
 \\n   Scalar    left    err     safe   (Bool, ~Bool)\
 \\n   Str       pre     chr     safe   (?Int=$_)\
@@ -1649,6 +1678,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Object    pre     Object::new     safe   (Object: Named)\
 \\n   Object    pre     BUILDALL   safe   (Object)\
 \\n   Object    pre     DESTROYALL safe   (Object)\
+\\n   Code      pre     TEMP    safe   (rw!Any)\
 \\n   Object    pre     clone   safe   (Any)\
 \\n   Object    pre     id      safe   (Any)\
 \\n   Bool      pre     Thread::yield   safe   (Thread)\
@@ -1680,4 +1710,7 @@ initSyms = mapM primDecl . filter (not . null) . lines $ decodeUTF8 "\
 \\n   Any       pre     Pugs::Internals::reduceVar  unsafe (Str)\
 \\n   Str       pre     Pugs::Internals::rule_pattern safe (Pugs::Internals::VRule)\
 \\n   Hash      pre     Pugs::Internals::rule_adverbs safe (Pugs::Internals::VRule)\
+\\n   Int       pre     Pugs::Internals::install_pragma_value safe (Str, Int)\
+\\n   Bool      pre     Pugs::Internals::current_pragma_value safe (Str)\
+\\n   Bool      pre     Pugs::Internals::caller_pragma_value safe (Str)\
 \\n"
