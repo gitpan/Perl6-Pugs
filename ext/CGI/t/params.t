@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 plan 30;
 
@@ -11,7 +11,7 @@ More advanced tests for params
 
 =cut
 
-use_ok('CGI');
+use CGI; pass "(dummy instead of broken use_ok)";
 
 {
     my $query_string = 'multi=1;multi=2;multi=3';

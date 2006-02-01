@@ -30,9 +30,9 @@ import Data.IORef
 import System.FilePath
 import qualified Data.Map as Map
 
-
+#ifndef HADDOCK
 #include "PreludePC.hs"
-
+#endif
 
 {-|
 Run 'Main.run' with command line args. 
@@ -145,6 +145,8 @@ prepareEnv name args = do
         , genSym "$=POD"        $ MkRef $ constScalar (VStr "")
         -- To answer the question "what revision does evalbot run on?"
         , genSym "$?PUGS_VERSION" $ MkRef $ constScalar (VStr $ getConfig "pugs_version")
+        -- If you change the name or contents of $?PUGS_BACKEND, be sure
+        -- to update all t/ and perl5/{PIL2JS,PIL-Run} as well.
         , genSym "$?PUGS_BACKEND" $ MkRef $ constScalar (VStr "BACKEND_PUGS")
         , genSym "$*OS"         $ hideInSafemode $ MkRef $ constScalar (VStr $ getConfig "osname")
         , genSym "&?BLOCK_EXIT" $ codeRef $ mkPrim
@@ -155,14 +157,21 @@ prepareEnv name args = do
         , genSym "$*_" $ MkRef defSV
         , genSym "$*AUTOLOAD" $ MkRef autoSV
         ] ++ classes
+    -- defSVcell <- (genSym "$_" . MkRef) =<< newScalar undef
+    let env' = env
+    {-
+            { envLexical  = defSVcell (envLexical env)
+            , envImplicit = Map.singleton "$_" ()
+            }
+    -}
     unless safeMode $ do
-        initPerl5 "" (Just . VControl $ ControlEnv env{ envDebug = Nothing })
+        initPerl5 "" (Just . VControl $ ControlEnv env'{ envDebug = Nothing })
         return ()
-    initPreludePC env              -- null in first pass
+    initPreludePC env'             -- null in first pass
     where
     hideInSafemode x = if safeMode then MkRef $ constScalar undef else x
 
-initClassObjects :: [Type] -> ClassTree -> IO [STM (Pad -> Pad)]
+initClassObjects :: [Type] -> ClassTree -> IO [STM PadMutator]
 initClassObjects parent (Node typ children) = do
     obj     <- createObject (mkType "Class") $
         [ ("name",   castV $ showType typ)

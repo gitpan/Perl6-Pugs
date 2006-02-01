@@ -7,7 +7,7 @@ use Test;
 
 # Return value of assignments of Proxy objects is decided now.
 # See thread "Assigning Proxy objects" on p6l,
-# http://www.nntp.perl.org/group/perl.perl6.language/21838.
+# L<"http://www.nntp.perl.org/group/perl.perl6.language/21838">.
 # Quoting Larry:
 #   The intention is that lvalue subs behave in all respects as if they
 #   were variables.  So consider what
@@ -21,12 +21,12 @@ plan 18;
 my $foo        = 42;
 my $was_inside = 0;
 
-eval 'sub lvalue_test1() is rw {
+sub lvalue_test1() is rw {
   $was_inside++;
   return new Proxy:
     FETCH => { 100 + $foo },
     STORE => { $foo = $^new - 100 };
-}';
+};
 
 {
     is $foo, 42,       "basic sanity (1)";
@@ -47,12 +47,12 @@ eval 'sub lvalue_test1() is rw {
 $foo        = 4;
 $was_inside = 0;
 
-eval 'sub lvalue_test2() is rw {
+sub lvalue_test2() is rw {
   $was_inside++;
   return new Proxy:
     FETCH => { 10 + $foo },
     STORE => { $foo = $^new - 100 };
-}';
+};
 
 {
     is $foo, 4,        "basic sanity (3)";

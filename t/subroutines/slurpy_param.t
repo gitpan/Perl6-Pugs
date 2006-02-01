@@ -10,9 +10,9 @@ These tests are the testing for "List paameters" section of Synopsis 06
 
 L<<S06/"List parameters" /Slurpy parameters follow any required or optional parameters. They are marked by a * before the parameter:/>>
 
-You might also be interested in the thread L<"Calling positionals by name in
+You might also be interested in the thread Calling positionals by name in
 presence of a slurpy hash" on p6l started by Ingo
-Blechschmidt|http://www.nntp.perl.org/group/perl.perl6.language/22883>.
+Blechschmidt L<"http://www.nntp.perl.org/group/perl.perl6.language/22883">
 
 =cut
 
@@ -73,25 +73,25 @@ dies_ok { foo 1, x => 20, y => 300, 4000 },
 # Named with slurpy *%h and slurpy *@a
 # named arguments aren't required in tests below
 {
-my sub foo(+$n, *%h, *@a) { };
-my sub foo1(+$n, *%h, *@a) { $n };
-my sub foo2(+$n, *%h, *@a) { %h<x> + %h<y> + %h<n> };
-my sub foo3(+$n, *%h, *@a) { return @a.sum };
+my sub foo(:$n, *%h, *@a) { };
+my sub foo1(:$n, *%h, *@a) { $n };
+my sub foo2(:$n, *%h, *@a) { %h<x> + %h<y> + %h<n> };
+my sub foo3(:$n, *%h, *@a) { return @a.sum };
 
 diag("Testing with named arguments (named param isn't required)");
 lives_ok { foo 1, x => 20, y => 300, 4000 },
-  'Testing: `sub foo(+$n, *%h, *@a){ }; foo 1, x => 20, y => 300, 4000`';
+  'Testing: `sub foo(:$n, *%h, *@a){ }; foo 1, x => 20, y => 300, 4000`';
 is (foo1 1, x => 20, y => 300, 4000), undef,
-  'Testing value for named argument', :todo<bug>;
+  'Testing value for named argument';
 is (foo2 1, x => 20, y => 300, 4000), 320,
   'Testing value for slurpy *%h';
 is (foo3 1, x => 20, y => 300, 4000), 4001,
-  'Testing the value for slurpy *@a', :todo<bug>;
+  'Testing the value for slurpy *@a';
 
 ### named parameter pair will always have a higher "priority" while passing
 ### so %h<n> will always be undef
 lives_ok { foo1 1, n => 20, y => 300, 4000 },
-  'Testing: `sub foo(+$n, *%h, *@a){ }; foo 1, n => 20, y => 300, 4000`';
+  'Testing: `sub foo(:$n, *%h, *@a){ }; foo 1, n => 20, y => 300, 4000`';
 is (foo1 1, n => 20, y => 300, 4000), 20,
   'Testing the named argument';
 is (foo2 1, n => 20, y => 300, 4000), 300,
@@ -106,21 +106,21 @@ is (foo3 1, n => 20, y => 300, 4000), 4001,
 
 #### ++ version
 {
-my sub foo(++$n, *%h, *@a){ };
+my sub foo(:$n!, *%h, *@a){ };
 diag('Testing with named arguments (named param is required) (++ version)');
 lives_ok { foo 1, n => 20, y => 300, 4000 },
-  'Testing: `my sub foo(++$n, *%h, *@a){ }; foo 1, n => 20, y => 300, 4000 }`';
+  'Testing: `my sub foo(+:$n, *%h, *@a){ }; foo 1, n => 20, y => 300, 4000 }`';
 dies_ok { foo 1, x => 20, y => 300, 4000 }, :todo<bug>;
 }
 
 #### "trait" version
 {
-my sub foo(+$n is required, *%h, *@a) { };
+my sub foo(:$n is required, *%h, *@a) { };
 diag('Testing with named arguments (named param is required) (trait version)');
 lives_ok { foo 1, n => 20, y => 300, 4000 },
-  'Testing: `my sub foo(+$n is required, *%h, *@a){ }; foo 1, n => 20, y => 300, 4000 }`';
+  'Testing: `my sub foo(:$n is required, *%h, *@a){ }; foo 1, n => 20, y => 300, 4000 }`';
 dies_ok { foo 1, x => 20, y => 300, 4000 },
-  'Testing: `my sub foo(+$n is required, *%h, *@a){ }; foo 1, x => 20, y => 300, 4000 }`', :todo<bug>;
+  'Testing: `my sub foo(:$n is required, *%h, *@a){ }; foo 1, x => 20, y => 300, 4000 }`', :todo<bug>;
 }
 
 ##### Now slurpy scalar tests here.

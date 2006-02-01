@@ -17,7 +17,8 @@ plan 65;
 
 if(!eval('("a" ~~ /a/)')) {
   skip_rest "skipped tests - rules support appears to be missing";
-} else {
+  exit;
+}
 
 rule dotdot { (.)(.) };
 
@@ -31,6 +32,11 @@ is($1, 'ef', '$1');
 ok(!defined($/[2]), 'no $/[2]');
 ok(!defined($2), 'no $2');
 ok(!defined($/<dotdot>), 'no $/<dotdot>');
+
+flunk "erratic behaviour with external PGE", :todo<bug>;
+skip_rest "erratic behaviour with external PGE";
+
+=begin END 
 
 ok("zzzabcdefzzz" ~~ m/(a.)<dotdot>(..)/, 'Match');
 ok($/, 'Matched');
@@ -93,24 +99,21 @@ is($/, "john", 'Match is john', :todo<feature>);
 ok($/ ne "jean", "Match isn't jean");
 is($/<name>, "john", 'Name is john', :todo<feature>);
 
-fail "Test hangs", :todo<bug>;
+flunk "Test hangs", :todo<bug>;
 # ok("jean" ~~ m/<?English.name> | <?French.name> | <?Russian.name>/, 'French name', :todo<feature>);
 is($/, "jean", 'Match is jean', :todo<feature>);
 is($/<name>, "jean", 'Name is jean', :todo<feature>);
 
-fail "Test hangs", :todo<bug>;
+flunk "Test hangs", :todo<bug>;
 # ok("ivan" ~~ m/<?English.name> | <?French.name> | <?Russian.name>/, 'Russian name', :todo<feature>);
 is($/, "ivan", 'Match is ivan', :todo<feature>);
 is($/<name>, "ivan", 'Name is ivan', :todo<feature>);
 
 rule name { <?English.name> | <?French.name> | <?Russian.name> }
  
-fail "Test hangs", :todo<bug>;
+flunk "Test hangs", :todo<bug>;
 # ok("john" ~~ m/<name>/, 'English metaname', :todo<feature>);
 is($/, "john", 'Metaname match is john', :todo<feature>);
 ok($/ ne "jean", "Metaname match isn't jean");
 is($/<name>, "john", 'Metaname is john', :todo<feature>);
 is(try { $/<name><name> }, "john", 'Metaname name is john', :todo<feature>);
-
-}
-

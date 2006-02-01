@@ -11,14 +11,14 @@ L<S04/"Conditional statements">
 
 =cut
 
-plan 17;
+plan 18;
 
 my $x = 'test';
-if ($x eq $x) { pass("if ($x eq $x) {} works"); } else { fail("if ($x eq $x) {} failed"); }
-if ($x ne $x) { fail("if ($x ne $x) {} failed"); } else { pass("if ($x ne $x) {} works"); }
-if (1) { pass("if (1) {} works"); } else { fail("if (1) {} failed"); }
-if (0) { fail("if (0) {} failed"); } else { pass("if (0) {} works"); }
-if (undef) { fail("if (undef) {} failed"); } else { pass("if (undef) {} works"); }
+if ($x eq $x) { pass("if ($x eq $x) {} works"); } else { flunk("if ($x eq $x) {} failed"); }
+if ($x ne $x) { flunk("if ($x ne $x) {} failed"); } else { pass("if ($x ne $x) {} works"); }
+if (1) { pass("if (1) {} works"); } else { flunk("if (1) {} failed"); }
+if (0) { flunk("if (0) {} failed"); } else { pass("if (0) {} works"); }
+if (undef) { flunk("if (undef) {} failed"); } else { pass("if (undef) {} works"); }
 
 # die called in the condition part of an if statement should die immediately
 # rather than being evaluated as true
@@ -86,10 +86,16 @@ is $foo, 1, "die should stop execution immediately.";
 
 {
     my $foo = 1;
-    eval 'if { 1 > 0 } { $foo = 2 } else { $foo = 3 }';
-    is $foo, 2, 'if with no parens, and closure as cond',:todo<bug>;
-    ### This is a parser problem.  This test has been copied to perlbugs.
-};
+    if { 1 > 0 } { $foo = 2 } else { $foo = 3 };
+    is $foo, 2, 'if with no parens, and closure as cond';
+}
+
+{
+    my $var = 9;
+    my sub func( $a, $b, $c ) { $var };
+    if func 1, 2, 3 { $var = 4 } else { $var = 5 };
+    is $var, 4, 'if with no parens, and call a function without parenthesis';
+}
 
 # I'm not sure where this should go
 

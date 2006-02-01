@@ -6,7 +6,7 @@ use Test;
 plan 1;
 # See thread "Packages, Modules and Classes" on p6l
 # started by Stevan Little:
-# http://www.nntp.perl.org/group/perl.perl6.language/23019
+# L<"http://www.nntp.perl.org/group/perl.perl6.language/23019">
 skip_rest "test needs to be rewritten because of recent design changes";
 
 =begin obsolete
@@ -19,7 +19,7 @@ Namespaces, symbol tables and symbolic references.
 
 #=cut
 
-# fail("%:: parse", :todo);
+# flunk("%:: parse", :todo);
 eval_ok('%::', '%:: parses', :todo);
 my $symhash   = eval '%::';
 
@@ -69,7 +69,7 @@ ok(try {!defined(%MY::<nosuch>)},              "unknown lexical lookup");
 ok(try {!defined(%MY::<nosuch>)},              "unknown lexical lookup doesn't autovivify");
 
 {
-    # fail("package keyword", :todo);
+    # flunk("package keyword", :todo);
     ok eval('package Other1;'), "package keyword parses", :todo;
 
     ok eval('%:: eq $symhash'), "package declaration changes current package", :todo;

@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 28;
+plan 31;
 
 =kwid
 
@@ -75,12 +75,10 @@ $b= $b - 1;
 is($b, -(++$a), 'est oder of predecrement in -(++$a)');
 
 $a = undef;
-$a++;
-is($a, 0, 'undef++ == 0',:todo);
+is($a++, 0, 'undef++ == 0');
 
 $a = undef;
-$a--;
-is($a, undef, 'undef-- is undefined',:todo);
+is($a--, undef, 'undef-- is undefined');
 
 $a = 'x';
 is($a++, 'x', 'magical ++ should not be numified');
@@ -113,6 +111,18 @@ is($moo, 0, "var was not touched");
 
   my @array = (42);
 
-  is(@array[+foo()]++, 43, "++ evaluates the expression to increment only once (1)", :todo<bug>);
-  is($was_in_foo,       1, "++ evaluates the expression to increment only once (2)", :todo<bug>);
+  is(++@array[+foo()], 43, "++ evaluates the expression to increment only once (1)");
+  is($was_in_foo,       1, "++ evaluates the expression to increment only once (2)");
+}
+
+# Test case courtesy of Limbic_Region
+
+{
+    my $curr  = 4;
+    my @array = 1..5;
+    is @array[$curr], 5, "postincrements in array subscripts work";
+    @array[ --$curr ]++;
+
+    is $curr, 3, "postincrements in array subscripts work";
+    is @array[$curr], 5, "postincrements in array subscripts work";
 }

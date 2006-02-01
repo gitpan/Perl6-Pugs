@@ -28,6 +28,7 @@ use Prelude::JS::Array;
 use Prelude::JS::Context;
 use Prelude::JS::Math;
 use Prelude::JS::JSAN;
+use Prelude::JS::Perl5;
 use Prelude::JS::Rules;
 use Prelude::JS::Smartmatch;
 use Prelude::JS::OO;
@@ -54,7 +55,7 @@ sub infix:<=:=>($a, $b) is primitive { JS::inline('new PIL2JS.Box.Constant(
   }
 )')($a, $b) }
 
-sub infix:<eqv>($a, $b) is primitive { JS::inline('new PIL2JS.Box.Constant(
+sub infix:<===>($a, $b) is primitive { JS::inline('new PIL2JS.Box.Constant(
   function (args) {
     var cxt = args.shift(),  cc  = args.pop();
     var a = args[0].FETCH(), b = args[1].FETCH();
@@ -69,25 +70,52 @@ sub infix:<eqv>($a, $b) is primitive { JS::inline('new PIL2JS.Box.Constant(
   }
 )')($a, $b) }
 
-sub prefix:<*>(@array) {
+sub prefix:<*>(Array|Pair|Hash $thing) {
   JS::inline('new PIL2JS.Box.Constant(function (args) {
-    // We\'ve to [].concat here so we don\'t set .flatten_me of caller\'s
-    // original array.
     var cc    = args.pop();
-    var array = [].concat(args[1].FETCH());
+    var thing = args[1].FETCH();
+    if(thing.referencee && thing.autoderef) thing = thing.referencee.FETCH();
 
-    array.flatten_me = true;
-    var ret = new PIL2JS.Box.Constant(array);
-    throw function () { cc(ret) };
-  })')(@array);
+    if(thing instanceof PIL2JS.Pair) {
+      cc(new PIL2JS.Box.Constant(new PIL2JS.NamedPair(
+        thing.key.toNative(),
+        thing.value
+      )));
+    } else if(thing instanceof Array) {
+      // We\'ve to [].concat here so we don\'t set .flatten_me of caller\'s
+      // original array.
+      var array = [].concat(thing);
+
+      array.flatten_me = true;
+      cc(new PIL2JS.Box.Constant(array));
+    } else if(thing instanceof PIL2JS.Hash) {
+      var pairs = thing.pairs();
+      var hash  = new PIL2JS.Hash;
+      for(var i = 0; i < pairs.length; i++)
+        hash.add_pair(pairs[i]);
+      hash.flatten_me = true;
+      cc(new PIL2JS.Box.Constant(hash));
+    } else {
+      PIL2JS.die("&prefix:<*> only works on arrays, hashes, and pairs!");
+    }
+  })')($thing);
 }
 
-sub JS::Root::eval(Str ?$code, Str +$lang = 'Perl6') {
+sub JS::Root::eval(Str $code?, Str :$lang = 'Perl6') {
+  if (lc($lang) eq 'perl5') {
+    # TODO: do try here and handle $!
+    return JS::inline('(
+  function (str) {
+    if (!Perl5) throw "Perl5 required.";
+    return Perl5.perl_eval(str);
+  })')($code);
+  }
   $! = "&eval does not work under PIL2JS.";
   undef;
 }
+
 # Stub.
-method perl(Any $self:) {}
+method perl(Any $self:) { ".perl not yet implemented in PIL2JS" }
 
 # We load the operator definitions lastly because they'll override *our*
 # operators.

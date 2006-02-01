@@ -35,18 +35,10 @@ use v6;
 # - lists of junctions --> junctions of lists
 # - list concatenation --> array concatenation
 
-# XXX - this is temporary - this namespace is from 'S29'
-# TODO - change these to *pop, *push, ...
-    our &Perl6::Array::pop     := &pop;
-    our &Perl6::Array::push    := &push;
-    our &Perl6::Array::shift   := &shift;
-    our &Perl6::Array::unshift := &unshift;
-    our &Perl6::Array::reverse := &reverse;
-    our &Perl6::Array::map     := &map;
-    our &Perl6::Array::grep    := &grep;
 # ---------
 
 class Perl6::Value::List {
+    does List;
     has Code $.cstart;
     has Code $.cend;
     has Code $.celems;
@@ -55,27 +47,22 @@ class Perl6::Value::List {
     has Code $.cstringify;
     has Bool $.is_lazy;
 
-    submethod BUILD ($class: 
-            Code ?$.cstart, 
-            Code ?$.cend, 
-            Code ?$.celems,
-            Code ?$.cis_infinite   = sub { &{$.celems}() == Inf },
-            Code ?$.cis_contiguous = sub { bool::false }, 
-            Code ?$.cstringify     = sub { &{$.cstart}() ~ '....' ~ &{$.cend}() }, 
-            Bool ?$.is_lazy        = bool::true,
-    )
-    {
-        unless defined $.celems {
-            $.celems =
-                ( defined $.cstart || defined $.cend ) ?? sub { Inf } !! sub { 0 }
-        }
-        $.cstart = sub {} unless defined $.cstart;
-        $.cend   = sub {} unless defined $.cend;    
+    submethod BUILD () {
+        $.cis_infinite   //= sub { &{$.celems}() == Inf },
+        $.cis_contiguous //= sub { bool::false }, 
+        $.cstringify     //= sub { &{$.cstart}() ~ '....' ~ &{$.cend}() }, 
+        $.is_lazy        //= bool::true,
+        $.celems         //= ( defined $.cstart || defined $.cend ) ?? 
+                             sub { Inf } !! 
+                             sub { 0 };
+        $.cstart         //= sub {};
+        $.cend           //= sub {};    
     }
 
-    method shift         ( $self: ) { &{$.cstart}() if &{$.celems}() }
-    method pop           ( $self: ) { &{$.cend}()   if &{$.celems}() }  
-    method elems         ( $self: ) { &{$.celems}() }
+    method start         () { &{$.cstart}() }  # == shift
+    method end           () { &{$.cend}() }    # == pop
+
+    method elems         () { &{$.celems}() }
     method is_infinite   ( $self: ) { &{$.cis_infinite}() }
     method is_contiguous ( $self: ) { &{$.cis_contiguous}() }
     method to_str        ( $self: ) { &{$.cstringify}() }
@@ -94,11 +81,11 @@ class Perl6::Value::List {
         #     if $ret.is_infinite;
 
         my @list;
-        while $ret.elems { *push @list, $ret.shift; }
+        while $ret.elems { &*push(@list, $ret.shift); }
         $self.from_single( @list ); 
     }
 
-    method from_range ( $class: $start is copy, $end is copy, ?$step ) {
+    method from_range ( $class: $start is copy, $end is copy, $step? ) {
         $class.new(
                     cstart =>  sub {
                                 my $r = $start;
@@ -126,9 +113,9 @@ class Perl6::Value::List {
     }
 
     method from_single ( $class: @list is copy ) {
-        $class.new( cstart => sub{ Perl6::Array::shift  @list },
-                    cend =>   sub{ Perl6::Array::pop    @list },
-                    celems => sub{ @list.elems  },
+        $class.new( cstart => sub{ &*shift(@list) },
+                    cend =>   sub{ &*pop(@list) },
+                    celems => sub{ +@list },
                     is_lazy => bool::false );
     }
 
@@ -166,11 +153,13 @@ class Perl6::Value::List {
         Perl6::Value::List.new(
                 cstart => coro {
                         my $x = $ret.shift // yield;
-                        yield $x if &$code($x) 
+                        yield $x if &$code($x);
+                        return;
                 },
                 cend => coro { 
                         my $x = $ret.pop // yield;
-                        yield $x if &$code($x) 
+                        yield $x if &$code($x);
+                        return;
                 },
                 # TODO - signal end of data using 'elems()'
         );
@@ -182,14 +171,16 @@ class Perl6::Value::List {
                 cstart => coro {
                         my @ret;
                         my $x = $ret.shift // yield;
-                        Perl6::Array::unshift @ret,&$code($x); 
-                        yield Perl6::Array::shift @ret while @ret 
+                        &*unshift(@ret, &$code($x)); 
+                        yield &*shift(@ret) while @ret;
+                        return;
                 },
                 cend => coro {
                         my @ret; 
                         my $x = $ret.pop // yield;
-                        Perl6::Array::push @ret, &$code($x); 
-                        yield Perl6::Array::pop @ret while @ret  
+                        &*push(@ret, &$code($x));
+                        yield &*pop(@ret) while @ret;
+                        return;
                 },
                 # TODO - signal end of data using 'elems()'
         )
@@ -203,15 +194,17 @@ class Perl6::Value::List {
                         my $x = $ret.shift // yield;
                         unless %seen{$x} { 
                             %seen{$x} = bool::true; 
-                            yield $x 
+                            yield $x;
                         }                       
+                        return;
                 },
                 cend => coro {
                         my $x = $ret.pop // yield;
                         unless %seen{$x} { 
                             %seen{$x} = bool::true; 
-                            yield $x 
-                        }  
+                            yield $x;
+                        }
+                        return;
                 },
                 # TODO - signal end of data using 'elems()'
         )
@@ -225,6 +218,7 @@ class Perl6::Value::List {
                         my $x = $ret.shift // yield;
                         yield $count++;
                         yield $x;
+                        return;
                 },
                 celems => sub { $ret.elems + $ret.elems },
         )
@@ -271,11 +265,11 @@ class Perl6::Value::List {
                         # TODO - rewrite this checking 'elems()'
                         # XXX - the list would normally stop after the first 'undef'
                         for @lists -> $xx {
-                            Perl6::Array::push @x, [$xx.shift];
+                            &*push(@x, [$xx.shift]);
                         }
                         if defined any(@x) {
                             for @lists -> $xx {
-                                yield Perl6::Array::shift @x;
+                                yield &*shift(@x);
                             }
                         }
                         else {
@@ -285,7 +279,13 @@ class Perl6::Value::List {
         )
     }
 
+    method shift () { self.start if self.elems }
+    method pop   () { self.end   if self.elems }  
+
 }  # end class Perl6::Value::List
+
+multi *shift ( Perl6::Value::List $l ) is export { $l.start if $l.elems }
+multi *pop   ( Perl6::Value::List $l ) is export { $l.end   if $l.elems }  
 
 =kwid
 

@@ -12,7 +12,7 @@ sub case_tolerant returns Bool is export { 0           }
 
 sub splitdir (Str $dir) returns Array is export { split('/', $dir) }
 
-sub splitpath (Str $path, Bool ?$nofile) returns Array is export {
+sub splitpath (Str $path, Bool $nofile?) returns Array is export {
     my $volume    = '';
     my $directory = '';
     my $file      = '';
@@ -21,8 +21,8 @@ sub splitpath (Str $path, Bool ?$nofile) returns Array is export {
     }
     else {
         $path ~~ rx:perl5{^((?:.*/(?:\.\.?\Z(?!\n))?)?)([^/]*)};
-        $directory = $0;
-        $file      = $1;
+        $directory = ~$0;
+        $file      = ~$1;
     }
     return ($volume, $directory, $file);
 }
@@ -32,10 +32,10 @@ sub splitpath (Str $path, Bool ?$nofile) returns Array is export {
 sub catdir (*@path) returns Str is export { canonpath(join('/', (@path, ''))) }
 
 sub catfile (*@_path) returns Str is export {
-    # take a copy of our args here, maybe 
-    # replace this with 'is copy' parameter 
-    # trait at some point    
-    my @path = @_path; 
+    # take a copy of our args here, maybe
+    # replace this with 'is copy' parameter
+    # trait at some point
+    my @path = @_path;
     my $file = canonpath(pop(@path));
     return $file unless ?@path;
     my $dir = catdir(@path);
@@ -55,7 +55,7 @@ sub catpath (Str $volume, Str $directory, Str $file) returns Str is export {
 
 ## real to absolute
 
-sub rel2abs (Str $_path, Str ?$_base) returns Str is export {
+sub rel2abs (Str $_path, Str $_base?) returns Str is export {
     # take a copy of our args here, maybe 
     # replace this with 'is copy' parameter 
     # trait at some point    
@@ -162,11 +162,11 @@ sub path returns Array is export {
 # the File::Spec platform hack
 #sub cwd returns Str { system("pwd") }
 sub cwd returns Str is export {
-  return File::Spec::cwd();
+  return '/';
 }
 
 sub tmpdir returns Str is export {
-  return File::Spec::tmpdir();
+  return '';
 }
 
 #
@@ -227,7 +227,7 @@ This is a very primative port of the Perl 5 File::Spec::Unix module.
 
 - `splitdir (Str $dir) returns Array`
 
-- `splitpath (Str $path, Bool ?$nofile) returns Array`
+- `splitpath (Str $path, Bool $nofile?) returns Array`
 
 - `catdir (*@path) returns Str`
 
@@ -235,7 +235,7 @@ This is a very primative port of the Perl 5 File::Spec::Unix module.
 
 - `catpath (Str $volume, Str $directory, Str $file) returns Str`
 
-- `rel2abs (Str $path, Str ?$base) returns Str`
+- `rel2abs (Str $path, Str $base?) returns Str`
 
 - `abs2rel (Str $path, Str $base) returns Str`
 

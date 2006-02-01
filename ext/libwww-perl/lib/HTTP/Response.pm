@@ -12,7 +12,7 @@ class HTTP::Response[?::URI_CLASS = URI] {
     has $.previous  is rw;
     has $.request   is rw;
     
-    submethod BUILD (+$.code, +$.message) { }
+    submethod BUILD (:$.code, :$.message) { }
     
     method parse (Str $str is copy) {
         my $status_line;
@@ -74,7 +74,7 @@ class HTTP::Response[?::URI_CLASS = URI] {
         return undef;
     }
     
-    method as_string (Str ?$newline = "\n") {
+    method as_string (Str $newline = "\n") {
         my $code = ./code;
         my $status_message = HTTP::Status::status_message($code) // "Unknown code";
         my $message = ./message // "";

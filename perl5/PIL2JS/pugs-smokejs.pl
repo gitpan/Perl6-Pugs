@@ -12,11 +12,10 @@ use FindBin;
 use File::Spec;
 sub pwd { File::Spec->catfile($FindBin::Bin, @_) }
 
-warn "# @ARGV\n";
 
 if($ARGV[1] eq "-w" and $ARGV[2]) {
   # XXX hack
-  if($ARGV[2] =~ /rules/) {
+  if($ENV{DISABLE_RULE_TESTS} && $ARGV[2] =~ /rules/) {
     my $tests = get_plan_count($ARGV[2]);
     print "1..$tests\n";
     print "ok $_ -  # skip PIL2JS exhausts too much swap on this test\n"
@@ -28,8 +27,15 @@ if($ARGV[1] eq "-w" and $ARGV[2]) {
   open my $fh, "<", $ARGV[2] or die "Couldn't open \"$ARGV[2]\": $!\n";
   my $src = <$fh>;
 
-  # Don't load Test.pm, as we precompile it.
-  $src =~ s/^use Test//gm; # hack
+  # Don't load Test.pm, as we precompile and automatically load it.
+  # Pugs doesn't know that we've a precompiled copy of Test.pm lying around and
+  # that we'll link it in; thus we've to sourcefilter $src.
+  # If we did not s/^use Test//gm, things will still work but performance will
+  # suffer, as Test.pm would be re-parsed, re-compiled-to-PIL1 and
+  # re-compiled-to-JS on every invocation.
+  #   $src =~ s/^use Test//gm; # hack
+  # As of r8689, this hack b0rks PIL2JS, so I removed the hack (temporarily?).
+  # --iblech
 
   # XXX ABSOLUTELY EVIL BLOODY HACK
   # XXX ABSOLUTELY EVIL BLOODY HACK
@@ -43,10 +49,24 @@ if($ARGV[1] eq "-w" and $ARGV[2]) {
   #   my $a; our sub b { $a++ }; b();  # does work, as &b is not only in
   #                                    # pilGlob: "our sub foo {...}" gets
   #                                    # emitted as "our &foo := sub {...}".
+  # There's no other possibility for us to work around this; by the time the
+  # source is compiled to PIL1, global subs will already have lost their lexpad
+  # info.
+  # The s/sub/our sub/ hack is semantically relatively harmless, as &b should
+  # be our() anyway.
+  # This hack does not fix this problem:
+  #   my $a; b(); sub b { $a++ }  # dies (can't find &b)
+  # With PIL2 the hack won't be necessary any longer, as PIL2 will report
+  # proper lexpad info by leaving subs in pilMain.
   $src =~ s/^(\s*)sub(\s+)(\w+)/$1our sub$2$3/gm;
 
-  exec pwd("runjs.pl"), "-e", $src;
+  my @args = ();
+  @args = qw(--run=jspm --perl5)
+    if $ENV{PUGS_RUNTIME} and $ENV{PUGS_RUNTIME} eq 'JSPERL5';
+  warn "# runjs.pl @args @ARGV[2]\n";
+  exec pwd("runjs.pl"), @args, "-e", $src;
 } else {
+  warn "# @ARGV\n";
   exec pwd("..", "..", "pugs"), @ARGV[1..$#ARGV];
 }
 

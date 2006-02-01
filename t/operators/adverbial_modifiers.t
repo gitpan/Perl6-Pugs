@@ -3,8 +3,8 @@
 use v6;
 use Test;
 
-plan 75;
-
+plan 74;
+# L<A03/"Binary :">
 eval_is 'infix:<..>(1, 10, by => 2)', <1 3 5 7 9>, 'range operator, :by parameter, long name', :todo<feature>;
 eval_is '1..10 :by(2)', <1 3 5 7 9>, 'range operator, :by adverb, space', :todo<feature>;
 eval_is '1..10:by(2)', <1 3 5 7 9>, 'range operator, :by adverb, without space', :todo<feature>;
@@ -15,7 +15,7 @@ eval_is '1...:by(2)[0..4]', <1 3 5 7 9>, 'infinite range operator, :by adverb, w
 
 # XXX need to test prefix:<=> on $handle with :prompt adverb
 
-sub prefix:<blub> (Str $foo, Int +$times = 1) {
+sub prefix:<blub> (Str $foo, Int :$times = 1) {
   ("BLUB" x $times) ~ $foo;
 }
 
@@ -49,12 +49,12 @@ is eval('blub "bar":times(2)'), 'BLUBBLUBbar', 'user-defined prefix operator, :t
   $v = :foo«alice»;
   is ~$v, ~$e, ':foo«alice»';
 
-  fail("FIXME parsefail", :todo<bug>);
+  flunk("FIXME parsefail", :todo<bug>);
   #$e = (foo => { a => 1, b => 2 });
   $v = eval ':foo{ a => 1, b => 2 }';
   #is ~$v, ~$e, ':foo{ a => 1, b => 2 }', :todo;
 
-  fail("FIXME parsefail", :todo<bug>);
+  flunk("FIXME parsefail", :todo<bug>);
   #$e = (foo => { dostuff() });
   $v = eval ':foo{ dostuff() }';
   #is ~$v, ~$e, ':foo{ dostuff() }', :todo;
@@ -72,7 +72,7 @@ is eval('blub "bar":times(2)'), 'BLUBBLUBbar', 'user-defined prefix operator, :t
   # Exercise various mixes of "f", parens "()",
   # and adverbs with "X' and without "x" an argument.
 
-  my sub f(+$x,+$y){$x~$y}
+  my sub f(:$x,:$y){$x~$y}
   my $v;
 
   # f(XY) f(YX) f(xY) f(Xy)
@@ -172,8 +172,10 @@ is eval('blub "bar":times(2)'), 'BLUBBLUBbar', 'user-defined prefix operator, :t
 
   # f_X(Y) f_X_Y() f_X_Y_() f_XY_() f_XY() fXY ()
 
-  $v = f :x("a")(:y("b"));
-  is $v, "ab", 'f :x("a")(:y("b"))';
+  # $v = f :x("a")(:y("b"));
+  # is $v, "ab", 'f :x("a")(:y("b"))';
+  # Since the demagicalizing of pairs, this test shouldn't and doesn't work any
+  # longer.
 
   $v = 'eval failed';
   eval '$v = f :x("a") :y("b")()';
@@ -204,8 +206,8 @@ is eval('blub "bar":times(2)'), 'BLUBBLUBbar', 'user-defined prefix operator, :t
   # Exercise mixes of adverbs and positional arguments.
 
   my $v;
-  my sub f(+$x,$s){$x~$s}
-  my sub g($s1,+$x,$s2){$s1~$x~$s2}
+  my sub f(:$x,$s){$x~$s}
+  my sub g($s1,:$x,$s2){$s1~$x~$s2}
   my sub h(*@a){@a.perl}
   my sub i(*%h){%h.perl}
   my sub j($s1,*%h,$s2){$s1~%h.perl~$s2}
@@ -268,20 +270,20 @@ is eval('blub "bar":times(2)'), 'BLUBBLUBbar', 'user-defined prefix operator, :t
 
   { # adverbs as pairs
 
-    my sub f1($s,+$x){$s.perl~$x}
+    my sub f1($s,:$x){$s.perl~$x}
 
     $v = f1(\:bar :x("b"));
-    is $v, "('bar' => 1)b", 'f1(\:bar :x("b"))';
+    is $v, '("bar" => 1)b', 'f1(\:bar :x("b"))';
 
     my sub f2(Pair $p){$p.perl}
 
-    $v = f2(:bar);
-    is $v, "('bar' => 1)", 'f2(:bar)';
+    $v = f2((:bar));
+    is $v, '("bar" => 1)', 'f2((:bar))';
 
     my sub f3(Pair $p1, Pair $p2){$p1.perl~" - "~$p2.perl}
 
-    $v = f3(:bar,:hee(3));
-    is $v, "('bar' => 1) - ('hee' => 3)", 'f3(:bar,:hee(3))';
+    $v = f3((:bar),(:hee(3)));
+    is $v, '("bar" => 1) - ("hee" => 3)', 'f3((:bar),(:hee(3)))';
   
   }
 
@@ -292,15 +294,15 @@ is eval('blub "bar":times(2)'), 'BLUBBLUBbar', 'user-defined prefix operator, :t
 {
   # Exercise adverbs on operators.
 
-  sub prefix:<zpre>($a,+$x){join(",",$a,$x)}
+  sub prefix:<zpre>($a,:$x){join(",",$a,$x)}
 
   is eval('(zpre 4 :x(5))'), '4,5', '(zpre 4 :x(5))', :todo<feature>;
 
-  sub postfix:<zpost>($a,+$x){join(",",$a,$x)}
+  sub postfix:<zpost>($a,:$x){join(",",$a,$x)}
 
   is eval('(4 zpost :x(5))'), '4,5', '(4 zpost :x(5))', :todo<feature>;
 
-  sub infix:<zin>($a,$b,+$x){join(",",$a,$b,$x)}
+  sub infix:<zin>($a,$b,:$x){join(",",$a,$b,$x)}
 
   is eval('(3 zin 4 :x(5))'), '3,4,5', '(3 zin 4 :x(5))', :todo<feature>;
 

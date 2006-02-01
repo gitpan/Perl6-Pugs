@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 14;
+plan 17;
 
 class Foo {
   method get_self_normal()    { $?SELF }
@@ -48,7 +48,7 @@ class SimpleClass does Bar {}
   my $foo1 = Foo.new;
   my $foo2 = $foo1.get_self_normal;
 
-  ok $foo1 =:= $foo2, '$?SELF in classes works';
+  ok $foo1 === $foo2, '$?SELF in classes works';
 }
 
 {
@@ -69,7 +69,7 @@ class SimpleClass does Bar {}
   my $bar1 = SimpleClass.new;
   my $bar2 = $bar1.get_self_normal;
 
-  ok $bar1 =:= $bar2, '$?SELF in roles works';
+  ok $bar1 === $bar2, '$?SELF in roles works';
 }
 
 {
@@ -81,10 +81,42 @@ class SimpleClass does Bar {}
 
 # Now the same with type vars
 {
-  cmp_ok Foo.new.get_class_pvar, &infix:<=:=>, ::Foo,
+  cmp_ok Foo.new.get_class_pvar, &infix:<===>, ::Foo,
     "::?CLASS in classes works", :todo<bug>;
-  cmp_ok SimpleClass.new.get_class_pvar, &infix:<=:=>, ::SimpleClass,
+  cmp_ok SimpleClass.new.get_class_pvar, &infix:<===>, ::SimpleClass,
     "::?CLASS in roles works", :todo<bug>;
-  cmp_ok SimpleClass.new.get_role_pvar, &infix:<=:=>, ::Bar,
+  cmp_ok SimpleClass.new.get_role_pvar, &infix:<===>, ::Bar,
     "::?ROLE in roles works", :todo<bug>;
+}
+
+# Per L<"http://www.nntp.perl.org/group/perl.perl6.language/23541">:
+#     On Sat, Oct 15, 2005 at 07:39:36PM +0300, wolverian wrote:
+#     : On Sat, Oct 15, 2005 at 08:25:15AM -0700, Larry Wall wrote:
+#     : > [snip]
+#     : >
+#     : > Of course, there's never been any controversy here about what to call
+#     : > "self", oh no... :-)
+#     : 
+#     : IMHO just call it "self" (by default) and be done with it. :) 
+#
+#     Let it be so.
+#
+#     Larry
+{
+  class Grtz {
+    method get_self1 { self }
+    method get_self2 { $?SELF }
+    method foo       { 42 }
+    method run_foo   { self.foo }
+  }
+  my $grtz = Grtz.new;
+
+  cmp_ok $grtz.get_self1, &infix:<===>, $grtz.get_self2,
+    'self is an alias for $?SELF (1)';
+  is $grtz.run_foo, 42,
+    'self is an alias for $?SELF (2)';
+}
+
+{
+  dies_ok { self }, "there is no self outside of a method";
 }

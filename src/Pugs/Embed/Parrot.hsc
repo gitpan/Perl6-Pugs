@@ -16,16 +16,29 @@ import Pugs.Compat (getEnv)
 
 findExecutable' :: String -> IO (Maybe FilePath)
 findExecutable' cmd = do
-    rv  <- findExecutable cmd
-    if isJust rv then return rv else do
-    cwd <- getCurrentDirectory
+    dir <- getEnv "PARROT_PATH"
+    if isJust dir then (do
+        rv  <- findExecutableInDirectory (fromJust dir) cmd
+        if isJust rv then return rv else findExecutable'') else do
+    findExecutable''
+    where
+    findExecutable'' = do
+        rv  <- findExecutable cmd
+        if isJust rv then return rv else do
+        cwd <- getCurrentDirectory
+        rv  <- findExecutableInDirectory cwd cmd
+        if isJust rv then return rv else do
+        return Nothing
+
+findExecutableInDirectory :: FilePath -> FilePath -> IO (Maybe FilePath)
+findExecutableInDirectory dir cmd = do
 ##ifdef PUGS_HAVE_POSIX
-    let parrot = cwd ++ ('/':cmd)
+    let file = dir ++ ('/':cmd)
 ##else
-    let parrot = cwd ++ ('\\':cmd) ++ ".exe"
+    let file = dir ++ ('\\':cmd) ++ ".exe"
 ##endif
-    ok  <- doesFileExist parrot
-    return $ if ok then Just parrot else Nothing
+    ok  <- doesFileExist file
+    return $ if ok then Just file else Nothing
 
 findParrot :: IO FilePath
 findParrot = do
@@ -41,7 +54,7 @@ evalParrotFile file = do
     -- so we use the next fastest CGP core.
     args <- getEnv "PUGS_PARROT_OPTS"
     let args' | isJust args && fromJust args /= "" = fromJust args
-              | otherwise                          = "-C"
+              | otherwise                          = "-f"
     rawSystem cmd [args', file]
     return ()
 
@@ -131,8 +144,10 @@ import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Storable
+-- import Foreign.StablePtr
 import System.IO.Unsafe
 import System.Directory
+import Pugs.Internals (_GlobalFinalizer)
 
 type ParrotString               = Ptr ()
 type ParrotInterp               = Ptr (Ptr ())
@@ -155,24 +170,41 @@ initParrot :: IO ParrotInterp
 initParrot = do
     interp <- readIORef _ParrotInterp 
     if interp /= nullPtr then return interp else do
+    parrot_set_config_hash
     interp <- parrot_new nullPtr
     writeIORef _ParrotInterp interp
-#if PARROT_JIT_CAPABLE && defined(PARROT_JIT_CORE)
+#if XXX_ENABLE_PARROT_JIT && PARROT_JIT_CAPABLE && defined(PARROT_JIT_CORE)
     parrot_set_run_core interp PARROT_JIT_CORE
+#elsif defined(PARROT_FAST_CORE)
+    parrot_set_run_core interp PARROT_FAST_CORE
 #elsif defined(PARROT_CGP_CORE)
     parrot_set_run_core interp PARROT_CGP_CORE
+#elsif defined(PARROT_CGOTO_CORE)
+    parrot_set_run_core interp PARROT_CGOTO_CORE
 #endif
+    -- parrot_set_debug interp 0x20
+    -- ptr <- newStablePtr _ParrotInterp
+    -- parrot_init_stacktop interp (castStablePtrToPtr ptr)
+    parrot_init interp
     parrot_imcc_init interp
+
+{-
+    parrot_block_DOD interp
+    parrot_block_GC interp
+-}
+
+    pf      <- parrot_packfile_new interp 0
+    parrot_loadbc interp pf
+    seg     <- withCString "pugs" $ \p -> do
+        parrot_pf_create_default_segs interp p 1
+    set_pf_cur_cs pf seg
+    parrot_loadbc interp pf
+
     callback    <- mkCompileCallback compileToParrot
     pugsStr     <- withCString "Pugs" (const_string interp)
     parrot_compreg interp pugsStr callback
 
-    pf      <- parrot_packfile_new interp 0
-    pf_dir  <- get_pf_directory pf
-    seg     <- withCString "pugs" $ \p -> do
-        parrot_packfile_segment_new_seg interp pf_dir 4 p 1
-    set_pf_cur_cs pf seg
-    parrot_loadbc interp pf
+    modifyIORef _GlobalFinalizer (>> parrot_exit 0)
     return interp
 
 loadPGE :: ParrotInterp -> FilePath -> IO (ParrotPMC, ParrotPMC)
@@ -185,8 +217,10 @@ loadPGE interp path = do
     if match /= nullPtr then return (match, add) else do
     cwd     <- getCurrentDirectory
     setCurrentDirectory path
-    withCString "PGE.pbc" $ parrot_load_bytecode interp
-    withCString "PGE/Hs.pir" $ parrot_load_bytecode interp
+    pge_pbc <- withCString "PGE.pbc" $ const_string interp
+    pge_hs  <- withCString "PGE/Hs.pir" $ const_string interp
+    parrot_load_bytecode interp pge_pbc
+    parrot_load_bytecode interp pge_hs
     setCurrentDirectory cwd
     loadPGE interp path
 
@@ -231,11 +265,17 @@ compileToParrot interp cstr = do
 foreign import ccall "wrapper"  
     mkCompileCallback :: ParrotCompilerFunc -> IO (FunPtr ParrotCompilerFunc)
 
+foreign import ccall "Parrot_set_config_hash"
+    parrot_set_config_hash :: IO ()
+
 foreign import ccall "Parrot_new"
     parrot_new :: ParrotInterp -> IO ParrotInterp
 
 foreign import ccall "Parrot_init"
     parrot_init :: ParrotInterp -> IO ()
+
+foreign import ccall "Parrot_init_stacktop"
+    parrot_init_stacktop :: ParrotInterp -> Ptr () -> IO ()
 
 foreign import ccall "Parrot_readbc"
     parrot_readbc :: ParrotInterp -> CString -> IO ParrotPackFile
@@ -255,6 +295,9 @@ foreign import ccall "PackFile_new"
 foreign import ccall "PackFile_Segment_new_seg"
     parrot_packfile_segment_new_seg :: ParrotInterp -> ParrotPackFileDirectory -> CInt -> CString-> CInt -> IO ParrotPackFileByteCode
 
+foreign import ccall "PF_create_default_segs"
+    parrot_pf_create_default_segs :: ParrotInterp -> CString -> CInt -> IO ParrotPackFileByteCode
+
 foreign import ccall "dod_register_pmc"
     parrot_dod_register_pmc :: ParrotInterp -> ParrotPMC -> IO ()
 
@@ -265,7 +308,7 @@ foreign import ccall "Parrot_compreg"
     parrot_compreg :: ParrotInterp -> ParrotString -> FunPtr ParrotCompilerFunc -> IO ()
 
 foreign import ccall "Parrot_load_bytecode"
-    parrot_load_bytecode :: ParrotInterp -> CString -> IO ()
+    parrot_load_bytecode :: ParrotInterp -> ParrotString -> IO ()
 
 foreign import ccall "Parrot_call_sub"
     parrot_call_sub_vv :: ParrotInterp -> ParrotPMC -> CString -> IO ()
@@ -282,8 +325,22 @@ foreign import ccall "Parrot_find_global"
 foreign import ccall "Parrot_get_strreg"
     parrot_get_strreg :: ParrotInterp -> CInt -> IO ParrotString
 
+foreign import ccall "Parrot_set_debug"
+    parrot_set_debug :: ParrotInterp -> CInt -> IO ()
+
+foreign import ccall "Parrot_exit"
+    parrot_exit :: CInt -> IO ()
+
 foreign import ccall "string_to_cstring"
     parrot_string_to_cstring :: ParrotInterp -> ParrotString -> IO CString
+
+{-
+foreign import ccall "Parrot_block_DOD"
+    parrot_block_DOD :: ParrotInterp -> IO ()
+
+foreign import ccall "Parrot_block_GC"
+    parrot_block_GC :: ParrotInterp -> IO ()
+-}
 
 foreign import ccall "imcc_init"
     parrot_imcc_init :: ParrotInterp -> IO ()

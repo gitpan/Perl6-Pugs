@@ -7,36 +7,36 @@ use Test::Builder::Output;
 
 class Test::Builder::Tester::Output
 {
-    has @:output;
-    has @:diagnostics;
+    has @!output;
+    has @!diagnostics;
 
     method write ( Str $message is copy )
     {
-        push @:output, $message;
+        push @!output, $message;
     }
 
     method diag ( Str $message is copy )
     {
-        push @:diagnostics, $message;
+        push @!diagnostics, $message;
     }
 
     method output returns Str
     {
         # XXX - hack or pugsbug?
-        return '' unless +@:output;
+        return '' unless +@!output;
 
-        my $output = @:output.join( "\n" );
-        @:output   = ();
+        my $output = @!output.join( "\n" );
+        @!output   = ();
         return $output;
     }
 
     method diagnostics returns Str
     {
         # XXX - hack or pugsbug?
-        return '' unless +@:diagnostics;
+        return '' unless +@!diagnostics;
 
-        my $diagnostics = @:diagnostics.join( "\n" );
-        @:diagnostics   = ();
+        my $diagnostics = @!diagnostics.join( "\n" );
+        @!diagnostics   = ();
         return $diagnostics;
     }
 }
@@ -63,17 +63,17 @@ sub line_num is export
 {
 }
 
-sub test_pass ( Str ?$diagnostic ) is export
+sub test_pass ( Str $diagnostic? ) is export
 {
     report_test( 'ok', $diagnostic );
 }
 
-sub test_fail ( Str ?$diagnostic ) is export
+sub test_fail ( Str $diagnostic? ) is export
 {
     report_test( 'not ok', $diagnostic );
 }
 
-sub report_test ( Str $type, Str ?$diagnostic )
+sub report_test ( Str $type, Str $diagnostic? )
 {
     my $number = $tb_test.get_test_number();
     my $line   = "$type $number";
@@ -96,7 +96,7 @@ sub test_diag ( Str $line ) is export
     push @expect_diag, $line;
 }
 
-sub test_test ( Str ?$description = '' ) returns Bit is export 
+sub test_test ( Str $description = '' ) returns Bit is export 
 {
     my $expect_out    = @expect_out.join(  "\n" ) || '';
     my $expect_diag   = @expect_diag.join( "\n" ) || '';
@@ -183,7 +183,7 @@ to run.
 Adds a line to the list of lines of expected diagnostics for the test you're
 going to run.
 
-=item B<test_test( Str ?$description )>
+=item B<test_test( Str $description? )>
 
 Compares the receivied and expected lines from the previously run tests,
 passing if both the diagnostics and output match exactly.  If you pass

@@ -2,7 +2,7 @@ package Perl6::Pugs;
 use 5.006;
 use strict;
 
-our $VERSION = 6.002010;
+our $VERSION = 6.002011;
 
 =head1 NAME
 
@@ -10,12 +10,20 @@ Perl6::Pugs - A Perl 6 Implementation
 
 =head1 VERSION
 
-This document describes version 6.2.10 of Pugs, released October 10, 2005.
+This document describes version 6.2.11 of Pugs, released February 1, 2005.
 
 =head1 SYNOPSIS
 
     % pugs -e "{ 'Hello, ', @^x }.('World!').say"
     Hello, World!
+
+With Perl 5 embedding support (also note the C<--> in the C<#!> line):
+
+    #!/usr/bin/pugs --
+    use v6;
+    use perl5:DBI;
+    my $dbh = DBI.connect('dbi:SQLite:dbname=test.db');
+    $dbh.do("CREATE TABLE Test (Project, Pumpking)");
 
 =head1 DESCRIPTION
 
@@ -80,7 +88,7 @@ Please submit bug reports to C<E<lt>pugsbugs@perl.orgE<gt>>.
 
 =head1 COPYRIGHT
 
-Copyright 2005 by Autrijus Tang C<E<lt>autrijus@autrijus.orgE<gt>>.
+Copyright 2005, 2006 by Audrey Tang C<E<lt>autrijus@autrijus.orgE<gt>>.
 
 This code is free software; you can redistribute it and/or modify it under
 the terms of either:

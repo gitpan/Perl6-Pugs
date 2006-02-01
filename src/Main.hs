@@ -3,14 +3,14 @@
 {-|
     The Main REPL loop.
 
->   Un nuevo barco para él construyeron
->   de sándalo. y de vidrio élfico,
->   de proa brillante; ningún remo desnudo,
->   ninguna vela en el mástil de plata:
->   el Silmaril como linterna
->   y en la bandera un fuego vivo
->   puesto allí mismo por Elbereth,
->   y otorgándole alas inmortales...
+>   Tünde-üvegből új hajót
+>   kapott, s mithrilből; ragyogott
+>   orra, nem hordott evezőt,
+>   vitorlát s ezüstárbocot:
+>   lámpása lett a Szilmaril,
+>   lánglobogója, lenghetett,
+>   s hogy ékesítse mind velük,
+>   eljött ő maga, Elbereth...
 
 -}
 

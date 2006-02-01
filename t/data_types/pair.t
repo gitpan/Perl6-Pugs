@@ -9,13 +9,13 @@ use Test;
 
 =cut
 
-plan 62;
+plan 97;
 
 # basic Pair
 
 my $pair = 'foo' => 'bar';
 isa_ok($pair, 'Pair');
-is($pair.perl, "('foo' => 'bar')", 'canonical representation');
+is($pair.perl, '("foo" => "bar")', 'canonical representation');
 
 # get key and value from the pair as many ways as possible
 
@@ -88,7 +88,7 @@ my $quux = (quux => "xyzzy");
 is($quux.key, 'quux', "lhs quotes" );
 
 # lvalue Pair assignments from S06 and thread starting with
-# http://www.nntp.perl.org/group/perl.perl6.language/19425
+# L<"http://www.nntp.perl.org/group/perl.perl6.language/19425">
 
 my $val;
 ("foo" => $val) = "baz";
@@ -111,18 +111,18 @@ test1 $var;
 
 my %hash  = ('foo' => 'bar');
 for  %hash.pairs -> $pair {
-    isa_ok($pair,'Pair',:todo<bug>) ; 
+    isa_ok($pair,'Pair') ; 
     my $testpair = $pair;
-    isa_ok($testpair,'Pair',:todo<bug>); # new lvalue variable is also a Pair
+    isa_ok($testpair, 'Pair', :todo<bug>); # new lvalue variable is also a Pair
     my $boundpair := $pair;
-    isa_ok($boundpair,'Pair',:todo<bug>); # bound variable is also a Pair
+    isa_ok($boundpair,'Pair'); # bound variable is also a Pair
     is($pair.key, 'foo', 'in for loop got the right $pair.key');
     is($pair.value, 'bar', 'in for loop got the right $pair.value');
 }
 
 sub test2 (Hash %h){
     for %h.pairs -> $pair {
-        isa_ok($pair,'Pair',:todo<bug>) ; 
+        isa_ok($pair,'Pair') ; 
         is($pair.key, 'foo', 'in sub test2 got the right $pair.key');
         is($pair.value, 'bar', 'in sub test2 got the right $pair.value');
     }
@@ -130,11 +130,11 @@ sub test2 (Hash %h){
 test2 %hash;
 
 # See thread "$pair[0]" on p6l started by Ingo Blechschmidt:
-# http://www.nntp.perl.org/group/perl.perl6.language/22593
+# L<"http://www.nntp.perl.org/group/perl.perl6.language/22593">
 
 sub test3 (Hash %h){
     for %h.pairs -> $pair {
-        isa_ok($pair,'Pair',:todo<bug>) ; 
+        isa_ok($pair,'Pair');
         dies_ok({$pair[0]}, 'sub test3: access by $pair[0] should not work', :todo<bug>);
         dies_ok({$pair[1]}, 'sub test3: access by $pair[1] should not work', :todo<bug>);
     }
@@ -165,7 +165,7 @@ isa_ok $should_be_a_pair, "Pair", "=> has correct precedence";
 =pod
 
 Stated by Larry on p6l in:
-http://www.nntp.perl.org/group/perl.perl6.language/20122
+L<"http://www.nntp.perl.org/group/perl.perl6.language/20122">
 
  "Oh, and we recently moved => to assignment precedence so it would
  more naturally be right associative, and to keep the non-chaining
@@ -194,16 +194,105 @@ http://www.nntp.perl.org/group/perl.perl6.language/20122
 # This is per the pairs-behave-like-one-element-hashes-rule.
 # (I asked p6l once, but the "thread" got warnocked.  --iblech)
 # (I asked p6l again, now the thread did definitely not get warnocked:
-# http://groups.google.de/group/perl.perl6.language/browse_thread/thread/e0e44be94bd31792/6de6667398a4d2c7?q=perl6.language+Stringification+pairs&)
-# Also see http://www.nntp.perl.org/group/perl.perl6.language/23224.
+# L<"http://groups.google.de/group/perl.perl6.language/browse_thread/thread/e0e44be94bd31792/6de6667398a4d2c7?q=perl6.language+Stringification+pairs&">
+# Also see L<"http://www.nntp.perl.org/group/perl.perl6.language/23224">
 {
   my $pair = (a => 1);
-  is try { ~$pair  }, "a\t1", "pairs stringify correctly (1)", :todo<unspecced>;
-  is try { "$pair" }, "a\t1", "pairs stringify correctly (2)", :todo<unspecced>;
+  is try { ~$pair  }, "a\t1", "pairs stringify correctly (1)";
+  is try { "$pair" }, "a\t1", "pairs stringify correctly (2)";
 }
 
 {
   my $pair = (a => [1,2,3]);
-  is try { ~$pair  }, "a\t1 2 3", "pairs with arrayrefs as values stringify correctly (1)", :todo<unspecced>;
-  is try { "$pair" }, "a\t1 2 3", "pairs with arrayrefs as values stringify correctly (2)", :todo<unspecced>;
+  is try { ~$pair  }, "a\t1 2 3", "pairs with arrayrefs as values stringify correctly (1)";
+  is try { "$pair" }, "a\t1 2 3", "pairs with arrayrefs as values stringify correctly (2)";
+}
+
+# Per Larry L<"http://www.nntp.perl.org/group/perl.perl6.language/23525">:
+#   Actually, it looks like the bug is probably that => is forcing
+#   stringification on its left argument too agressively.  It should only do
+#   that for an identifier.
+{
+  my $arrayref = [< a b c >];
+  my $hashref  = { :d(1), :e(2) };
+
+  my $pair = ($arrayref => $hashref);
+  is ~$pair.key,   ~$arrayref, "=> should not stringify the key (1)";
+  is ~$pair.value, ~$hashref,  "=> should not stringify the key (2)";
+
+  push $pair.key, "d";
+  $pair.value<f> = 3;
+  is ~$pair.key,   ~$arrayref, "=> should not stringify the key (3)";
+  is ~$pair.value, ~$hashref,  "=> should not stringify the key (4)";
+  is +$pair.key,            4, "=> should not stringify the key (5)";
+  is +$pair.value,          3, "=> should not stringify the key (6)";
+}
+
+{
+  my $arrayref = [< a b c >];
+  my $hashref  = { :d(1), :e(2) };
+
+  my $pair = ($arrayref => $hashref);
+  my sub pair_key (Pair $pair) { $pair.key }
+
+  is ~pair_key($pair), ~$arrayref,
+    "the keys of pairs should not get auto-stringified when passed to a sub (1)";
+
+  push $pair.key, "d";
+  is ~pair_key($pair), ~$arrayref,
+    "the keys of pairs should not get auto-stringified when passed to a sub (2)";
+  is +pair_key($pair),          4,
+    "the keys of pairs should not get auto-stringified when passed to a sub (3)";
+}
+
+# Per Larry: http://www.nntp.perl.org/group/perl.perl6.language/23984
+{
+  my ($key, $val) = <key val>;
+  my $pair        = ($key => $val);
+
+  lives_ok { $pair.key = "KEY" }, "setting .key does not die", :todo<bug>;
+  is $pair.key,          "KEY",   "setting .key actually changes the key", :todo<bug>;
+  is $key,               "key",   "setting .key does not change the original var";
+
+  lives_ok { $pair.value = "VAL" }, "setting .value does not die", :todo<bug>;
+  is $pair.value,          "VAL",   "setting .value actually changes the value", :todo<bug>;
+  is $val,                 "val",   "setting .value does not change the original var";
+}
+
+{
+  my ($key, $val) = <key val>;
+  my $pair        = ($key => $val);
+
+  lives_ok { $pair.key := "KEY" }, "binding .key does not die", :todo<bug>;
+  is $pair.key,           "KEY",   "binding .key actually changes the key", :todo<bug>;
+  is $key,                "key",   "binding .key does not change the original var";
+  dies_ok { $pair.key = 42 },      "the .key was really bound";  # (can't modify constant)
+
+  lives_ok { $pair.value := "VAL" }, "binding .value does not die", :todo<bug>;
+  is $pair.value,           "VAL",   "binding .value actually changes the value", :todo<bug>;
+  is $val,                  "val",   "binding .value does not change the original var";
+  dies_ok { $pair.value = 42 },      "the .value was really bound";  # (can't modify constant)
+}
+
+{
+  my ($key, $val) = <key val>;
+  my $pair        = (abc => "def");
+
+  lives_ok { $pair.key := $key }, "binding .key does not die", :todo<bug>;
+  is $pair.key,           "key",  "binding .key actually changes the key", :todo<bug>;
+  $key = "KEY";
+  is $key,                "KEY",  "binding .key to a var works (1)";
+  is $pair.key,           "KEY",  "binding .key to a var works (2)", :todo<bug>;
+  try { $pair.key = "new" };
+  is $key,                "new",  "binding .key to a var works (3)", :todo<bug>;
+  is $pair.key,           "new",  "binding .key to a var works (4)", :todo<bug>;
+
+  lives_ok { $pair.value := $val }, "binding .value does not die", :todo<bug>;
+  is $pair.value,           "val",  "binding .value actually changes the value", :todo<bug>;
+  $val = "VAL";
+  is $val,                  "VAL",  "binding .value to a var works (1)";
+  is $pair.value,           "VAL",  "binding .value to a var works (2)", :todo<bug>;
+  try { $pair.value = "new" };
+  is $val,                  "new",  "binding .value to a var works (3)", :todo<bug>;
+  is $pair.value,           "new",  "binding .value to a var works (4)", :todo<bug>;
 }

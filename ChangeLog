@@ -1,3 +1,161 @@
+= Changes for 6.2.11 (r8934) - Feb 1, 2006
+
+== Bundled Modules
+
+=== New Perl 6 modules
+
+* [ext/Parse-Rule/] - A Rules engine port in perl 6
+* [ext/Rosetta/] - A federated relational database (incomplete)
+* [ext/Rosetta-Engine-Native/] - A back-end for Rosetta testing (incomplete)
+
+=== Updated modules
+
+* [ext/File-Spec/] - Rewritten to define its own exported wrapper subs
+* [ext/Locale-KeyedText/] - Rewrote with a strong resemblence to the original
+** Split up `translate_message()` for more granular Translator usage
+** Objects now become something useful when coerced into a string
+** Added `Locale::KeyedText::L::en`, LKT now throws Message exceptions
+** Template Modules now have a different variable interpolation format
+** Created 2 running [examples/] from pod that was removed from KeyedText.pm
+** Deleted old test suite (yet to be replaced); now only tests compilation
+* [ext/libwww-perl] - Rewrote `HTTP::Header::Util` with gather/take syntax
+* [ext/Test] - `&fail` renamed to `&flunk` to avoid conflict with builtin
+
+=== Experimental modules (in misc/, not installed)
+
+* [misc/Parser-Mini/] - Experimental *thin* p6 parser
+* misc/Rosetta-Incubator/ broken up:
+** Locale::KeyedText was merged into the rewritten one in ext/
+** SQL::Routine and Rosetta were merged together, became Rosetta in ext/
+** The license of Rosetta is now GPL (with extra linking provision)
+** Remainder (SQLBuilder, SQLParser, Eng/Generic, Emu/DBI) was deleted
+* [misc/sixpan/] - Prototype of new CPAN tools in Perl 5
+
+== Test, Examples and Documentations
+
+* Add timing data prints to smoke harness, to help spot hanging/slow tests
+* Tests in [ext/] and [t/] - Temporary workaround the breaking of `use_ok`
+* [Makefile.PL] - Begins with an overview POD section on the build system
+* [TASKS] - Tracking current things to do
+* [docs/AES/S17draft.pod] - Draft synopsis for Perl 6's concurrency
+* [docs/AES/S22draft.pod] - Draft synopsis for Perl 6's CPAN
+* [docs/articles/tpr.pod] - An introduction article to Pugs
+* [docs/feather] - Feather.perl6.nl web site
+* [docs/getting_started] - Pointers for people new to Pugs
+* [docs/notes/context_coercion.pod] - Notes on implementing contexts
+* [docs/notes/context_coersion.pod] - Notes on implementing contexts
+* [docs/notes/docs_evil_plan.txt] - Plan for Perl 6 documentation
+* [docs/notes/multimethods.pod] - Description of the canonical MMD algorithm
+* [docs/p6doc/] - Perl 6 language tutorials and documentation
+* [docs/quickref/] - Various updates and improvements from new Synopses
+* [docs/quickref/fears] - assorted fears about Perl 6
+* [examples/cookbook/] - New recipes
+* [examples/network/wiki/] - demo wiki
+* [examples/rpn/] - RPN calculator in Perl 6, Perl 6, and Haskell
+* [util/run-smoke.pl] - Support for `PUGS_SMOKE_EXCLUDE_EXT` environment variable
+* [util/catalog_tests.pl] - Annotate smoke reports with colored sources/specs
+
+== Feature Changes
+
+* Adverbial number forms: `:16<deadbeef>` and `:16[14,15]`
+** This change obsoletes `hex()` and `oct()`
+* Calling private methods with `self!method`
+* Deep eager sequential evaluation (aka /steamroll/) operator `&prefix:<**>`
+* Multisub declarations in the same scope can now be exported selectively
+* Named arguments are now decided at parse time, not as runtime Pair objects
+* New YAML tree-dump backends: `-C Parse-YAML`, `-C PIR-YAML`, `-C PIL1-YAML`
+* New `\x[abcd]` and `\x[1,2,3,]` forms instead of `\x{abcd}` in qq-strings
+* New backend: `-CParse-Pretty`, to show a pretty parse tree
+* Parameter syntax changes:
+** `+$arg` becomes `:$arg`
+** `++$arg` and `+$arg is required` becomes `:$arg!`
+** `?$arg` becomes `$arg?`
+* Round-trip data serialization with `.yaml` and `eval(..., :lang<yaml>)`
+* Support for multiline inputs in interactive shell
+* The build system now supports Cygwin again
+* Two or more underscores in numbers (eg. `1__0`) is no longer accepted
+* Unary `^` support: `^10` is a shorthand for `0..^10`
+* `$+x` is now accepted as a shorthand for `$CALLER::x`
+* `$CALLER::x` now only sees `env $x` in outer dynamic scopes, not `my $x`
+* `$obj.clone` support
+* `%*INC` now contains module interface structures, not file system pathnames
+* `&die` and `&fail` can take an object argument without stringifying it
+* `eqv` is now spelled `===`
+* `pugs file.p6 --options` now passes options to the program, not to Pugs
+* `self` is an alias for `$?SELF`
+* `use Module` now imports its symbols lexically at the consumer's use time
+* `use Perl-6` parses correctly now
+
+== Bug Fixes
+
+* Bareword `foo.bar` now always parses as `::foo.bar`, never `foo(.bar)`
+* Binding a block to `&infix:<operator>` in BEGIN time now affects parsing
+* Fixed embedding of threaded parrot
+* Fixed evaluation order in array and hash access
+* Fixed splice on scalar
+* Improved detection of null patterns; this fixes some endless loops
+* Improved hash parsing. `{("a"=>3),}.ref` is again ::Hash, not ::Block
+* Infix macros no longer cause parsefail
+* Lazy `{...}` executes its closure at most once
+* Method calls on simple index lookups now gets dispatched correctly
+* Parse (but no implementation) for scoped packages
+* When `m:P5/(...)?/` captures nothing, $0 no longer evaluates to true
+* `$.foo.bar()` correctly dispatches on the runtime type of `$.foo`
+* `&splice` was destroying existing bindings on the array
+* `.perl` stringification now escapes unprintable characters
+* `1**Inf`, `0**0` and `Inf**0` are defined to 1 regardless of architecture
+* `3..2` and `'z'..'a'` return empty lists
+* `\(1,2,3,4).elems` no longer throws an exception
+* `zip(@a; @b; @c)` no longer flattens the arrays together
+
+== Backends
+
+=== JavaScript backend
+
+* Division by zero raises an error, not return NaN like JS does
+* Fix problems with `[=>]` and related operators
+* New operators implemented: `+| +& +^ +< +> ~& ~| ~^ +^ ~^`
+* PIL/JS compilation now works with exported multisubs
+* Support for using Perl 5 modules in JavaScript backend via `-B JS-Perl5`
+* `$*PID`
+* `.assuming`
+* `FIRST {...}` blocks
+* `state $variable`
+* `unlink()`
+
+=== Parrot backend
+
+* Parrot 0.4.1+ is now required for Parrot targeting and embedding
+* Closure creation no longer triggers segfaults
+* Lexical variables are now truly lexical instead of emulated by temps
+* Upon program exit, embedded Parrot/Perl5 objects are finalized correctly
+* Support for modules with lexical imports
+* When looking for an external parrot, look in `%ENV<PARROT_PATH>` first
+
+=== PIL^N backend
+
+* New VM written in Haskell which uses the domain specific language PIL^N
+** Based on the Perl6-ObjectSpace prototype
+** Optionally built with `make pil` (and interactively as `make pili`)
+** See [src/PIL/Native/] for the source code
+* Class Meta-Model written and bootstrapped in PIL^N
+** Basic tests for Meta-Model in [t/pil/]
+* Role Meta-Model partially complete in PIL^N
+* Some basic Container types written in PIL^N
+** See [docs/notes/piln_object_repr_types.pod] for implementation notes
+* Haskell implementation of Perl 6 Rules and precedence parser
+** See [src/Text/Parser/] for the source code
+
+=== Perl6-ObjectSpace
+
+* Prototype Perl 5 backend, served as the inspiration for the PIL^N backend
+** Currently somewhat out of sync with PIL^N
+** See [perl5/Perl6-ObjectSpace/] for the source code
+* Core set of /native types/ written in Perl 5
+** Class Meta-Model bootstrapped using only the native types
+** Role Meta-Model and Container types not yet supported
+* Based on work from the [perl5/Perl6-MetaModel/]
+
 = Changes for 6.2.10 (r7520) - Oct 10, 2005
 
 == Feature Changes
@@ -46,7 +204,7 @@
 * Support for the `eqv` operator
 * Using `for` with only one element to loop over works now
 * `int()` works correctly on special values like `Inf` or `NaN` now
-* `substr()` returns a r/w proxy: `substr($str, $pos, $len) = $replacement)`
+* `substr()` returns a r/w proxy: `substr($str, $pos, $len) = $replacement`
 
 === Perl 5 backend
 
@@ -1043,92 +1201,4 @@
 * Hashes, Pairs and their access methods
 * Much more robust casting between arrays, lists and hashes
 * Fixed harness output problem on older perls
-* Many Posix-based IO primitives
-* Precedence for builtin unary/list functions are parsed correctly
-* `unless` construct
-* New primitives: `join`, `split`, prefix `++` and `--`
-* `+>>` etc changed to `+>` etc
-* Stacking multiple prefix and postfix operators now works
-* `@*INC`, `&?SUB`, `CALLER::`
-* Tests for the /perlego/ dialect
-* User-defined function applications now takes arbitary expressions
-* Deep recursion detection
-
-= Changes for 6.0.7 - February 18, 2005
-
-* Beginning of synopses-based unit tests
-* Two code snippets that runs: `examples/life.p6` and `examples/mandel.p6`
-* Code literals -- /sub/, /pointy/ and /bare/ variants all works
-* Lexical subroutine declarations via `my sub`
-* The `say`, `exit`, `die`, `time`, `open`, `close` primitives
-* `Bool.perl` now prints correct literals
-* Blocks under void contexts now evaluates automatically
-* The `...` (dotdotdot) literal
-* Errors are propagated upward using shiftT
-* Postfix `++` and `--`
-* Ternary `?? ::`
-* Assignment to mutable variables and to array slices
-* `loop`, `for` and `if` constructs
-
-= Changes for 6.0.5 - February 15, 2005
-
-* The `rand` primitive
-* Taking references of junctions no longer create a junction of references
-* Illegal divisions are caught
-* Chained comparison for four or more terms now works
-* Collapsing for /JuncOne/ into two sets: the `none` set and the `one` set
-* The evaluator now prints some helpful debugging messages
-* New parser logic merged from Michaud and Palmer's `Perl6.grammar`
-* Extra semicolon and whitespace in blocks are dealt with
-* Space around punctiation operators is now optional
-* The /Eval/ monad now supports `shift`/`reset`/`callcc`, lexical and dynamic scopes
-* Improved pretty-printing code for syntactic constructs
-
-= Changes for 6.0.4 - February 12, 2005
-
-* The `eval` primitive
-* Refactor junctive logic into `Junc.hs`
-* /JuncAny/ and /JuncAll/ now collapses operands of the same type correctly
-* /JuncOne/ now collapses into an empty set when operands contains duplicates
-
-= Changes for 6.0.3 - February 12, 2005
-
-* Formal parameters declaration and binding
-* Invocant-based multimethod dispatch
-* Optional(`?`), named(`+` and `++`), slurpy(`*`) parameters with defaulting
-* Extraction of higher-order placeholder variables
-* Proper semantics and extraction of `@_`, `%_` and `$_`
-* Global variables and subroutines: `&*foo`, `$*bar`
-* Context propagation from types of formal parameters
-* The `returns` / `is returns` trait
-* Trailing comma and semicolons are now allowed
-* Better handling of exponential primitives
-* &prefix: is now consistently added for user-defined subroutines
-* Junctions are now proper sets, instead of lists masqueraded as sets
-* New operators: `!!` and `nor`
-* The `all` junction builder now collapses nested junctions under it
-
-= Changes for 6.0.2 - February 9, 2005
-
-* User-defined subroutine with `$_` and `@_` as parameters
-* Variable binding
-* Context propagation
-* Multimethod dispatch
-* Subtype distancing and casting
-* Autothreading over chained comparison and multiarg functions
-* List associativity
-* Array references as literals
-* Flattening (slurpy) star
-
-= Changes for 6.0.1 - February 7, 2005
-
-* Fix building on Mac OS X
-* Characters in single quotes should not be escaped
-* Add one very basic test in `t/`
-
-= Changes for 6.0.0 - February 7, 2005
-
-* Initial CPAN release
-* Evaluation of most simple expressions
-* Junctions and chained comparisons
-* Interactive shell and `#!/usr/bin/pugs` support
+* Many Posix

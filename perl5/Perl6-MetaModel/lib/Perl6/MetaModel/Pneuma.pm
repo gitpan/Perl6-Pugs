@@ -87,17 +87,28 @@ $::Object->add_method('can' => ::make_method(sub {
 }));
 
 $::Object->add_method('add_singleton_method' => ::make_method(sub { 
-    my ($self, $label, $method) = @_;   
-    my $eigenclass = $::EigenClass->new('$:name' => '_EigenClass(' . $self->id . ')');
-    $eigenclass->superclasses([ $self->class ]);
-    ::opaque_instance_change_class($self, $eigenclass);
-    $eigenclass->add_method($label, $method);
+    my ($self, $label, $method) = @_;  
+    if ($self->class->class != $::EigenClass ){
+#        warn "hello from not yet eigened : " . $self;
+        my $eigenclass = $::EigenClass->new('$:name' => 'EigenClass[' . 
+                            ($self->can('name') ? $self->name : $self->class->name) . 
+                        ']');                   
+        $eigenclass->superclasses([ $self->class ]);        
+        ::opaque_instance_change_class($self, $eigenclass);
+        ::bind_method_to_class($method, $self);
+        $eigenclass->add_method($label, $method);        
+    }
+    else {
+#        warn "hello from already eigened : $self";
+        ::bind_method_to_class($method, $self);        
+        $self->class->add_method($label, $method);
+    }
 }));
 
 $::Object->add_method('dump' => ::make_method(sub { 
     my $self = shift;
     require Data::Dumper;
-    $Data::Dumper::Maxdepth = shift || 2;
+    $Data::Dumper::Maxdepth = shift if @_;
     Data::Dumper::Dumper $self;
 }));
 

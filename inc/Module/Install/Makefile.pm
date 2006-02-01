@@ -1,4 +1,4 @@
-#line 1 "inc/Module/Install/Makefile.pm - /Users/ingy/local/lib/perl5/site_perl/5.8.6/Module/Install/Makefile.pm"
+#line 1 "inc/Module/Install/Makefile.pm - /usr/local/lib/perl5/site_perl/5.8.7/Module/Install/Makefile.pm"
 package Module::Install::Makefile;
 use Module::Install::Base; @ISA = qw(Module::Install::Base);
 
@@ -27,7 +27,7 @@ sub build_subdirs {
     my $self = shift;
     my $subdirs = $self->makemaker_args->{DIR} ||= [];
     for my $subdir (@_) {
-        push @$subdirs, $subdir;  
+        push @$subdirs, $subdir;
     }
 }
 
@@ -62,15 +62,20 @@ sub write {
     $args->{VERSION} = $self->version || $self->determine_VERSION($args);
     $args->{NAME} =~ s/-/::/g;
 
+    # Only call $self->tests if we haven't been given explicit
+    # tests from makemaker_args.
+
+    $args->{test} ||= {TESTS => $self->tests};
+
     if ($] >= 5.005) {
-        $args->{ABSTRACT} = $self->abstract;
-        $args->{AUTHOR} = $self->author;
+	$args->{ABSTRACT} = $self->abstract;
+	$args->{AUTHOR} = $self->author;
     }
     if ( eval($ExtUtils::MakeMaker::VERSION) >= 6.10 ) {
         $args->{NO_META} = 1;
     }
     if ( eval($ExtUtils::MakeMaker::VERSION) > 6.17 ) {
-        $args->{SIGN} = 1 if $self->sign;
+	$args->{SIGN} = 1 if $self->sign;
     }
     delete $args->{SIGN} unless $self->is_admin;
 
@@ -148,4 +153,4 @@ sub postamble {
 
 __END__
 
-#line 273
+#line 282

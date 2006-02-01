@@ -15,7 +15,7 @@
 module Pugs.Monads (
     enterLex, enterContext, enterEvalContext, enterPackage, enterCaller,
     enterGiven, enterWhen, enterWhile, genSymPrim, genSymCC,
-    enterBlock, enterSub,
+    enterBlock, enterSub, envEnterCaller,
     evalVal, tempVar,
     
     MaybeT, runMaybeT,
@@ -26,6 +26,7 @@ import Pugs.Internals
 import Pugs.AST
 import Pugs.Types
 import Control.Monad.RWS
+import qualified Data.Map as Map
 
 
 newtype MaybeT m a = MaybeT { runMaybeT :: m (Maybe a) }
@@ -53,7 +54,7 @@ new scope.
 
 (Subsequent chained 'Eval's do /not/ see this new scope.)
 -}
-enterLex :: [Pad -> Pad] -- ^ Transformations on current 'Pad' to produce the
+enterLex :: [PadMutator] -- ^ Transformations on current 'Pad' to produce the
                          --     new 'Pad'.
          -> Eval a       -- ^ Evaluation to be performed in the new scope
          -> Eval a       -- ^ Resulting evaluation (lexical scope enter & exit
@@ -88,9 +89,18 @@ enterPackage pkg = local (\e -> e{ envPackage = pkg })
 Enter a new environment and mark the previous one as 'Caller'.
 -}
 enterCaller :: Eval a -> Eval a
-enterCaller = local (\env -> env
+enterCaller = local envEnterCaller
+
+envEnterCaller :: Env -> Env
+envEnterCaller env = env
     { envCaller = Just env
-    , envDepth = envDepth env + 1 })
+        { envLexical = MkPad (lex `Map.intersection` envImplicit env)
+        }
+    , envDepth = envDepth env + 1
+    , envImplicit = Map.fromList [("$_", ())]
+    }
+    where
+    MkPad lex = envLexical env
 
 {-|
 Bind @\$_@ to the given topic value in a new lexical scope, then perform
@@ -166,7 +176,7 @@ genSymPrim :: (MonadSTM m)
            => String                -- ^ Name installed in 'Pad'
                                     --     (must have leading @&@ sigil)
            -> ([Val] -> Eval Val)   -- ^ The actual primitive to wrap
-           -> ((Pad -> Pad) -> m t) -- ^ A (lambda) function that the 'Pad'
+           -> (PadMutator -> m t)   -- ^ A (lambda) function that the 'Pad'
                                     --     transformer is given to
            -> m t -- ^ Result of passing the pad-transformer to the \'action\'
 genSymPrim symName@('&':name) prim action = do
@@ -187,7 +197,7 @@ to an \'action\' function, which is expected to apply it (e.g. in a lexical
 scope), then perform some evaluation in that scope.
 -}
 genSymCC :: String -- ^ Name of the primitive in the symbol table ('Pad').
-         -> ((Pad -> Pad) -> Eval Val) -- ^ An \'action\' function that will
+         -> (PadMutator -> Eval Val)   -- ^ An \'action\' function that will
                                        --     take the pad-transformer and use
                                        --     it to perform some evaluation 
          -> Eval Val -- ^ Result of passing the pad-transformer to the 
@@ -223,7 +233,7 @@ enterSub sub action
         env <- ask
         if typ >= SubBlock
             then do
-                doFix <- fixEnv undefined env
+                doFix <- fixEnv return env
                 local doFix action
             else resetT $ callCC $ \cc -> do
                 doFix <- fixEnv cc env
@@ -243,7 +253,10 @@ enterSub sub action
                 { envOuter = Just env
                 , envPackage = maybe (envPackage e) envPackage (subEnv sub)
                 , envLexical = combine [blockRec]
-                    (subPad sub `unionPads` envLexical env) }
+                    (subPad sub `unionPads` envLexical env)
+                , envImplicit= envImplicit e `Map.union` Map.fromList
+                    [ ("&?BLOCK", ()) ]
+                }
         | otherwise = do
             subRec <- sequence
                 [ genSym "&?SUB" (codeRef (orig sub))
@@ -254,6 +267,8 @@ enterSub sub action
                 { envLexical = combine (concat [subRec, callerRec]) (subPad sub)
                 , envPackage = maybe (envPackage e) envPackage (subEnv sub)
                 , envOuter   = maybe Nothing envOuter (subEnv sub)
+                , envImplicit= envImplicit e `Map.union` Map.fromList
+                    [ ("&?SUB", ()), ("$?SUBNAME", ()), ("&?CALLER_CONTINUATION", ()) ]
                 }
     ccSub :: (Val -> Eval Val) -> Env -> VCode
     ccSub cc env = mkPrim
@@ -262,7 +277,7 @@ enterSub sub action
         , subBody = Prim $ doCC cc
         }
 
-genSubs :: t -> Var -> (t -> VCode) -> Eval [Pad -> Pad]
+genSubs :: t -> Var -> (t -> VCode) -> Eval [PadMutator]
 genSubs env name gen = sequence
     [ genMultiSym name (codeRef $ gen env)
     , genMultiSym name (codeRef $ (gen env) { subParams = [] })

@@ -73,7 +73,7 @@ is($array_ref6[2], 'bar', 'got the right value at array_ref6 index 2');
 
 # create an array_ref slice with an array_ref constructed with []
 
-my $array_ref7 = [ $array_ref1[*[2, 1, 0]] ];
+my $array_ref7 = [ $array_ref1[**[2, 1, 0]] ];
 isa_ok($array_ref7, 'Array');
 
 is(+$array_ref7, 3, 'the array_ref7 has 3 elements');
@@ -101,7 +101,7 @@ my $array11 = [[2,3]];
 is try { $array11[0][0] = 6; $array11[0][0] }, 6, "changing nested array (2)";
 
 # creating a AoA using ";" doesn't work any longer
-# As of http://www.nntp.perl.org/group/perl.perl6.language/20795:
+# As of L<"http://www.nntp.perl.org/group/perl.perl6.language/20795">:
 #   In ordinary list context, infix:<;> is just a list-op-ending "big comma",
 #   but is otherwise treated like an ordinary comma (but only if the
 #   list is in some kind of brackets, of course).

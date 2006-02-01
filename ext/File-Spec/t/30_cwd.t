@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 plan 2;
 
@@ -11,7 +11,7 @@ Test handling of C<cwd>.
 
 =cut
 
-use_ok('File::Spec');
+use File::Spec; pass "(dummy instead of broken use_ok)";
 
 # XXX: this function does not work on Win32 either.
 sub manual_cwd () {

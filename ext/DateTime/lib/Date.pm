@@ -28,7 +28,7 @@ multi submethod BUILD () returns Date {
     return $_.today();
 }
 
-multi submethod BUILD (Int|Real +$epoch) returns Date {
+multi submethod BUILD (Int|Real :$epoch) returns Date {
     $epoch = int $epoch;
 
     # waiting for localtime in Pugs
@@ -56,7 +56,7 @@ multi submethod BUILD (Str $string) returns Date {
 }
 
 # day as Str where { rx:i/^last$/ }
-multi submethod BUILD (Int +$year, Int +$month = 1, Int|Str +$day is copy = 1) returns Date {
+multi submethod BUILD (Int :$year, Int :$month = 1, Int|Str :$day is copy = 1) returns Date {
     if $day ~~ rx:perl5<i>/^last$/ {
         my @lengths := _is_leap_year($year) ?? @LeapYearMonthLengths !! @MonthLengths;
 
@@ -114,15 +114,15 @@ method day_of_year () returns Int {
     @doy[$.month - 1] + $.day;
 }
 
-method ymd (Str ?$sep = "-") returns Str {
+method ymd (Str $sep = "-") returns Str {
     return [$.year, $.month, $.day].join($sep);
 }
 
-method mdy (Str ?$sep = "-") returns Str {
+method mdy (Str $sep = "-") returns Str {
     return [$.month, $.day, $.year].join($sep);
 }
 
-method dmy (Str ?$sep = "-") returns Str {
+method dmy (Str $sep = "-") returns Str {
     return [$.day, $.month, $.year].join($sep);
 }
 

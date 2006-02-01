@@ -54,13 +54,13 @@ sub set_url_encoding(Str $encoding) is export {
 # utility functions
 
 sub header (
-    Str ?$content_type = 'text/html',
-    Str ?$status = '200 OK',
-    Str ?$charset,
-    Str +$cookies,
-    Str +$target,
-    +$expires,
-    Bool +$nph,
+    Str  $content_type? = 'text/html',
+    Str  $status? = '200 OK',
+    Str  $charset? = undef,
+    Str :$cookies?,
+    Str :$target?,
+    :$expires?,
+    Bool :$nph?,
     *%extra
 ) returns Str is export {
     # construct our header
@@ -102,11 +102,11 @@ sub header (
 }
 
 sub redirect (
-    Str $location,
-    Str ?$target,
-    Str ?$status = "302 Found",
-    Str +$cookie,
-    Bool +$nph,
+    Str   $location,
+    Str   $target?,
+    Str   $status? = "302 Found",
+    Str  :$cookie,
+    Bool :$nph,
     *%extra
 ) returns Str is export {
     my %out;
@@ -142,15 +142,15 @@ sub url_decode (Str $to_decode) returns Str is export {
     $decoded ~~ s:perl5:g/\+/ /;
     given $URL_ENCODING {
         when 'iso-8859-1' {
-            $decoded ~~ s:perl5:g/%([\da-fA-F][\da-fA-F])/{chr(hex($0))}/;
+            $decoded ~~ s:perl5:g/%([\da-fA-F][\da-fA-F])/{chr(:16($0))}/;
         }
         when 'utf-8' {
-            $decoded ~~ s:perl5:g:i/%(F[CD])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($0)+&1)*1073741824+(hex($1)+&63)*16777216+(hex($2)+&63)*262144+(hex($3)+&63)*4096+(hex($4)+&63)*64+(hex($5)+&63))}/;
-            $decoded ~~ s:perl5:g:i/%(F[8-B])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($0)+&3)*16777216+(hex($1)+&63)*262144+(hex($2)+&63)*4096+(hex($3)+&63)*64+(hex($4)+&63))}/;
-            $decoded ~~ s:perl5:g:i/%(F[0-7])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($0)+&7)*262144+(hex($1)+&63)*4096+(hex($2)+&63)*64+(hex($3)+&63))}/;
-            $decoded ~~ s:perl5:g:i/%(E[\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((hex($0)+&15)*4096+(hex($1)+&63)*64+(hex($2)+&63))}/;
-            $decoded ~~ s:perl5:g:i/%([CD][\dA-F])%([8-9AB][\dA-F])/{chr((hex($0)+&31)*64+(hex($1)+&63))}/;
-            $decoded ~~ s:perl5:g:i/%([0-7][\dA-F])/{chr(hex($0))}/;
+            $decoded ~~ s:perl5:g:i/%(F[CD])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((:16($0)+&1)*1073741824+(:16($1)+&63)*16777216+(:16($2)+&63)*262144+(:16($3)+&63)*4096+(:16($4)+&63)*64+(:16($5)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%(F[8-B])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((:16($0)+&3)*16777216+(:16($1)+&63)*262144+(:16($2)+&63)*4096+(:16($3)+&63)*64+(:16($4)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%(F[0-7])%([8-9AB][\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((:16($0)+&7)*262144+(:16($1)+&63)*4096+(:16($2)+&63)*64+(:16($3)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%(E[\dA-F])%([8-9AB][\dA-F])%([8-9AB][\dA-F])/{chr((:16($0)+&15)*4096+(:16($1)+&63)*64+(:16($2)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%([CD][\dA-F])%([8-9AB][\dA-F])/{chr((:16($0)+&31)*64+(:16($1)+&63))}/;
+            $decoded ~~ s:perl5:g:i/%([0-7][\dA-F])/{chr(:16($0))}/;
         }
     }
     return $decoded;
@@ -240,7 +240,7 @@ sub load_params {
     }    
 }
 
-sub escapeHTML (Str $string, Bool +$newlines) returns Str is export {
+sub escapeHTML (Str $string, Bool :$newlines) returns Str is export {
     # XXX check for $self.escape == 0
     #unless ($self.escape != 0) { return $toencode; }
     
@@ -293,7 +293,7 @@ sub unescapeHTML (Str $string) returns Str is export {
             
             if ($latin) {
                 when /^#(\d+)$/     { chr($1) }
-                when /^#x(\d+)$/    { chr(hex($1)) }
+                when /^#x(\d+)$/    { chr(:16($1)) }
             }
         }
     }/;
@@ -376,7 +376,7 @@ B<The following informational functions are fetched on-demand>
 
 =over 4
 
-=item B<header (+$status = '200 OK', +$content_type = 'text/html', +$charset, +$location) returns Str>
+=item B<header (:$status = '200 OK', :$content_type = 'text/html', :$charset, :$location) returns Str>
 
 =item B<redirect (Str $location) returns Str>
 
@@ -405,7 +405,7 @@ figure out a good way to do this without. Either way it is still TODO.
 
 stevan little, E<lt>stevan@iinteractive.comE<gt>
 
-Autrijus Tang, E<lt>autrijus@autrijus.comE<gt>
+Audrey Tang, E<lt>autrijus@autrijus.comE<gt>
 
 Curtis "Ovid" Poe
  

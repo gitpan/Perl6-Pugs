@@ -1,0 +1,195 @@
+## ------------------------------------------------------------------------- ##
+## Roles
+## ------------------------------------------------------------------------- ##
+
+^Role := ^Class.new({});
+
+^Role.set_name('Role');       
+^Role.set_version('0.0.1');    
+^Role.set_authority('url:pugscode.org');
+
+^Role.set_superclasses([ ^Module ]);
+
+^Role.add_attribute('@!roles',      []);
+^Role.add_attribute('%!methods',    {});
+^Role.add_attribute('%!attributes', {});
+
+# for detcting conflicts in-statis
+^Role.add_attribute('%!method_conflicts',     {});
+^Role.add_attribute('%!attribute_conflicts',  {});
+
+# NOTE:
+# These methods are pretty much duplicates of the 
+# ones in ^Class, so we can just copy them here.
+
+^Role.add_method('add_method',      ^Class.get_method('add_method'));
+^Role.add_method('has_method',      ^Class.get_method('has_method'));
+^Role.add_method('get_method',      ^Class.get_method('get_method'));
+^Role.add_method('get_method_list', ^Class.get_method('get_method_list'));
+
+^Role.add_method('add_attribute',      ^Class.get_method('add_attribute'));
+^Role.add_method('has_attribute',      ^Class.get_method('has_attribute'));
+^Role.add_method('get_attribute',      ^Class.get_method('get_attribute'));
+^Role.add_method('get_attribute_list', ^Class.get_method('get_attribute_list'));
+^Role.add_method('get_attributes',     ^Class.get_method('get_attributes'));
+
+^Role.add_method('roles',     -> { self`get_attr('@!roles') });
+^Role.add_method('set_roles', -> @roles { 
+    self`set_attr('@!roles', @roles); 
+});
+
+^Role.add_method('get_method_conflicts', -> { 
+    # first clear it ...
+    self`set_attr('%!method_conflicts', {});
+    # now re-check it ...
+    self!find_method_conflicts(self.roles());
+    # and return it ...
+    self`get_attr('%!method_conflicts');
+    # NOTE: 
+    # we need to clear and regenerate the cache here
+    # since calls to set_roles, add_method, add_attribute, etc
+    # could have changed the results for this. We store this
+    # internally because it is easier than using some foreign
+    # null object or something, although it might (at some point)
+    # make sense to switch to that approach for efficiency/space
+    # considerations, but for now, this works :P
+});
+
+^Role.add_private_method('find_method_conflicts', -> @roles {
+    -> $role {   
+        self`set_attr('%!method_conflicts', self`get_attr('%!method_conflicts')`concat($role.get_method_conflicts()));
+        -> $method_name {
+            # see if we have this method in
+            # the parent role, if so, we can
+            # just skip it, there is no conflict
+            -> {
+                # however, if we don't have one, then
+                # we need to check ...
+                self`get_attr('%!method_conflicts')`exists($method_name)`if_else(
+                    -> {
+                        # increment the number of times seen 
+                        self`set_attr_hash('%!method_conflicts', $method_name, self`get_attr('%!method_conflicts')`fetch($method_name)`increment());                    
+                    },
+                    -> {
+                        # mark it as seen first ...
+                        self`set_attr_hash('%!method_conflicts', $method_name, 1);
+                    }
+                );
+            }`do_unless(self.has_method($method_name));
+        }`do_for($role.get_method_list);  
+    }`do_for(@roles);
+    
+    # loop through the methods and remove 
+    # any ones with only one key or who
+    # are in this role itself
+    -> $method_name {
+        -> {
+            self`set_attr('%!method_conflicts', self`get_attr('%!method_conflicts')`delete($method_name));
+        }`do_if(self`get_attr('%!method_conflicts')`fetch($method_name)`eq(1));
+        # this will resolve any from "inherited" conflicts ...
+        -> {
+            self`set_attr('%!method_conflicts', self`get_attr('%!method_conflicts')`delete($method_name));
+        }`do_if(self.has_method($method_name));        
+    }`do_for(self`get_attr('%!method_conflicts')`keys());
+});
+
+
+^Role.add_method('get_attribute_conflicts', -> { 
+    self!find_attribute_conflicts(self.roles());
+    self`get_attr('%!attribute_conflicts');
+});
+
+# -----------------------------------------------------------------------------
+
+^Role.add_method('does', -> $role {
+    self.name`eq($role)`if_else(
+        -> { true },
+        -> {
+            @roles := self.collect_all_roles(); 
+            @roles`is_empty`if_else(
+                -> { false },
+                -> {
+                    -> @r {
+                        &redo := &?SUB;
+                        @r`is_empty`if_else(
+                            -> { false },
+                            -> {
+                                @r`fetch(0).name`eq($role)`if_else(
+                                    -> { true },
+                                    -> { &redo`(@r`splice(1)) }
+                                )                            
+                            }
+                        )
+                    }`(@roles);                
+                }
+            );       
+        }
+    );     
+});
+
+
+# NOTE:
+# We need to collect conflicts as we collect all the roles,
+# this will allow a role to resolve a conflict in it's subroles.
+# This means we probably should create some kind of "required"
+# list so that we can make sure our consuming class fufills all
+# these requirements. In other words,.. Roles are still pretty 
+# broken :)
+
+^Role.add_method('collect_all_roles', -> {
+    -> $c, $role {
+        &recurse := &?SUB;
+        -> $r {
+           -> {
+               $c`set_attr_hash('%seen', $r.name(), 1);
+               $c`set_attr('@roles', $c`get_attr('@roles')`push($r));
+               -> {
+                   -> $subrole {
+                       -> {
+                           $c`set_attr_hash('%seen', $subrole.name(), 1);
+                           $c`set_attr('@roles', $c`get_attr('@roles')`concat($subrole));
+                       }`do_unless($c`get_attr('%seen')`exists($subrole.name()))
+                   }`do_for(&recurse`($c, $r));
+               }`do_unless($r.roles`is_empty());
+           }`do_unless($c`get_attr('%seen')`exists($r.name()))
+        }`do_for($role.roles());
+        $c`get_attr('@roles');
+    }`(^`create('p6opaque', { '@roles' => [], '%seen' => {} }), self);
+});
+
+^Role.add_method('resolve', -> {
+    $conflicts := ^`create('p6opaque', { 'methods' => {}, 'attrs' => {} });
+    -> $role {
+        -> $method_name {
+            $conflicts`get_attr('methods')`exists($method_name)`if_else(
+                -> { self.remove_method($method_name) },
+                -> {
+                    $conflicts`set_attr_hash('methods', $method_name, 1);
+                    self.has_method($method_name)`if_else(
+                        -> { nil },
+                        -> { self.add_method($method_name, $role.get_method($method_name)) }
+                    );                        
+                }
+            );
+        }`do_for($role.get_method_list);
+        
+        -> $attribute_name {
+            $conflicts`get_attr('attrs')`exists($attribute_name)`if_else(
+                -> { self.remove_attribute($attribute_name) },
+                -> {
+                    $conflicts`set_attr_hash('attrs', $attribute_name, 1);
+                    self.has_attribute($attribute_name)`if_else(
+                        -> { nil },
+                        -> { self.add_attribute($attribute_name, $role.get_attribute($attribute_name)) }
+                    );                        
+                }
+            );
+        }`do_for($role.get_attribute_list);    
+    }`do_for(self.collect_all_roles());
+    -> {
+        self.add_method('does', -> $role { 
+            self.does($role) 
+        });
+    }`do_unless(self.isa('Role'));
+});
+

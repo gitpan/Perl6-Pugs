@@ -1,0 +1,583 @@
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+Rosetta::Language -
+Design document of the Intermediate Relational Language
+
+=head1 DESCRIPTION
+
+Rosetta::Model provides an effective language for defining relational data
+models, both the means to create them and the means to interact with them.
+The language is IRL (Intermediate Relational Language); see the
+documentation of L<Rosetta::Model> itself (in the current distribution) for
+a further introduction.
+
+This document, Rosetta::Language ("Language"), is the human readable
+authoritative design document for that language.  The file Rosetta::Model
+itself contains the machine readable language specification, which is
+derived from the human readable version.  If there's a conflict between the
+two, then either Rosetta::Model is in error, or the developers were
+negligent in updating it before Language, so you can yell at them.
+Likewise, believe Language before any other conflicting documents, unless
+the other documents are emails from Rosetta::Model developers, in which
+case they can be yelled at again for not keeping Language up to date.
+
+Since IRL is largely derived from pre-existing language specifications such
+as Christopher J. Date's and Hugh Darwen's Tutorial D and the ANSI/ISO
+SQL:2003 standard, it may be tempting to just assume everything you know
+from them is also true here.  While that will work in some cases (and in
+fact I intentionally don't repeat many details here for brevity), it won't
+in others, so you should always check here for any possible conflicts.
+
+IRL is primarily declarative, in that it defines how implementations should
+appear and behave from a user's point of view, and it does not typically
+make any demands as to how implementations accomplish this behind the
+scenes.
+
+=head1 OPERATIONAL CONTEXT
+
+IRL is designed for a specific virtual environment, that provides
+usually-persistent repositories (or "depots") in which can live user
+defined data structures and routines to operate on them, as is the case
+with a typical computer programming language.  Broadly speaking, IRL
+provides the means to create, read, modify, and delete both entire depots
+and other items that live in them.  An implementation (or instance thereof)
+of IRL is a "depot management system" (or "depot manager"); it is the job
+of the depot manager to facilitate access to depots implemented with it.
+
+A B<depot> is is a fully self-contained and fully addressable database.  It
+is what your application opens a connection to when it wants to use a
+database.  A depot has its own set of user accounts, and its own catalogs
+(containing schemas, which in turn contain tables and other data structures
+plus stored routines), which are owned by and operated on by said users.  A
+depot by definition never shares ownership of catalogs or users with
+another depot, even another managed by the same depot manager.  When an
+application opens a connection to a database, a "depot" I<is> what it is
+connecting to, and everything it sees within that connection is from within
+the context of the depot.  In other terms, when you hold a "data source
+name" / DSN, a single "depot" is what it points to.
+
+A B<depot manager> is software that takes the form of either a library
+embedded in the current application process or one instance of a separate
+server process that is running somewhere.  When an application wants to
+invoke a depot from an application, the invocation must be qualified with
+what depot manager is going to be used, plus any necessary manager
+implementation specific details to locate the depot itself.
+
+With a "file based" implementation, such as one using the SQLite database
+manager, there is a one-to-one mapping between a depot and a file system
+file, the SQLite database file in this case; to use this depot, it is
+identified simply using the manager name and the file name.  Likewise with
+MS Access, or standalone CSV or tabular database files.  One such database
+manager can typically manage several depots/files at once, each accessed
+with a separate connection.  Rosetta::Engine::Native is also "file based".
+
+With a "client-server" implementation, such as Oracle or PostgreSQL, a
+depot is identified (directly or under abstraction) by both the network
+address of the server itself (qualified with such as an IP address and
+port, or a socket name), and a "database name".  Or that is the case with
+many client-server databases like PostgreSQL, so for those each "database
+at a server" corresponds one-to-one with a depot, assuming that these
+databases do not share a common set of users.  Oracle is different in that
+"the server equals the database", so therefore one Oracle server equals one
+depot.  MySQL muddies the waters, where it seems that all "databases"
+managed by a MySQL server process share a common set of users.  By
+definition, a depot contains everything that a single database manager
+provided user account is privileged to own, so perhaps everything under a
+MySQL server process is a single depot.
+
+Of course, the exact mapping of concepts for a federated implementation of
+a depot manager (and most depot managers are anticipated to be federated)
+are left to its creator, but the above are my recommendations.
+
+A B<user> is whom the application or its user authenticates themselves as
+against a depot connection, if the depot manager has a concept of users
+(SQLite natively does not, Oracle natively does, etc).  IRL defines 3 types
+of users, called ROOT, NAMED, ANONYMOUS; there is 1 ROOT user that owns the
+depot and was created with it, and NAMED users are what a typical person
+connects as, unless they are ANONYMOUS.  Note that some database managers
+underlying a depot manager will display a different view of the database
+depending on what user logged in, but the depot manager should abstract
+away this per-user difference where possible, mainly by using fully
+qualified identifiers for all depot contents.  A user can have privileges
+that authorize what it can do in the depot.
+
+A depot provides 2 levels of namespace in which its main contents are
+organized; the higher level namespace is B<catalog> and the lower level
+namespace is B<schema>.  The main contents themselves (data structures and
+routines) are collectively referred to as B<schema objects>.  Schema
+objects are like the package qualified global variables of Perl;
+authorization permitting, you can directly invoke any of them at any time,
+either from within another schema object or within a client side routine
+operating over an open connection to the depot containing them.  The fully
+qualified name of a schema object is "<catalog>.<schema>.<object>", which
+is fully unambiguous and works anywhere.  Partially qualified
+("<schema>.<object>") or unqualified ("<object>") names can also be used to
+invoke a schema object, but they only work within the same namespace
+(catalog or schema respectively) as the invocant.
+
+As with typical programming languages, IRL also provides lexically scoped
+data structures (and sometimes routines).  Mainly it is data structures
+declared within a routine that are lexical, and these are only visible
+within that routine.
+
+Unlike typical SQL databases, but like typical programming languages, you
+can define instances of all the same data structure types at both the
+global and lexical level.  So for example you can define a table or view
+that only exists within a routine (and has the life of its execution), and
+you can also declare a standalone scalar container that is a schema object.
+(The latter would be implemented as a table with a single column and row
+in a typical SQL database back-end.)
+
+IRL defines 4 types of catalogs, called LOCAL, SYSTEM, TEMPORARY, and
+REMOTE; a depot can potentially have all of these kinds at once, but
+typically it has exactly 1 each of the first 3 types.  The LOCAL catalog
+type is the normal one, and contains all the typical persistent schema
+objects.  The TEMPORARY catalog type is for schema objects whose fates are
+tied to open connections; each connection has its own private instance of
+one TEMPORARY catalog, and its contents disappear when the connection is
+closed.  The SYSTEM catalog type provides read-only schema objects that are
+views into that depot's meta-data; they are analagous to an "information
+schema", but that all the meta-data is atomic like IRL itself.
+
+The REMOTE catalog type is used when you cause the depot / depot manager
+you are connected with to turn around and connect to another depot (whether
+under the same depot manager doesn't matter), so its contents also become
+visible to you like they were an extension of the current depot; by default
+all catalogs in the other depo are "mounted" as remote catalogs in the
+current one.  In SQLite terms, when you "attach" one or more database files
+to the "main" one you have open, then a new "remote" catalog appears that
+represents each one. In terms of MySQL, I would guess that tables of its
+"federated" table type qualify to conceptually live in a remote catalog.
+Any other database, presumably such as Oracle, that lets you "connect to" a
+remote depot_manager is implementing the REMOTE catalog feature.  In terms
+of a hypothetical federated depot manager that lets you use a single
+"connection" to access multiple remote depots at once, such as for a
+database cloning utility or a multiplexer, I<all> of the visible catalogs
+would be the REMOTE type, and there wouldn't be any of the LOCAL type.
+
+=head1 DATA TYPES AND VALUES
+
+IRL is natively built around strong data types and
+values, which is part of its rigor and simplicity.  Every B<data value> is
+considered to have a specific B<data type>, and a data type is considered
+to be a domain of one or more representable values.  Examples of data types
+are booleans, numerics, character strings, bit strings, temporals,
+spatials, sets, relations, tuples, arrays, and nulls.  A B<data container>
+is a named and/or addressable site, considered to be of a specific data
+type, that always holds exactly one data value of the same data type.
+Generally speaking, any two data types are considered to be mutually
+exclusive, such that a data value can only be in the domain of one of the
+types, and not the other.  (The exception is if type A is declared to be a
+restriction of type B, or both are restrictions of type C.)
+
+If you want to compare two values that have different data types, you must
+explicitly cast one or both values into the same data type.  Likewise, if
+you want to use a value of one type in an operation that requires a value
+of a different type, such as when assigning to a container, the value must
+be cast into the needed type.  The details of casting depend on the two
+types involved, but often you must choose from several possible methods of
+casting; for example, when casting between a numeric and a character
+string, you must choose what numeric radix to use.  However, no casting
+choice is necessary if the data type of the value in hand is a restriction
+of the needed data type.
+
+IRL gains rigor from this requirement for strong typing and explicit
+casting methods because you have to be very explicit as to what behaviour
+is expected; as a result, there should be no ambiguity in the system and
+the depot manager should perform exactly as you intended. This reduces
+troublesome subtle bugs in your programs, making development faster, and
+making your programs more reliable.  Your data integrity is greatly
+improved, with certain causes of corruption removed, which is an important
+goal of any data management system, and supports the ideals of the
+relational data model.
+
+IRL gains simplicity from this same requirement, because your depot-centric
+routines can neatly avoid the combinatorial complexity that comes from
+being given a range of data types as values when you conceptually just want
+one type, and your code doesn't have to deal with all the possible cases.
+The simpler routines are easier for developers to write, as they don't have
+to worry about several classes of error detection and handling (due to
+improper data formats), and the routines would also execute faster since
+they do less actual work.  Any necessary work to move less strict data from
+the outside to within the depot manager environment is handled by the depot
+manager itself and/or your external application components (the latter is
+where any user interaction takes place), so that work is un-necessary to do
+once the data is inside the depot manager environment.
+
+=head2 Classifications
+
+IRL has 2 main classes of data types, which are opaque data types and
+transparent data types.
+
+An opaque data type is like a black box whose internal representation is
+completely unknown to the user (and is determined by the depot manager),
+though its external interace and behaviour are clearly defined.  Or, an
+opaque data type is like an object in a typical programming language whose
+attributes are all private.  Conceptually speaking, all opaque data values
+are atomic and no sub-components are externally addressable for reading and
+changing, although the data type can provide its own specific methods or
+operators to extract or modify sub-components of an opaque data value.  An
+example is extracting a sub-string of a character string to produce a new
+character string, or extracting a calendar-specific month-day from a
+temporal type.
+
+A transparent data type is like a partitioned open box, such that each
+partition is a visibly distinct container or value that can be directly
+addressed for reading or writing.  Or, an opaque data type is like an
+object in a typical programming language whose attributes are all public.
+Conceptually speaking, all transparent data types are named collections of
+zero or more other data types, as if the transparent data value or
+container was an extra level of namespace.  Accessing these sub-component
+partitions individually is unambiguous and can be done without an accessor
+method.  An example is a single element in an array, or a single member of
+a set, or a single field in a tuple, or a single tuple in a relation.
+
+Opaque data types are further classified into unrestricted opaque data
+types and restricted opaque data types.  An unrestricted opaque type has
+the full natural domain of possible values, and that domain is infinite in
+size for most of them; eg, the unrestricted numerical type can accomodate
+any number from negative to positive infinity, though the unrestricted
+boolean type still only has 2 values, false and true.  A restricted opaque
+type is defined as a sub-type of another opaque type (restricted or not)
+which excludes part of the parent type's domain; eg a new type of numerical
+type can be defined that can only represent integers between 1 and 100.  A
+trivial case of a restricted type is one declared to be identical in range
+to the parent type, such as if it simply served as an alias; that is also
+how you always declare a boolean type.  A restricted type can implicitly be
+used as input to all operations that its parent type could be, though it
+can only be used conditionally as output.
+
+Note that, for considerations of practicality, as computers are not
+infinite, IRL requires you to explicitly declare a container (but not a
+value) to be of a restricted opaque type, having a defined finite range in
+its domain, though that domain can still be very large.  This allows depot
+manager implementations to know whether or not they need to do something
+very inefficient in order to store extremely large possible values (such as
+implement a numeric using a LOB), or whether a more efficient but more
+limited solution will work (using an implementation-native numeric type);
+stating your intentions by defining a finite range helps everything work
+better.
+
+Transparent data types are further classified into collective and
+disjunctive transparent data types.  A collective transparent data type is
+what you normally think of with transparent types, and includes arrays,
+sets, relations, and tuples; each one can contain zero or more distinct
+sub-values at once.  A disjunctive transparent data type is the means that
+IRL provides to simulate both weak data types and normal-but-nullable data
+types.  It looks like a tuple where only one field is allowed to contain a
+non-empty value at once, and it has a distinct field for each possible
+strong data type that the weak type can encompass (one being of the null
+type when simulating nullability); it actually has one more field than
+that, always valued, which says which of the other fields contains the
+important value.
+
+=head1 OLDER DOCUMENTATION TO REWRITE/REMOVE: DATA TYPES OVERVIEW
+
+IRL is strongly typed, following the relational model's ideals of stored
+data integrity, and the actual practice of SQL and many database products,
+and Rosetta's own ideals of being rigorously defined.  However, its
+native set of data types also includes ones that have the range of typical
+weak types such as some database products and languages like Perl use.
+
+A data type is a set of representable values.  All data types are based on
+the concept of domains; any variable or literal that is of a particular
+data type may only hold a value that is part of the domain that defines the
+data type.  IRL has some native data types that it implicitly understands
+(eg, booleans, integers, rational numbers, character strings, bit strings,
+arrays, rows, tables), and you can define custom ones too that are based on
+these (eg, counting numbers, character strings that are limited to 10
+characters in length, rows having 3 specific fields).
+
+All Rosetta::Model "domain" Nodes (and schema objects) are user defined,
+having a name that you pick, regardless of whether the domain corresponds
+directly to a native data type, or to one you customized; this is so
+there won't be any name conflicts regardless of any same named data types
+that a particular database implementation used in conjunction with
+Rosetta::Model may have.
+
+=head2 Generalities
+
+It is the general case that every data type defines a domain of values that
+is mutually exclusive from every other data type; 2 artifacts having a
+common data type (eg, 2 character strings) can always be compared for
+equality or inequality, and 2 artifacts of different data types (eg, 1
+character string and 1 bit string) can not be compared and hence are always
+considered inequal.  Following this, it is mandatory that every native
+and custom data type define the 'eq' (equal) and 'ne' (not equal) operators
+for comparing 2 artifacts that are of that same data type.  Moreover, it is
+mandatory that no data type defines for themselves any 'eq' or 'ne'
+operators for comparing 2 artifacts of different data types.
+
+In order to compare 2 artifacts of different data types for equality or
+inequality, either one must be cast into the other's data type, or they
+must both be cast into a common third data type.  How exactly this is done
+depends on the situation at hand.
+
+The simplest casting scenario is when there is a common domain that both
+artifacts belong to, such as happens when either one artifact's data type
+is a sub-domain of the other (eg, an integer and a rational number), or the
+data types of both are sub-domains of a common third data type (eg, even
+numbers and square whole numbers).  Then both artifacts are cast as the
+common parent type (eg, rationals and integers respectively).
+
+A more difficult but still common casting scenario is when the data types
+of two artifacts do not have a common actual domain, but yet there is one
+or more commonly known or explicitly defined way of mapping members of one
+type's domain to members of the other type's domain.  Then both artifacts
+can be cast according to one of the candidate mappings.  A common example
+of this is numbers and character strings, since numbers are often expressed
+as characters, such as when they come from user input or will be displayed
+to the user; sometimes characters are expressed as numbers too, as an
+encoding.  One reason the number/character scenario is said to be more
+difficult is due to there being multiple ways to express numbers in
+character strings, such as octal vs decimal vs hexadecimal, so you have to
+explicitly choose between multiple casting methods or formats for the
+version you want; in other words, there are multiple members of one domain
+that map to the same member of another domain, so you have to choose; a
+cast method can not be picked simply on the data type of the operands.
+
+A different casting scenario occurs when one or both of the data types are
+composite types, such as 2 tuples that are either of different degrees or
+that have different attribute names or value types.  Dealing with these
+involves mapping all the attributes of each tuple against the other, with
+or without casting of the individual attributes, possibly into a third data
+type having attributes to represent all of those from the two.
+
+Most data types support the extraction of part of an artifact to form a new
+artifact, which is either of the same data type or a different one.  In
+some cases, even if 2 artifacts can't be compared as wholes, it is possible
+to compare an extract from one with the other, or extractions from both
+with each other.  Commonly this is done with composite data types like
+tuples, where some attributes are extracted for comparison, such when
+joining the tuples, or filtering a tuple from a relation.
+
+Aside from the 'eq' and 'ne' comparison operators, there are no other
+mandatory operators that must be defined for a given custom data type,
+though the native ones will include others.  However, it is strongly
+recommended that each data type implement the 'cmp' (comparison) operator
+so that linearly sorting 2 artifacts of that common data type is a
+deterministic activity.
+
+IRL requires that all data types are actually self-contained, regardless of
+their complexity or size.  So nothing analagous to a "reference" or
+"pointer" in the Perl or C or SQL:2003 sense may be stored; the only valid
+way to say that two artifacts are related is for them to be equal, or have
+attributes that are equal, or be stored in common or adjoining locations.
+
+=head2 Native Null Type
+
+IRL natively supports the special NULL data type, whose value domain is by
+definition mutually exclusive of the domains of all other data types; in
+practice, a NULL is distinct from all possible values that the other IRL
+native primitive types can have.  But some native complex types and user
+customized types could be defined where their domains are a super-set of
+NULL; those latter types are described as "nullable", while types whose
+domains are not a super-set of NULL are described as "not nullable".
+
+The NULL data type represents situations where a value of an arbitrary data
+type is desired but none is yet known; it sits in place of the absent value
+to indicate that fact.  NULL artifacts will always explicitly compare as
+being unequal to each other; since they all represent unknowns, we can not
+logically say any are equal, so they are all treated as distinct.  This
+data type corresponds to SQL's concept of NULL, and is similar to Perl's
+concept of "undef".  A NULL does not natively cast between any data types.
+
+Rosetta::Model does not allow you to declare "domain" Nodes that are simply
+of or based on the data type NULL; rather, to use NULL you must declare
+"domain" Nodes that are either based on a not-nullable data type unioned
+with the NULL type, or are based on a nullable data type.  The "domain"
+Node type provides a short-hand to indicate the union of its base type with
+NULL, in the form of the boolean "is_nullable" attribute; if the attribute
+is undefined, then the nullability status of the base data type is
+inherited; if it is defined, then it overrides the parent's status.
+
+All not-nullable native data types default to their concept of empty or
+nothingness, such as zero or the empty string.  All nullable native
+types, and all not-nullable native types that you customize with a true
+is_nullable, will default to NULL.  In either case, you can define an
+explicit default value for your custom data type, which will override those
+behaviours; details are given further below.
+
+=head2 Native Primitive Types
+
+These are the simplest data types, from which all others are derived:
+
+=over
+
+=item C<BOOLEAN>
+
+This data type is a single logical boolean, whose only possible values are
+FALSE and TRUE.  Its concept of nothingness is FALSE.
+
+=item C<NUMERIC>
+
+This data type is a single rational number.  Its concept of nothingness is
+zero.  A subtype of NUMERIC must specify the radix-agnostic "num_precision"
+and "num_scale" attributes, which determine the maximum valid range of the
+subtype's values, and the subtype's storage representation can often be
+derived from it too.
+
+The "num_precision" attribute is an integer >= 1; it specifies the maximum
+number of significant values that the subtype can represent.  The
+"num_scale" attribute is an integer >= 0 and <= "num_precision"; if it is
+>= 1, the subtype is a fixed radix point rational number, such that 1 /
+"num_scale" defines the increment size between adjacent possible values;
+the trivial case of "num_scale" = 1 means the increment size is 1, and the
+number is an integer; if "num_scale" = 0, the subtype is a floating radix
+point rational number where "num_precision" represents the product of the
+maximum number of significant values that the subtype's mantissa and
+exponent can represent.  IRL does not currently specify how much
+of a floating point number's "num_precision" is for the mantissa and how
+much for the exponent, but commonly the exponent takes a quarter.
+
+The meanings of "precision" and "scale" are more generic for IRL than they
+are in the SQL:2003 standard; in SQL, "precision" (P) means the maximum
+number of significant figures, and the "scale" (S) says how many of those
+are on the right side of the radix point.  Translating from base-R (eg, R
+being 10 or 2) to the IRL meanings are as follows (assuming negative
+numbers are allowed and zero is always in the middle of a range). For
+fixed-point numerics, a (P,S) becomes (2*R^P,R^S), meaning an integer (P,0)
+becomes (2*R^P,1).  For floating-point numerics, a (P) sort-of becomes
+(2*R^P,0); I say sort-of because SQL:2003 says that the P shows significant
+figures in just the mantissa, but IRL currently says that the size of the
+exponent eats away from that, commonly a quarter.
+
+As examples, a base-10 fixed in SQL defined as [p=10,s=0] (an integer in
+-10^10..10^10-1) becomes [p=20_000_000_000,s=1] in IRL; the base-10
+[p=5,s=2] (a fixed in -1_000.00..999.99) becomes [p=200_000,s=100]; the
+base-2 [p=15,s=0] (a 16-bit int in -32_768..32_767) becomes [p=65_536,s=1];
+the base-2 float defined as [p=31] (a 32-bit float in
++/-8_388_608*2^+/-128) becomes [p=4_294_967_296,s=0].
+
+A subtype of NUMERIC may specify the "num_min_value" and/or "num_max_value"
+attributes, which further reduces the subtype's valid range.  For example,
+a minimum of 1 and maximum of 10 specifies that only numbers in the range
+1..10 (inclusive) are allowed.  Simply setting the minimum to zero and
+leaving the maximum unset is the recommended way in IRL to specify that you
+want to allow any non-negative number.  Setting the minimum >= 0 also
+causes the maximum value range allowable by "num_precision" to shift into
+the positive, rather than it being half there and half in the negative.
+Eg, an (P,S) of (256,1) becomes 0..255 when the minimum = 0, whereas it
+would be -128..127 if the min/max are unset.
+
+=item C<CHAR_STR>
+
+This data type is a string of characters.  Its concept of nothingness is
+the empty string.  A subtype of CHAR_STR must specify the "char_max_length"
+and "char_repertoire" attributes, which determine the maximum valid range
+of the subtype's values, and the subtype's storage representation can often
+be derived from it too.
+
+The "char_max_length" attribute is an integer >= 0; it specifies the
+maximum length of the string in characters (eg, a 100 means a string of
+0..100 characters can be stored).  The "char_repertoire" enumerated
+attribute specifies what individual characters there are to choose from
+(eg, Unicode 4.1, Ascii 7-bit, Ansel; Unicode is the recommended choice).
+
+A subtype of CHAR_STR may specify the "char_min_length" attribute, which
+means the length of the character string must be at least that long (eg, to
+say strings of length 6..10 are required, set min to 6 and max to 10).
+
+=item C<STR_BIT>
+
+This data type is a string of bits.  Its concept of nothingness is the
+empty string.  A subtype of BIT_STR must specify the "bit_max_length"
+attribute, which determines the maximum valid range of the subtype's
+values, and the subtype's storage representation can often be derived from
+it too.
+
+The "bit_max_length" attribute is an integer >= 0; it specifies the maximum
+length of the string in characters (eg, an 8000 means a string of 0..8000
+bits can be stored).
+
+A subtype of BIT_STR may specify the "bit_min_length" attribute, which
+means the length of the bit string must be at least that long (eg, to say
+strings of length 24..32 are required, set min to 24 and max to 32).
+
+=back
+
+A subtype of any of these native primitive types can define a default value
+for the subtype, it can define whether the subtype is nullable or not (they
+are all not-nullable by default), and it can enumerate an explicit list of
+allowed values (eg, [4, 8, 15, 16, 23, 42], or ['foo', 'bar', 'baz'], or
+[B'1100', B'1001']), one each in a child Node (these must fall within the
+specified range/size limits otherwise defined for the subtype).
+
+=head2 Native Scalar Type
+
+IRL has native support for a special SCALAR data type, which is akin to
+SQLite's weakly typed table columns, or to Perl's weakly typed default
+scalar variables.  This data type is a union of the domains of the BOOLEAN,
+NUMERIC, CHAR_STR, and BIT_STR data types; it is not-nullable by default.
+Its concept of nothingness is the empty string.
+
+=head1 SEE ALSO
+
+During my work on this project, I found the following resources to be
+particularly useful:
+
+=over
+
+=item L<http://www.acm.org/classics/nov95/toc.html>
+
+Edgar F. Codd - "A Relational Model of Data for Large Shared Data Banks"
+
+Reprinted from I<Communications of the ACM>, Vol. 13, No. 6, June 1970, pp.
+377-387. Copyright © 1970, Association for Computing Machinery, Inc.
+
+This is the famous 1970 publication that first presented a relational model
+of data to the world, which is the basis for the modern database industry.
+
+=item L<http://www.oreilly.com/catalog/databaseid/>
+
+Chris J. Date - "Database in Depth: Relational Theory for Practitioners"
+
+First Edition, May 2005.  Published by O'reilly.  ISBN: 0-596-10012-4
+
+This book lays out what the relational data model really is, in partial
+contrast to how SQL does it, from the man that was closer to and more
+directly involved with Edgar F. Codd in this work work than anyone.
+
+=item L<http://www.wiscorp.com/SQLStandards.html>
+
+This web page of Whitemarsh Information Systems Corporation, run by one of
+the people on the SQL standard drafting community, has copies of the
+official SQL:2003 and SQL:1999 specification documents, and other related
+helpful documents about SQL, in PDF format.  For example, "an almost
+indistinguishable delta on the actual SQL 2003 database standard" is at
+L<http://www.wiscorp.com/sql/sql_2003_standard.zip> (warning, large file).
+
+=item L<http://www.unicode.org/standard/standard.html>
+
+Unicode Standard official documentation.
+
+=item L<http://en.wikipedia.org/wiki/Relational_model>
+
+The Wikipedia article on the relational data model, and related topics.
+
+=back
+
+Also, the vendor documentation for various relational and/or SQL databases
+such as MySQL and SQLite were regularly consulted, and various other sites.
+
+=head1 AUTHOR
+
+Darren R. Duncan (C<perl@DarrenDuncan.net>)
+
+=head1 LICENCE AND COPYRIGHT
+
+This file is part of the Rosetta database portability library.
+
+Rosetta is Copyright (c) 2002-2006, Darren R. Duncan.
+
+See the LICENCE AND COPYRIGHT of L<Rosetta> for details.
+
+=head1 ACKNOWLEDGEMENTS
+
+The ACKNOWLEDGEMENTS in L<Rosetta> apply to this file too.
+
+=cut

@@ -1,3 +1,46 @@
+my $mapStr = -> Code $f, Str $x {
+  "
+    (function () \{
+      var res = \"\";
+      for(var i = 0; i < {$x}.length; i++) \{
+        res += String.fromCharCode($f("{$x}.charCodeAt(i)"));
+      \}
+      return res;
+    \})()
+  ";
+};
+
+my $mapStr2 = -> Str $op, Str $x, Str $y {
+  "
+    (function () \{
+      var res    = \"\";
+      var minlen = {$x}.length < {$y}.length ? {$x}.length : {$y}.length;
+      for(var i = 0; i < minlen; i++) \{
+        res += String.fromCharCode({$x}.charCodeAt(i) $op {$y}.charCodeAt(i));
+      \}
+      return res;
+    \})()
+  ";
+};
+
+my $mapStr2Fill = -> Str $op, Str $x, Str $y {
+  "
+    (function () \{
+      var res = \"\";
+
+      for(var i = {$x}.length; i < {$y}.length; i++)
+        $x += \"\\000\";
+      for(var i = {$y}.length; i < {$x}.length; i++)
+        $y += \"\\000\";
+
+      for(var i = 0; i < {$x}.length; i++) \{
+        res += String.fromCharCode({$x}.charCodeAt(i) $op {$y}.charCodeAt(i));
+      \}
+      return res;
+    \})()
+  ";
+};
+
 # Standard operators
 my @subs = (
   "infix:«<»",    2, "N", "Number(a)  < Number(b)",
@@ -16,8 +59,19 @@ my @subs = (
   "infix:«-»",    2, "N", "Number(a)  - Number(b)",
   "infix:«*»",    2, "N", "Number(a)  * Number(b)",
   "infix:«/»",    2, "N", "Number(a)  / Number(b)",
-  "infix:«%»",    2, "N", "Number(a)  % Number(b)",
+  "infix:«/»",    2, "N", "Number(b) == 0 ? eval(\"throw(new Error(\\\"Division by zero\\\"))\") : Number(a)  / Number(b)",
+  "infix:«%»",    2, "N", "Number(b) == 0 ? eval(\"throw(new Error(\\\"Modulo zero\\\"))\") : Number(a)  % Number(b)",
   "infix:«**»",   2, "N", "Math.pow(Number(a), Number(b))",
+  "infix:«+|»",   2, "N", "Number(a)  | Number(b)",
+  "infix:«+&»",   2, "N", "Number(a)  & Number(b)",
+  "infix:«~&»",   2, "S", "$mapStr2("&", "String(a)", "String(b)")",
+  "infix:«~|»",   2, "S", "a = String(a), b = String(b), $mapStr2Fill("|", "a", "b")",
+  "infix:«~^»",   2, "S", "a = String(a), b = String(b), $mapStr2Fill("^", "a", "b")",
+  "prefix:«~^»",  1, "S", "$mapStr({ "255 - $^ord" }, "String(a)")",
+  "prefix:«+^»",  1, "N", "~Number(a)",
+  "infix:«+^»",   2, "N", "Number(a)  ^ Number(b)",
+  "infix:«+<»",   2, "N", "Number(a) << Number(b)",
+  "infix:«+>»",   2, "N", "Number(a) >> Number(b)",
   "infix:«<=>»",  2, "N", "Number(a) < Number(b) ? -1 : Number(a) == Number(b) ? 0 : 1",
   "infix:«cmp»",  2, "S", "String(a) < String(b) ? -1 : String(a) == String(b) ? 0 : 1",
   "prefix:«-»",   1, "N", "-a",
@@ -51,12 +105,12 @@ for @subs -> $name, $arity, $type, $body {
   \}";
 
   # XXX! minor hack. See the end of Prelude::JS for explanation.
-  my $args  = $arity == 1  ?? '?$__a = $CALLER::_' !! '$__a, $__b';
-  my $c     = $type eq "S" ?? "~"                  !! "+";
-  my $args_ = $arity == 1  ?? "$c\$__a"            !! "$c\$__a, $c\$__b";
-  my $type  = $arity == 1  ?? "method"             !! "sub";
-  my $colon = $arity == 1  ?? ":"                  !! "";
-  my $trait = $arity == 1  ?? ""                   !! "is primitive";
+  my $args  = $arity == 1  ?? '$__a = $CALLER::_' !! '$__a, $__b';
+  my $c     = $type eq "S" ?? "~"                 !! "+";
+  my $args_ = $arity == 1  ?? "$c\$__a"           !! "$c\$__a, $c\$__b";
+  my $type  = $arity == 1  ?? "method"            !! "sub";
+  my $colon = $arity == 1  ?? ":"                 !! "";
+  my $trait = $arity == 1  ?? ""                  !! "is primitive";
   $eval ~= "
     $type $name ($args$colon) $trait \{
       JS::inline('($jsbody)').($args_);
@@ -87,6 +141,45 @@ for «
       \}
     \}
   ";
+#  XXX: currying doesn't work properly
+#  $eval ~= "
+#    our &infix:\{\"»$op«\"\} := &__hyper.assuming( 'op' => &infix«$op» );
+#    our &infix:\{\">>$op<<\"\} := &__hyper.assuming( 'op' => &infix«$op» );
+#  ";
+}
+
+sub infix:{">>+<<"} (Array @a, Array @b) {
+  __hyper(&infix:<+>, @a, @b);
+}
+
+our &infix:{"»+«"} := &infix:{">>+<<"};
+
+sub infix:{">>~<<"} (Array @a, Array @b) {
+  __hyper(&infix:<~>, @a, @b);
+}
+
+our &infix:{"»~«"} := &infix:{">>~<<"};
+
+sub __hyper (Code $op, Array @a is copy, Array @b is copy) {
+  my Array @ret;
+  if (@a.elems == 1) {
+      @a = @a[0] xx @b.elems;
+  }
+  if (@b.elems == 1) {
+      @b = @b[0] xx @a.elems;
+  }
+  for 0..(@a.end, @b.end).max -> $i {
+    if $i > @a.end {
+      push @ret, @b[$i];
+    }
+    elsif $i > @b.end {
+      push @ret, @a[$i];
+    }
+    else {
+      push @ret, $op(@a[$i], @b[$i]);
+    }
+  }
+  return @ret;
 }
 
 # From here on, most normal things won't work any longer, as all the standard
@@ -94,13 +187,16 @@ for «
 Pugs::Internals::eval $eval;
 die $! if $!;
 
+
 sub prefix:<++>  ($a is rw)    is primitive { $a = $a + 1 }
 sub postfix:<++> ($a is rw)    is primitive { my $cur = $a; $a = $a + 1; $cur }
 sub prefix:<-->  ($a is rw)    is primitive { $a = $a - 1 }
 sub postfix:<--> ($a is rw)    is primitive { my $cur = $a; $a = $a - 1; $cur }
-sub JS::Root::rand (?$a = 1)   is primitive { $JS::Math.random() * $a }
+sub JS::Root::rand ($a = 1)    is primitive { $JS::Math.random() * $a }
 
-sub infix:<=>    ($a is rw, $b) is primitive is rw { $a = $b }
+# The following line also installs &infix:<=>. (hack!)
+method infix:<=> (Item $a is rw: $b) is rw          { $a = $b }
+#sub infix:<=>    ($a is rw, $b) is primitive is rw { $a = $b }
 
 sub prefix:<[.{}]> (*$head is copy, *@rest is copy) is primitive {
   while @rest {
@@ -118,11 +214,19 @@ sub prefix:<[.[]]> (*$head is copy, *@rest is copy) is primitive {
   $head;
 }
 
-# XXX weird pugsbug, should be able to declare [=>] using the eval loop above
-sub prefix:«[=>]» (*$head is copy, *@rest is copy) is primitive {
-  while @rest {
-    $head = $head => shift @rest;
-  }
-
-  $head;
+sub prefix:«[=>]» (*@args) is primitive {
+  # XXX copying necessary because PIL2JS's => currently captures *containers*,
+  # not values.
+  reduce -> $a, $b {; my $B = $b; my $A = $a; $B => $A } reverse @args;
 }
+
+sub prefix:«[=]» (*@vars is copy) is primitive is rw {
+  my $dest := pop @vars;
+  $_ = $dest for @vars;
+  @vars[0];
+}
+
+our &prefix:«[,]» := &list;
+
+sub infix:«Y» (Array *@arrays) is primitive is rw { zip *@arrays }
+sub infix:«¥» (Array *@arrays) is primitive is rw { zip *@arrays }

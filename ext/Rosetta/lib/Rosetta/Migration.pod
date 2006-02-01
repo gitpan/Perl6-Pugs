@@ -1,0 +1,52 @@
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+Rosetta::Migration -
+Assist translating between various languages
+
+=head1 DESCRIPTION
+
+Rosetta::Model provides an effective language for defining relational data
+models, both the means to create them and the means to interact with them.
+The language is IRL (Intermediate Relational Language); see the
+documentation of L<Rosetta::Model> itself (in the current distribution) for
+a further introduction.
+
+This document, Rosetta::Migration ("Migration"), is intended to help
+users of Rosetta::Model to map the concepts and syntax of their existing
+database schemas and access specifications, between Rosetta::Model's native
+language and their current forms, such as SQL:2003 and other SQL dialects,
+and the "Tutorial D" relational data language, and various general purpose
+programming languages like C and Perl.
+
+This document should be helpful when converting applications to use
+Rosetta::Model to define their relational database concerning structures
+and tasks.  This document should also be helpful when creating a
+Rosetta::Model-based API layer on top of an existing database manager, so
+you know how to go about translating input and output to and from that
+database manager, or when creating something like a SQL translating tool.
+
+=head1 SEE ALSO
+
+I<This documentation is pending.>
+
+=head1 AUTHOR
+
+Darren R. Duncan (C<perl@DarrenDuncan.net>)
+
+=head1 LICENCE AND COPYRIGHT
+
+This file is part of the Rosetta database portability library.
+
+Rosetta is Copyright (c) 2002-2006, Darren R. Duncan.
+
+See the LICENCE AND COPYRIGHT of L<Rosetta> for details.
+
+=head1 ACKNOWLEDGEMENTS
+
+The ACKNOWLEDGEMENTS in L<Rosetta> apply to this file too.
+
+=cut

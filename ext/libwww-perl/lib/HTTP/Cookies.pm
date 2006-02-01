@@ -12,7 +12,7 @@ class HTTP::Cookies-0.0.1 {
     our $EPOCH_OFFSET;
     
     ## Attributes
-    has %:cookies           is rw;
+    has %!cookies           is rw;
     
     has $.file              is rw;
     has $.autosave          is rw;
@@ -27,7 +27,7 @@ class HTTP::Cookies-0.0.1 {
     }
     
     ## Creation and destruction
-    submethod BUILD (Str $.file, Bool ?$.autosave = 0, Bool ?$.ignore_discard = 0, Bool ?$.hide_cookie2 = 0) {
+    submethod BUILD (Str $.file, Bool $.autosave = 0, Bool $.ignore_discard = 0, Bool $.hide_cookie2 = 0) {
         ./load();
     }
     
@@ -63,16 +63,16 @@ class HTTP::Cookies-0.0.1 {
         my @vals = gather {
             loop ($domain ~~ m:P5/\./) {
                 #LWP::Debug::debug("Checking $domain for cookies");
-                my $cookies = %:cookies{$domain};
+                my $cookies = %!cookies{$domain};
                 
                 next unless $cookies;
                 
                 if (.delayload && defined $cookies{'//+delayload'}) {
                     my $data = $cookies{''//+delayload'}{'cookie'};
-                    %:cookies.delete($domain);
+                    %!cookies.delete($domain);
                     ./load_cookie($data[1]);
                     
-                    $cookies = %:cookies{$domain};
+                    $cookies = %!cookies{$domain};
                     next unless $cookies; # should not really happen
                 }
                 
@@ -87,7 +87,7 @@ class HTTP::Cookies-0.0.1 {
                     }
                     
                     for $cookies{$path}.kv -> $key, $array {
-                        my ($version, $val, $port, $path_spec, $secure, $expires) := $array;
+                        my :($version, $val, $port, $path_spec, $secure, $expires) := $array;
                         
                         #LWP::Debug::debug(" - checking cookie $key=$val");
                         
@@ -191,7 +191,7 @@ class HTTP::Cookies-0.0.1 {
     }
     
     # XXX lots of potential `where /.../` clauses here :-)
-    method set_cookie (Num $version, Str $key, Str $val, Str $path, Str $domain, Str ?$port, Bool ?$path_spec = bool::false, Bool ?$secure = bool::false, Num ?$maxage, Bool ?$discard = bool::false, *%rest) {
+    method set_cookie (Num $version, Str $key, Str $val, Str $path, Str $domain, Str $port?, Bool $path_spec = bool::false, Bool $secure = bool::false, Num $maxage?, Bool $discard = bool::false, *%rest) {
         return $?SELF if $path !~ m,^/, || $key ~~ m,^\$,;
         
         if $port.defined {
@@ -202,7 +202,7 @@ class HTTP::Cookies-0.0.1 {
         
         if $maxage.defined {
             if $maxage <= 0 {
-                %:cookies{$domain}{$path}.delete($key);
+                %!cookies{$domain}{$path}.delete($key);
                 return $?SELF;
             }
             
@@ -214,13 +214,13 @@ class HTTP::Cookies-0.0.1 {
         
         @array.pop while !defined @array[-1];
         
-        %:cookies{$domain}{$path}{$key} = \@array;
+        %!cookies{$domain}{$path}{$key} = \@array;
         return $?SELF;
     }
     
     method set_cookie_ok (*@_) { 1; }
     
-    method save (Str ?$file = $.file) {
+    method save (Str $file = $.file) {
         my $fh = open($file, :w);
         
         $fh.say("#LWP-Cookies-1.0");
@@ -230,7 +230,7 @@ class HTTP::Cookies-0.0.1 {
         1;
     }
     
-    method load (Str ?$file = $.file) {
+    method load (Str $file = $.file) {
         my $fh = open($file, :r) or return;
         
         # XXX ensure record seperator == "\n" -- how?
@@ -262,7 +262,7 @@ class HTTP::Cookies-0.0.1 {
                 
                 my @array = ($version, $val, $port, $path_spec, $secure, $expires, $discard);
                 push @array, %hash if %hash;
-                %:cookies{$domain}{$path}{$key} = @array;
+                %!cookies{$domain}{$path}{$key} = @array;
             }
         }
 
@@ -275,18 +275,18 @@ class HTTP::Cookies-0.0.1 {
     }
     
     multi method clear () {
-        %:cookies = ();
+        %!cookies = ();
         
         $?SELF;
     }
     
     multi method clear (*@_) {
         if (@_ == 1) {
-            %:cookies.delete(@_[0]);
+            %!cookies.delete(@_[0]);
         } elsif (@_ == 2) {
-            %:cookies{@_[0]}.delete(@_[1]);
+            %!cookies{@_[0]}.delete(@_[1]);
         } elsif (@_ == 3) {
-            %:cookies{@_[0]}{@_[1]}.delete(@_[2]);
+            %!cookies{@_[0]}{@_[1]}.delete(@_[2]);
         }
         
         $?SELF;
@@ -297,10 +297,10 @@ class HTTP::Cookies-0.0.1 {
     }
     
     method scan (Code $callback) {
-        for %:cookies.keys.sort -> $domain {
-            for %:cookies{$domain}.keys.sort -> $path {
-                for %:cookies{$domain}{$path}.keys.sort -> $key is rw {
-                    my ($version, $val, $port, $path_spec, $secure, $expires, $discard, *%rest) := @{$key};
+        for %!cookies.keys.sort -> $domain {
+            for %!cookies{$domain}.keys.sort -> $path {
+                for %!cookies{$domain}{$path}.keys.sort -> $key is rw {
+                    my :($version, $val, $port, $path_spec, $secure, $expires, $discard, *%rest) := @{$key};
                     %rest //= {};
                     
                     $cb.($version, $key, $val, $path, $domain, $port, $path_spec, $secure, $expires, $discard, *%rest);
@@ -309,10 +309,10 @@ class HTTP::Cookies-0.0.1 {
         }
     }
     
-    method as_string (Bool ?$skip_discardables) {
+    method as_string (Bool $skip_discardables?) {
         # XXX use nested gather/take
         my @ret = (gather {
-            ./scan(sub ($version, $key, $val, $path, $domain, ?$port, ?$path_spec, ?$secure, ?$maxage, ?$discard, *%rest) {
+            ./scan(sub ($version, $key, $val, $path, $domain, $port?, $path_spec?, $secure?, $maxage?, $discard?, *%rest) {
                 return if $discard && $skip_discardables;
                 
                 my @h = ($key, $val);
@@ -340,7 +340,7 @@ class HTTP::Cookies-0.0.1 {
     ## Class methods
     # these may also be called on an instance, but they are not tied to a
     # particular instance
-    method :host (HTTP::Request $r, URI $uri) {
+    my method host (HTTP::Request $r, URI $uri) {
         if (my $h = $r.header('Host')) {
             $h ~~ s:P5/:\d+$//;
             return $h.lc;
@@ -349,7 +349,7 @@ class HTTP::Cookies-0.0.1 {
         return $uri.host.lc;
     }
     
-    method :uri_path (URI $uri) {
+    my method uri_path (URI $uri) {
         my $path;
         
         if ($uri.can('epath')) {
@@ -363,13 +363,13 @@ class HTTP::Cookies-0.0.1 {
     }
     
     # XXX how should this binding be done?
-    #our &:url_path ::= &:uri_path; # for backwards compatibility
+    #our &!url_path ::= &!uri_path; # for backwards compatibility
     
-    method :normalize_path (Str $str is rw) {
+    my method normalize_path (Str $str is rw) {
         given ($str) {
             s:P5:g/%([0-9a-fA-F][0-9a-fA-F])/{
                 my $x = $0.uc;
-                $x eq "2F"|"25" ?? "%$x" !! pack("C", hex($x));
+                $x eq "2F"|"25" ?? "%$x" !! pack("C", :16($x));
             }/;
             s:P5:g/([\0-\x20\x7f-\xff])/{ ord($0).as('%%%02X') }/;
         }

@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fglasgow-exts -fallow-undecidable-instances -fno-warn-orphans -funbox-strict-fields -cpp #-}
-{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
+{-# OPTIONS_GHC -#include "../UnicodeC.h" #-}
 
 {-|
     Compiler interface.
@@ -23,7 +23,6 @@ import Pugs.AST
 import Pugs.Internals
 import Pugs.Types
 import Pugs.Eval
-import Pugs.Eval.Var
 import Pugs.Monads
 import Pugs.PIL1
 import Emit.PIR
@@ -39,8 +38,7 @@ tcItem      = TCxtItem anyType
 tcSlurpy    = TCxtSlurpy anyType
 -}
 
-type Comp a = Eval a
-type CompMonad = EvalT (ContT Val (ReaderT Env SIO))
+type Comp = Eval
 
 {-| Currently only 'Exp' → 'PIL' -}
 class (Show a, Typeable b) => Compile a b where
@@ -78,7 +76,7 @@ instance Compile Pad [PIL_Decl] where
         where
         entries = sortBy padSort $ padToList pad
         canCompile (name@('&':_), xs) | length xs > 1 = do
-            liftM concat $ mapM (\x -> canCompile (name, [x])) xs
+            fmap concat $ mapM (\x -> canCompile (name, [x])) xs
         canCompile (name@('&':_), [(_, sym)]) = do
             ref <- liftSTM $ readTVar sym
             case ref of
@@ -121,11 +119,13 @@ instance Compile (SubName, [PIL_Decl]) [PIL_Decl] where
         return (PSub name SubPrim [] False False (combine bodyC PNil):decls)
 
 instance Compile (SubName, VCode) [PIL_Decl] where
+{-
     compile (name, vsub) | packageOf name /= packageOf (subName vsub) = do
         let storeC  = PBind [PVar $ qualify name] (PExp . PVar . qualify $ subName vsub)
             bodyC   = PStmts (PStmt . PExp $ storeC) PNil
             exportL = "__export_" ++ (render $ varText name)
         return [PSub exportL SubPrim [] False False bodyC]
+-}
     compile (name, vsub) = do
         bodyC   <- enter cxtItemAny . compile $ case subBody vsub of
             Syn "block" [body]  -> body
@@ -134,26 +134,34 @@ instance Compile (SubName, VCode) [PIL_Decl] where
         return [PSub name (subType vsub) paramsC (subLValue vsub) (isMulti vsub) bodyC]
 
 instance Compile (String, [(TVar Bool, TVar VRef)]) PIL_Expr where
+    compile (name, ((_, ref):_)) = do
+        rv <- readRef =<< liftSTM (readTVar ref)
+        case rv of
+            VCode sub   -> return $ PRawName (subName sub)
+            _           -> return $ PRawName name
     compile (name, _) = return $ PRawName name
 
 instance Compile Exp PIL_Stmts where
-    compile (Pos _ rest) = compile rest -- fmap (PPos pos rest) $ compile rest
-    compile (Cxt cxt rest) = enter cxt $ compile rest
+    compile (Ann (Pos _) rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
+    -- XXX: pragmas?
     compile (Stmts (Pad SOur _ exp) rest) = do
         compile $ mergeStmts exp rest
     compile (Stmts (Pad scope pad exp) rest) = do
-        expC    <- compile $ mergeStmts exp rest
         padC    <- compile $ padToList pad
-        return $ PPad scope ((map fst $ padToList pad) `zip` padC) expC
+        let symC = (map fst $ padToList pad) `zip` padC
+            exps = [ Syn ":=" [Var name, Var from] | (name, PRawName from) <- symC, name /= from ]
+        expC    <- compile $ mergeStmts (foldl1 mergeStmts (exps ++ [exp])) rest
+        return $ PPad scope symC expC
     compile exp = compileStmts exp
 
 class EnterClass m a where
     enter :: a -> m b -> m b
 
-instance EnterClass CompMonad VCode where
+instance EnterClass Comp VCode where
     enter sub = local (\e -> e{ envLValue = subLValue sub, envContext = CxtItem (subReturns sub) })
 
-instance EnterClass CompMonad Cxt where
+instance EnterClass Comp Cxt where
     enter cxt = local (\e -> e{ envContext = cxt })
 
 compileStmts :: Exp -> Comp PIL_Stmts
@@ -192,8 +200,9 @@ instance Compile Val PIL_Expr where
     compile = compile . Val
 
 instance Compile Exp PIL_Stmt where
-    compile (Pos pos rest) = fmap (PPos pos rest) $ compile rest
-    compile (Cxt cxt rest) = enter cxt $ compile rest
+    compile (Ann (Pos pos) rest) = fmap (PPos pos rest) $ compile rest
+    compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
+    -- XXX: pragmas?
     compile Noop = return PNoop
     compile (Val val) = do
         cxt     <- asks envContext
@@ -266,8 +275,9 @@ instance (Compile a b, Compile a c, Compile a d) => Compile [a] (b, c, d) where
     compile x = compError x
 
 instance Compile Exp PIL_LValue where
-    compile (Pos _ rest) = compile rest -- fmap (PPos pos rest) $ compile rest
-    compile (Cxt cxt rest) = enter cxt $ compile rest
+    compile (Ann (Pos _) rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
+    -- XXX: pragmas?
     compile (Var name) = return $ PVar name
     compile (Syn (sigil:"::()") exps) = do
         compile $ App (Var "&Pugs::Internals::symbolic_deref") Nothing $
@@ -289,10 +299,10 @@ instance Compile Exp PIL_LValue where
         -- XXX HACK
         isLogicalLazy (PExp (PVar "&infix:or"))  = True
         isLogicalLazy (PExp (PVar "&infix:and")) = True
+        isLogicalLazy (PExp (PVar "&infix:err")) = True
         isLogicalLazy (PExp (PVar "&infix:||"))  = True
         isLogicalLazy (PExp (PVar "&infix:&&"))  = True
         isLogicalLazy (PExp (PVar "&infix://"))  = True
-        isLogicalLazy (PExp (PVar "&infix:err"))  = True
         isLogicalLazy _ = False
     compile exp@(Syn "if" _) = compConditional exp
     compile (Syn "{}" (x:xs)) = compile $ App (Var "&postcircumfix:{}") (Just x) xs
@@ -332,6 +342,11 @@ instance Compile Exp PIL_LValue where
                 , subParams = []
                 }
             ]) Nothing []
+    -- For PIL2 we want real zone separation, e.g.
+    --   PApp { pNamedArgs = [...], pPositionalArgs = [...], ... }
+    -- For now, using &Pugs::Internals::named_pair is probably ok.
+    compile (Syn "named" kv@[_, _]) = do
+        compile $ App (Var "&Pugs::Internals::named_pair") Nothing kv
     compile exp = compError exp
 
 compLoop :: Exp -> Comp PIL_Stmt
@@ -356,8 +371,9 @@ compConditional exp = compError exp
 
 {-| Compiles various 'Exp's to 'PIL_Expr's. -}
 instance Compile Exp PIL_Expr where
-    compile (Pos _ rest) = compile rest -- fmap (PPos pos rest) $ compile rest
-    compile (Cxt cxt rest) = enter cxt $ compile rest
+    compile (Ann (Pos _) rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
+    -- XXX: pragmas?
     compile (Var name) = return . PExp $ PVar name
     compile exp@(Val (VCode _)) = compile $ Syn "sub" [exp]
     compile (Val val) = fmap PLit $ compile val

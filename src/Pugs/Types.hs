@@ -49,7 +49,7 @@ data Cxt = CxtVoid         -- ^ Context that isn't expecting any values
          | CxtItem !Type   -- ^ Context expecting a value of the specified type
          | CxtSlurpy !Type -- ^ Context expecting multiple values of the
                            --     specified type
-    deriving (Eq, Show, Ord)
+    deriving (Eq, Show, Ord, Typeable)
 
 anyType :: Type
 anyType = mkType "Any"
@@ -152,6 +152,7 @@ data VThread a = MkThread
 data MatchPGE
     = PGE_Match !Int !Int ![MatchPGE] ![(VStr, MatchPGE)]
     | PGE_Array ![MatchPGE]
+    | PGE_String !String
     | PGE_Fail
     deriving (Show, Eq, Ord, Read, Typeable)
 
@@ -432,7 +433,9 @@ initTree = fmap MkType $ Node "Object"
                                 ] ] ] ]
                 ]
             ]
-        , Node "Pair" []
+        , Node "Pair"
+            [ Node "Pair::HashSlice" []
+            ]
         ]
     , Node "Junction" [] ]
 

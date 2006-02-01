@@ -7,7 +7,7 @@ use Test;
 
 Tests for post condition/iterating/looping including:
   if, unless, for, while, until
-
+L<S04/"Conditional statements" /Conditional statement modifiers also work as in Perl 5/>
 =cut
 
 plan 21;
@@ -73,7 +73,7 @@ my $str3 = "bbb";
 # see also t/pugsbugs/lexical_subs.t
 my $size = 1;
 sub check(Int $num) {
-    fail("lexical subs are broken! :)") for 1..$size;
+    flunk("lexical subs are broken! :)") for 1..$size;
 }
 
 {

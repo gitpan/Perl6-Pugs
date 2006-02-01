@@ -1,11 +1,11 @@
 ﻿#!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
-plan 10;
+plan 11;
 
-use_ok('HTML::Entities');
+use HTML::Entities; pass "(dummy instead of broken use_ok)";
 
 my $a = "V&aring;re norske tegn b&oslash;r &#230;res";
 $a = decode_entities($a);
@@ -44,7 +44,8 @@ is encode_entities($a, 'a-c'), "&#97;&#98;&#99;def",
     'We should be able to include the range of characters to encode.';
 
 my $b = "&lt;&amp;&gt;";
-is(try {decode_entities([ $a, $b ]) }, [ 'abcdef', '<&>' ], "Decoding a list should work.", :todo<bug>);
+is(decode_entities([$a, $b]), [ 'abcdef', '<&>' ], "Decoding an array ref should work.");
+is(decode_entities($a, $b), [ 'abcdef', '<&>' ], "Decoding a list should work too.");
 
 =head
 

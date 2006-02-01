@@ -11,15 +11,16 @@
 
 module Pugs.CodeGen (codeGen, backends) where
 import Pugs.AST
+import Pugs.Pretty
 import Pugs.Internals
-import Pugs.CodeGen.PIL (genPIL)
-import Pugs.CodeGen.PIR (genPIR)
+import Pugs.CodeGen.PIL1 (genPIL1)
+import Pugs.CodeGen.PIL2 (genPIL2, genPIL2Perl5, genPIL2JSON, genPIL2YAML)
+import Pugs.CodeGen.PIR (genPIR, genPIR_YAML)
 import Pugs.CodeGen.Perl5 (genPerl5)
+import Pugs.CodeGen.YAML (genParseYAML, genYAML)
 import Pugs.CodeGen.JSON (genJSON)
-import Pugs.CodeGen.Binary (genBinary)
 import Pugs.Compile.Pugs (genPugs)
 import Pugs.Compile.Haskell (genGHC)
--- import Pugs.CodeGen.PIL2 (genPIL2)
 -- import Pugs.CodeGen.XML (genXML)
 import qualified Data.Map as Map
 
@@ -28,14 +29,19 @@ type Generator = Eval Val
 generators :: Map String Generator
 generators = Map.fromList $
     [ ("GHC",         genGHC)
-    , ("Parrot",      genPIR)
     , ("PIR",         genPIR)
-    , ("PIL",         genPIL)
---  , ("PIL2",        genPIL2)
-    , ("Perl5",       genPerl5)
+    , ("PIR-YAML",    genPIR_YAML)
+    , ("PIL1",        genPIL1)
+    , ("PIL1-Perl5",  genPerl5)
+    , ("PIL1-JSON",   genJSON)
+    , ("PIL1-YAML",   genYAML)
+    , ("PIL2",        genPIL2)
+    , ("PIL2-Perl5",  genPIL2Perl5)
+    , ("PIL2-JSON",   genPIL2JSON)
+    , ("PIL2-YAML",   genPIL2YAML)
     , ("Pugs",        genPugs)
-    , ("Binary",      genBinary)
-    , ("JSON",        genJSON)
+    , ("Parse-YAML",  genParseYAML)
+    , ("Parse-Pretty",fmap (VStr . (++"\n") . pretty) (asks envBody))
 --  , ("XML",         genXML)
     ]
 
@@ -43,22 +49,38 @@ backends :: [String]
 backends = Map.keys generators
 
 norm :: String -> String
-norm = norm' . map toLower
+norm = norm' . map toLower . filter isAlphaNum
     where
     norm' "ghc"    = "GHC"
-    norm' "parrot" = "Parrot"
+    norm' "parrot" = "!PIR"
     norm' "pir"    = "PIR"
-    norm' "pil"    = "PIL"
-    -- norm' "pil2"   = "PIL2"
-    norm' "perl5"  = "Perl5"
+    norm' "piryaml"= "PIR-YAML"
+    norm' "pil"    = "!PIL1"
+    norm' "pil1"   = "PIL1"
+    norm' "pil2"   = "PIL2"
+    norm' "perl5"  = "!PIL1-Perl5"
+    norm' "json"   = "!PIL1-JSON"
+    norm' "yaml"   = "!PIL1-YAML"
+    norm' "pil1perl5"  = "PIL1-Perl5"
+    norm' "pil1json"   = "PIL1-JSON"
+    norm' "pil1yaml"   = "PIL1-YAML"
+    norm' "pil2perl5"  = "PIL2-Perl5"
+    norm' "pil2json"   = "PIL2-JSON"
+    norm' "pil2yaml"   = "PIL2-YAML"
+    norm' "parseyaml"  = "Parse-YAML"
+    norm' "parsepretty"= "Parse-Pretty"
     norm' "pugs"   = "Pugs"
-    norm' "binary" = "Binary"
-    norm' "json"   = "JSON"
     -- norm' "xml"    = "XML"
     norm' x        = x
 
 doLookup :: String -> IO Generator
-doLookup s = Map.lookup (norm s) generators
+doLookup s = do
+    case norm s of
+        ('!':key) -> do
+            hPutStrLn stderr $ "*** The backend '" ++ s ++ "' is deprecated."
+            hPutStrLn stderr $ "    Please use '" ++ key ++ "' instead."
+            Map.lookup key generators
+        key -> Map.lookup key generators
 
 codeGen :: String -> Env -> IO String
 codeGen s env = do

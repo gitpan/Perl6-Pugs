@@ -10,7 +10,7 @@ There are a couple of things going on here.
 * They sometimes use Pugs internals to do the job
 * Some of this had not been specced yet (need S29 work).
 
-When writing primitives, please do *not* use &return, because
+When writing primitives, please do *not* use `return()`, because
 that messes up PIR generation.  To return a value, arrange for
 it to be the last evaluated expression.
 
@@ -56,7 +56,7 @@ class Control::Basic {
 
     # safety of the individual methods is defined in Pugs.Prim.hs
     # (maybe :lang<YAML> doesn't quite belong here?)
-    multi sub eval (Str ?$code = $CALLER::_, Str +$lang = 'Perl6')
+    multi sub eval (Str $code = $CALLER::_, Str :$lang = 'Perl6')
             is primitive is safe is builtin {
         given lc $lang {
             when 'perl6'   { Pugs::Internals::eval($code) };
@@ -74,7 +74,7 @@ class Control::Basic {
     # S29:
     # Behaves like, and replaces Perl 5 C<do EXPR>, with optional C<$lang>
     # support.
-    multi sub evalfile (Str $filename: Str +$lang = 'Perl6')
+    multi sub evalfile (Str $filename: Str :$lang = 'Perl6')
             is primitive is unsafe {
         eval(slurp $filename, $lang);
     }
@@ -90,7 +90,7 @@ class Control::Caller {
     has Code $.sub;
     has Str $.params;   # FIXME: needs attention; don't use yet.
 
-    multi sub caller (Class ?$kind = Any, Int +$skip = 0, Str +$label)
+    multi sub caller (Class $kind = Any, Int :$skip = 0, Str :$label)
             returns Control::Caller is primitive is builtin is safe {
         my @caller = Pugs::Internals::caller($kind, $skip, $label);
 
@@ -119,7 +119,9 @@ class fatal {
     #         or "return ENOENT; # file not found"
     #  say this: "fail            'file not found';"
     
-    %*INC<fatal.pm> = "<precompiled>";
+    # make 'use fatal' not try to load a module. XXX: add a real inc class to
+    # interface %*INC, instead of this hack.
+    # %*INC<fatal> = { filename => "fatal", resname => "<precompiled>", };
 
     our $fatal::DEFAULT_FATALITY is constant = 1;
     
@@ -136,7 +138,7 @@ class fatal {
     #      I'm guessing "current" because this "is primitive".
     #      If I'm wrong then the above two subs might not work?
     # XXX2: "fail" clashes with Test's &fail.
-    sub __fail(?$e = "failed") is primitive is builtin is safe {
+    sub __fail($e = "failed") is primitive is builtin is safe {
         if Pugs::Internals::current_pragma_value($?CLASS) //
                 $fatal::DEFAULT_FATALITY {
             die $e;
@@ -152,11 +154,11 @@ class fatal {
 class Carp {
     # Please remember to update t/pugsrun/11-safemode.t if you change the fully
     # qualified name of longmess.
-    multi sub longmess (: ?$e = '') returns Str is primitive is safe {
+    multi sub longmess (: $e = '') returns Str is primitive is safe {
         my($mess, $i);
         $mess = "$e at $?CALLER::POSITION";
 
-        #while Control::Caller::caller(++$i) -> $caller {
+        #while Control::Caller::caller(+:$i) -> $caller {
         #   $mess ~= "\n\t{$caller.package}::{$caller.subname}() at {$caller.file} line {$caller.line}";
         #}
         loop {
@@ -297,8 +299,8 @@ class File {
     # spec, see the thread rooted at <20050502192508.GF24107@sike.forum2.org>
     # on p6-l.
 
-    multi sub open (Str $filename, Str +$layer, Bool +$r, Bool +$w, Bool +$rw,
-            Bool +$a) returns IO is primitive is unsafe is builtin {
+    multi sub open (Str $filename, Str :$layer, Bool :$r, Bool :$w, Bool :$rw,
+            Bool :$a) returns IO is primitive is unsafe is builtin {
         die "fancy open modes not supported yet" if $a and ($r or $w or $rw);
 
         my $mode;
@@ -317,7 +319,7 @@ class File {
         $fh;
     }
 
-    multi method seek ($self: Int $position, Int ?$whence = $File::SEEK_START)
+    multi method seek ($self: Int $position, Int $whence = $File::SEEK_START)
             returns Bool is primitive is unsafe is builtin {
         Pugs::Internals::hSeek($seek, $position, $whence);
     }
@@ -327,7 +329,7 @@ class File {
 class Pipe {
     # Easy to use, unidirectional pipe. Uses the shell.
 
-    multi sub open (Str $command, Bool +$r is copy, Bool +$w) returns IO
+    multi sub open (Str $command, Bool :$r is copy, Bool :$w) returns IO
             is primitive is unsafe {
         die "Pipe::open is unidirectional" if all($r, $w);
         $r = bool::true if none($r, $w);
@@ -380,32 +382,50 @@ class IO does Iter {
 class Str does Iter {
     method shift ($self: ) is primitive { =open($self) }
 
-    method trans (Str $self: *%intable) is primitive is safe {
+    method trans (Str $self: Pair *@intable) is primitive is safe {
         # Motto: If in doubt use brute force!
-        my sub expand(Str $string) {
-            my $idx = index($string, '-');
-            if ($idx == -1) {
-                split('', $string);
+        my sub expand (Str $string is copy) {
+            my @rv;
+
+            my $add_dash;
+            my $idx;
+
+            if (substr($string,0,1) eq '-') {
+                push @rv, '-';
+                $string = substr($string,1);
             }
-            else {
-                my $s1 = substr($string, 0, $idx);
-                my $s2 = substr($string, $idx+1);
-                my @rv = $s1;
-                while ($s1 ne $s2) {
-                    $s1++;
-                    push @rv, $s1
-                }
-                @rv;
+
+            if (substr($string,-1,1) eq '-') {
+                $add_dash = 1;
+                $string = substr($string,0,-1)
             }
+
+            while (($idx = index($string,'-')) != -1) {
+                my $pre = substr($string,0,$idx-1);
+                my $start = substr($string,$idx-1,1);
+                my $end = substr($string,$idx+1,1);
+
+                push @rv, $pre.split('');
+                push @rv, (~ $start)..(~ $end);
+
+                $string = substr($string,$idx+2);
+            }
+
+            push @rv, $string.split('');
+            push @rv, '-' if $add_dash;
+
+            @rv;
         }
 
         my %transtable;
-        for %intable.kv -> $k, $v {
-            my @ks = expand($k);
-            my @vs = expand($v);
+        for @intable -> Pair $pair {
+            my ($k, $v) = $pair.kv;
+            # $k is stringified by the => operator.
+            my @ks = $k.isa(Str) ?? expand($k) !! $k.values;
+            my @vs = $v.isa(Str) ?? expand($v) !! $v.values;
             %transtable{@ks} = @vs;
         }
-    
+
         [~] map { %transtable{$_} // $_ } $self.split('');
     }
 }
@@ -432,7 +452,7 @@ class Time::Local {
     has Int  $.tz;      # variation from UTC in seconds
     has Bool $.is_dst;
 
-    multi sub localtime(Num ?$when = time) returns Time::Local
+    multi sub localtime(Num $when = time) returns Time::Local
             is primitive is builtin is safe {
         my $res;
         my $sec = int $when;
@@ -564,13 +584,19 @@ sub sprintf ($fmt, *@args) is primitive is builtin is safe {
     $str;
 }
 
-sub Scalar::as ($obj, $fmt) is primitive is safe {
+multi shift (@array) is builtin is primitive { List::shift(@array) };
+multi shift ($array) is builtin is primitive { die "Cannot 'shift' scalar"; };
+
+multi pop (@array) is builtin is primitive { List::pop(@array) };
+multi pop ($array) is builtin is primitive { die "Cannot 'pop' scalar"; };
+
+multi as (Scalar $obj: $fmt) is builtin is primitive is safe {
     sprintf($fmt,$obj);
 }
-sub List::as ($obj, $fmt, $comma) is primitive is safe {
+multi as (List $obj: $fmt, $comma) is builtin is primitive is safe {
     join($comma, map -> $v { sprintf($fmt,$v) } @$obj );
 }
-sub Hash::as ($obj, $fmt, $comma) is primitive is safe {
+multi as (Hash $obj: $fmt, $comma) is builtin is primitive is safe {
     join($comma, map -> $k,$v { sprintf($fmt,$k,$v) } $obj.kv );
 }
 
@@ -578,3 +604,8 @@ sub PIL2JS::Internals::use_jsan_module_imp (*@whatever) {
     die "Can't load JSAN modules when not running under PIL2JS!";
 }
 our &PIL2JS::Internals::use_jsan_module_noimp := &PIL2JS::Internals::use_jsan_module_imp;
+
+sub PIL2JS::Internals::use_perl5_module_imp (*@whatever) {
+    die "Can't load perl5 modules via js when not running under PIL2JS!";
+}
+our &PIL2JS::Internals::use_perl5_module_noimp := &PIL2JS::Internals::use_perl5_module_imp;

@@ -7,6 +7,7 @@ use FindBin;
 use IPC::Open2;
 use Config;
 use File::Spec;
+use File::Temp;
 use Encode;
 
 our $VERSION = 0.0.1;
@@ -19,7 +20,7 @@ our @EXPORT    = qw<
   compile_perl6_to_pil
   precomp_module_to_mini_js
   jsbin_hack
-  run_pugs run_pil2js run_js run_js_on_jssm
+  run_pugs run_pil2js run_js run_js_on_jssm run_js_on_jspm
 >;
 our @EXPORT_OK = qw< pwd >;
 
@@ -64,7 +65,7 @@ sub preludepc_check {
 sub compile_perl6_to_standalone_js {
   preludepc_check();
 
-  my $pil  = run_pugs("-CPerl5", @_);
+  my $pil  = run_pugs("-CPIL1-Perl5", @_);
   die "Error: Couldn't compile to PIL!\n" if not defined $pil;
   my $mini = run_pil2js(\$pil);
   my $js   = run_pil2js("--link=js", "METAMODEL", jsprelude_path(), $cfg{preludepc}, $cfg{testpc}, \$mini);
@@ -73,7 +74,7 @@ sub compile_perl6_to_standalone_js {
 }
 
 sub compile_perl6_to_mini_js {
-  my $pil = run_pugs("-CPerl5", @_);
+  my $pil = run_pugs("-CPIL1-Perl5", @_);
   die "Error: Couldn't compile to PIL!\n" if not defined $pil;
 
   local $ENV{PIL2JS_INDENT} = "true";
@@ -93,7 +94,7 @@ sub compile_perl6_to_htmljs_with_links {
 }
 
 sub precomp_module_to_mini_js {
-  my $pil = eval { run_pugs("-CPerl5", @_, "-e", "''") };
+  my $pil = eval { run_pugs("-CPIL1-Perl5", @_, "-e", "''") };
   die $@ if $@;
   my $js  = eval { run_pil2js("-v", \$pil) };
   die $@ if $@;
@@ -101,7 +102,7 @@ sub precomp_module_to_mini_js {
 }
 
 sub compile_perl6_to_pil {
-  my $pil = run_pugs("-CPerl5", @_);
+  my $pil = run_pugs("-CPIL1-Perl5", @_);
   die "Error: Couldn't compile to PIL!\n" if not defined $pil;
   return $pil;
 }
@@ -111,7 +112,7 @@ sub run_pugs {
   diag "$cfg{pugs} @args";
 
   $ENV{PERL5LIB} = join $Config{path_sep}, pwd('lib'), ($ENV{PERL5LIB} || "");
-  unshift @args, "-Iblib6/lib", "-I../../blib6/lib";
+  unshift @args, "-Ilib6", "-Iblib6/lib", "-I../../blib6/lib";
 
   my $pid = open2 my($read_fh), my($write_fh), "$cfg{pugs}", @args
     or die "Couldn't open pipe to \"$cfg{pugs} @args\": $!\n";
@@ -132,16 +133,14 @@ sub run_pil2js {
   my @args = @_;
   unshift @args, "--pugs=" . $cfg{pugs}, "--metamodel-base=" . $cfg{metamodel_base};
 
-  my $push;
+  my $tmp;
   for(@args) {
-    if(ref $_ and defined $push) {
+    if(ref $_ and defined $tmp) {
       die "Only one reference argument may be given to &PIL2JS::run_pil2js!";
     } elsif(ref $_) {
-      open my $fh, '>', "pil2js-$$.tmp";
-      END { unlink "pil2js-$$.tmp" };
+      my ($fh, $fn) = File::Temp::tempfile(UNLINK => 1);
       print $fh $$_;
-      $_ = "pil2js-$$.tmp";
-      close $fh;
+      $_ = $fn;
     }
   }
   my @cmd = ($^X, $cfg{pil2js}, @args);
@@ -150,8 +149,6 @@ sub run_pil2js {
   my $pid = open2 my($read_fh), my($write_fh), @cmd
     or die "Couldn't open pipe to \"@cmd\": $!\n";
 
-  print $write_fh $push or die "Couldn't write into pipe to \"@cmd\": $!\n"
-    if defined $push;
   close $write_fh       or die "Couldn't close pipe to \"@cmd\": $!\n";
 
   local $/;
@@ -186,10 +183,31 @@ sub run_js_on_jssm {
   $jssm->init();
   $jssm->function_set("print",               sub { print encode "utf-8", "@_\n"; });
   $jssm->function_set("printWithoutNewline", sub { print encode "utf-8", "@_"; });
-  open F,">deleteme_eval.js"; print F $js; close F; # XXX - debugging output
+  # open F,">deleteme_eval.js"; print F $js; close F; # XXX - debugging output
   my $rc = $jssm->eval($js);
   warn "JavaScript::SpiderMonkey: $@" if $@;
   $jssm->destroy();
+}
+
+sub run_js_on_jspm {
+  my $js = shift;
+  diag $cfg{js};
+
+  require JavaScript;
+  require PIL2JS::JSPM;
+  my $rt = JavaScript::Runtime->new;
+  my $ct = $rt->create_context;
+
+  PIL2JS::JSPM::init_js_for_perl5($ct)
+    if $cfg{perl5};
+  $ct->bind_function( name => 'print',
+		      func => sub { print encode "utf-8", "@_\n" });
+  $ct->bind_function( name => 'printWithoutNewline',
+		      func => sub { print encode "utf-8", "@_" });
+
+  my $rc = $ct->eval($js);
+  warn "JavaScript: $@" if $@;
+  $ct->destroy;
 }
 
 sub jsbin_hack {

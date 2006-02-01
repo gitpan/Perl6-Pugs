@@ -12,6 +12,30 @@ sub fixup {
   die unless $self->{pCxt}->isa("PIL::TCxt");
   die unless ref($self->{pArgs}) eq "ARRAY";
 
+  my $subname;
+  if($self->{pFun}->{pLV} and $self->{pFun}->{pLV}->isa("PIL::PVar") and not ref $self->{pFun}->{pLV}->{pVarName}) {
+    $subname = $self->{pFun}->{pLV}->{pVarName};
+  }
+  # Minor hack -- we want syntactical pairs to be efficient.
+  if($subname and $subname eq "&Pugs::Internals::named_pair") {
+    my $key;
+    my $unwrapped = $self->{pArgs}[0]->unwrap;
+    if(
+      $unwrapped->isa("PIL::PLit") and
+      $unwrapped->{pLit}->isa("PIL::PVal") and
+      (my $lhs = $unwrapped->{pLit}{pVal})->isa("PIL::VStr")
+    ) {
+      $key = $lhs->[0];
+    } else {
+      $key = $self->{pArgs}[0]->fixup;
+    }
+    my $pair = bless { pVal => bless {
+      key   => $key,
+      value => $self->{pArgs}->[1]->fixup,
+    } => "PIL::NamedPair" } => "PIL::PLit";
+    return $pair->fixup;
+  }
+
   return bless {
     pCxt  => $self->{pCxt}->fixup,
     pFun  => $self->{pFun}->fixup,
@@ -26,7 +50,7 @@ sub as_js {
   no warnings "recursion";
 
   my $as_js = sub {
-    my @jsparams = @_; my $jsobj = pop @jsparams;
+    my @jsparams = @_; my $jsobj = shift @jsparams;
 
     my $subname;
     if($self->{pFun}->{pLV} and $self->{pFun}->{pLV}->isa("PIL::PVar") and not ref $self->{pFun}->{pLV}->{pVarName}) {
@@ -96,7 +120,8 @@ sub as_js {
 
     # For debugging
     unless($self->{CC}) {
-      use YAML; warn Dump($self);
+      warn "Internal error: Missing CC!\n";
+      require YAML; warn YAML::Dump($self);
     }
 
     # Minor hack -- we undefine all params to not suck up all memory.
@@ -131,10 +156,12 @@ sub as_js {
 
   return possibly_ccify_many(
     [
-      @{ $self->{pArgs} },
+      # XXX this doesn't deal with $obj.$methref(...) (but as Pugs can't even
+      # parse these constructs currently, it doesn't matter much (yet))
       $self->{pInv}
         ? $self->{pInv}
         : $self->{pFun},
+      @{ $self->{pArgs} },
     ],
     $as_js,
   );

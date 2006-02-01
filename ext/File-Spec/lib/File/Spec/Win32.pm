@@ -18,21 +18,22 @@ sub splitdir (Str $directories) returns Array is export {
     if (($directories ~~ rx:perl5{[\\/]\Z(?!\n)})) {
         @dirs[@dirs - 1] = '';
     }
+    @dirs = map {~$_ } @dirs;
     return @dirs;
 }
 
-sub splitpath (Str $path, Bool ?$nofile) returns Array is export {
+sub splitpath (Str $path, Bool $nofile?) returns Array is export {
     my ($volume, $directory, $file) = ('','','');
     if ($nofile) {
         $path ~~ rx:perl5{^((?:[a-zA-Z]:|(?:\\\\|//)[^\\/]+[\\/][^\\/]+)?)(.*)};
-        $volume    = $0;
-        $directory = $1;
+        $volume    = ~$0;
+        $directory = ~$1;
     }
     else {
         $path ~~ rx:perl5{^((?:[a-zA-Z]:|(?:\\\\|//)[^\\/]+[\\/][^\\/]+)?)((?:.*[\\/](?:\.\.?\Z(?!\n))?)?)(.*)};
-        $volume    = $0;
-        $directory = $1;
-        $file      = $2;
+        $volume    = ~$0;
+        $directory = ~$1;
+        $file      = ~$2;
     }
     return ($volume, $directory, $file);
 }
@@ -49,11 +50,11 @@ sub catdir (*@_path) returns Str is export {
     my $i = 0;
     loop ($i = 0; $i < @path; $i++) {
         @path[$i] ~~ s:perl5:g{/}{\\};
-        unless (@path[$i] eq "\\" || @path[$i] ~~ rx:perl5{\\$}) {
-            push(@new_path, @path[$i] ~ "\\");
+        if (@path[$i] ~~ m:perl5{\\$}) {
+            push(@new_path, @path[$i]);
         }
         else {
-            push(@new_path, @path[$i]);
+            push(@new_path, @path[$i] ~ "\\");
         }
     }
     return canonpath(join('', @new_path));
@@ -165,21 +166,22 @@ sub file_name_is_absolute (Str $file) returns Bool is export {
 #    return $cwd;
 #}
 sub cwd returns Str is export {
-  return File::Spec::cwd();
+  return '\\';
 }
 
 sub tmpdir returns Str is export {
-  return File::Spec::tmpdir();
+  return '';
 }
 
-sub rel2abs (Str $_path, Str ?$_base) returns Str is export {
+sub rel2abs (Str $_path, Str $_base?) returns Str is export {
     # take a copy of our args here, maybe
     # replace this with 'is copy' parameter
     # trait at some point
+    return cwd() if $_path eq '';
     my $path = $_path;
     if (!file_name_is_absolute($path)) {
         my $base;
-        if (!$_base.defined || $_base eq '') {
+        if ((!$_base.defined) or ($_base eq '')) {
             $base = cwd();
         }
         elsif (!file_name_is_absolute($_base)) {
@@ -195,7 +197,7 @@ sub rel2abs (Str $_path, Str ?$_base) returns Str is export {
     return canonpath($path);
 }
 
-sub abs2rel (Str $_path, Str ?$_base) returns Str is export {
+sub abs2rel (Str $_path, Str $_base?) returns Str is export {
     my $base;
     if (defined($_base) && $_base ne '') {
         # take a copy of our args here, maybe
@@ -211,6 +213,7 @@ sub abs2rel (Str $_path, Str ?$_base) returns Str is export {
 
     my ($path_volume) = splitpath($path, 1);
     my ($base_volume) = splitpath($base, 1);
+
     # Can't relativize across volumes
     return $path unless $path_volume eq $base_volume;
 
@@ -261,7 +264,7 @@ This is a very primitive port of the Perl 5 File::Spec::Win32 module.
 
 - `splitdir (Str $dir) returns Array`
 
-- `splitpath (Str $path, Bool ?$nofile) returns Array`
+- `splitpath (Str $path, Bool $nofile?) returns Array`
 
 - `catdir (*@path) returns Str`
 
@@ -269,7 +272,7 @@ This is a very primitive port of the Perl 5 File::Spec::Win32 module.
 
 - `catpath (Str $volume, Str $directory, Str $file) returns Str`
 
-- `rel2abs (Str $path, Str ?$base) returns Str`
+- `rel2abs (Str $path, Str $base?) returns Str`
 
 - `abs2rel (Str $path, Str $base) returns Str`
 

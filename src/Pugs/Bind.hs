@@ -22,9 +22,6 @@ message (@Left@).
 -}
 type MaybeError a = Either String a
 
-isRequired :: Param -> Bool
-isRequired prm = not $ isOptional prm
-
 {-|
 Match up named arguments with named parameters, producing a list of new
 bindings, and lists of remaining unbound args and params.
@@ -38,7 +35,7 @@ bindNames :: [Exp] -- ^ List of argument expressions to be bound
 bindNames exps prms = (bound, exps', prms')
     where
     prms' = prms \\ (map fst bound)
-    (bound, exps') = foldr doBind ([], []) (map unPair exps)
+    (bound, exps') = foldr doBind ([], []) (map unwrapNamedArg exps)
     doBind (name, exp) (bound, exps) 
         | Just prm <- find ((matchNamedAttribute name) . paramName) prms
         = ( ((prm, exp) : bound), exps )
@@ -46,7 +43,14 @@ bindNames exps prms = (bound, exps', prms')
         = ( bound, (Syn "=>" [Val (VStr name), exp]:exps) )
 
 
-matchNamedAttribute :: String -> String -> Bool
+{-|
+Return @True@ if the given argument-pair-key matches the given parameter name.
+Sigils and the twigils '@.@' and '@:@' are discarded from the parameter name
+for the purposes of the match.
+-}
+matchNamedAttribute :: String -- ^ Named argument's key
+                    -> String -- ^ Parameter name to match against
+                    -> Bool
 matchNamedAttribute arg (_:'.':param) = param == arg
 matchNamedAttribute arg (_:':':param) = param == arg
 matchNamedAttribute arg     (_:param) = param == arg
@@ -96,7 +100,7 @@ bindArray :: [Exp]      -- ^ List of slurpable argument expressions
           -> SlurpLimit -- ^ The sub's current 'SlurpLimit'
           -> MaybeError (Bindings, SlurpLimit)
 bindArray vs ps oldLimit = do
-    let exp = Cxt cxtSlurpyAny (Syn "," vs)
+    let exp = Ann (Cxt cxtSlurpyAny) (Syn "," vs)
     case foldM (doBindArray exp) ([], 0) prms of
         Left errMsg      -> fail errMsg
         Right (bound, n) -> do
@@ -140,27 +144,17 @@ doBindArray v (xs, n)  (p, _) = case v of
     _               -> return (((p, doIndex v n):xs), n+1)
 -- doBindArray _ (_, _)  (_, x) = internalError $ "doBindArray: unexpected char: " ++ (show x)
 
-{-|
-Return @True@ if the given expression represents a pair (i.e. it uses the
-\"=>\" pair constructor).
--}
-isPair :: Exp -> Bool
-isPair (Pos _ exp) = isPair exp
-isPair (Cxt _ exp) = isPair exp
-isPair (Syn "=>" [(Cxt _ (Val _)), _])   = True
-isPair (Syn "=>" [(Val _), _])   = True
-isPair _                         = False
 
-{-|
-Decompose a pair-constructor 'Exp'ression (\"=>\") into a Haskell pair
-(@key :: 'String'@, @value :: 'Exp'@).
--}
-unPair :: Exp -> (String, Exp)
-unPair (Pos _ exp) = unPair exp
-unPair (Cxt _ exp) = unPair exp
-unPair (Syn "=>" [key, exp])
-    | Val (VStr k) <- unwrap key = (k, exp)
-unPair x = error ("Not a pair: " ++ show x)
+isNamedArg :: Exp -> Bool
+isNamedArg (Syn "named" [(Val (VStr _)), _]) = True
+isNamedArg (Syn "named" [Ann _ (Val (VStr _)), _]) = True -- should the Ann reach here?
+isNamedArg arg@(Syn "named" _)               = error $ "malformed named arg: " ++ show arg
+isNamedArg _                                 = False
+
+unwrapNamedArg :: Exp -> (String, Exp)
+unwrapNamedArg (Syn "named" [(Val (VStr key)), val]) = (key, val)
+unwrapNamedArg (Syn "named" [Ann _ (Val (VStr key)), val]) = (key, val) -- (see comment in isNamedArg)
+unwrapNamedArg x = error $ "not a well-formed named arg: " ++ show x
 
 {-|
 Bind parameters to a callable, then verify that the binding is complete
@@ -198,11 +192,11 @@ finalizeBindings :: VCode -> MaybeError VCode
 finalizeBindings sub = do
     let params    = subParams sub
         bindings  = subBindings sub
-        boundInvs = filter (\x -> isInvocant (fst x)) bindings -- bound invocants
-        invocants = takeWhile isInvocant params                -- expected invocants
+        boundInvs = filter (isInvocant . fst) bindings    -- bound invocants
+        invocants = takeWhile isInvocant params           -- expected invocants
 
     -- Check that we have enough invocants bound
-    when (not $ null invocants) $ do
+    when (not . null $ invocants) $ do
         let cnt = length invocants
             act = length boundInvs
         fail $ "Wrong number of invocant parameters: "
@@ -210,14 +204,13 @@ finalizeBindings sub = do
             ++ (show $ act + cnt) ++ " expected in "
             ++ (show $ subName sub)
             
-    let (boundReq, boundOpt) = partition (\x -> isRequired (fst x)) bindings -- bound params which are required
-        (reqPrms, optPrms)   = span isRequired params -- all params which are required, and all params which are opt
+    let (boundOpt, boundReq) = partition (isOptional . fst) bindings -- bound params which are required
+        (optPrms, reqPrms)   = partition isOptional params -- all params which are required, and all params which are opt
 
     -- Check length of required parameters
     when (length boundReq < length reqPrms) $ do
-        fail $ "Insufficient number of required parameters: "
-            ++ (show $ length boundReq) ++ " actual, "
-            ++ (show $ length reqPrms) ++ " expected"
+        fail $ "Missing required parameters: "
+            ++ unwords (map paramName $ reqPrms \\ map fst boundReq)
 
     let unboundOptPrms = optPrms \\ (map fst boundOpt) -- unbound optParams are allPrms - boundPrms
         optPrmsDefaults = [
@@ -250,9 +243,10 @@ bindSomeParams sub invExp argsExp = do
             else (maybeToList invExp, argsExp)
 
     let boundInv                = invPrms `zip` givenInvs -- invocants are just bound, params to given
-        (namedArgs, posArgs)    = partition isPair givenArgs -- pairs are named arguments, they go elsewhere
+        (namedArgs, posArgs)    = partition isNamedArg givenArgs
         (boundNamed, namedForSlurp, allPosPrms) = bindNames namedArgs argPrms -- bind pair args to params. namedForSlup = leftover pair args
-        (posPrms, slurpyPrms)   = break isSlurpy allPosPrms -- split any prms not yet bound, into regular and slurpy. allPosPrms = not bound by named
+        (itemPrms, slurpyPrms)  = break isSlurpy allPosPrms -- split any prms not yet bound, into regular and slurpy. allPosPrms = not bound by named
+        posPrms                 = filter (not . isNamed) itemPrms
         boundPos                = posPrms `zip` posArgs -- bind all the unbound params in positional order
         posForSlurp             = drop (length posPrms) posArgs -- and whatever's left will be slurped
 

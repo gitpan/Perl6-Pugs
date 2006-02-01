@@ -5,6 +5,7 @@ use Config;
 use File::Spec;
 use File::Basename;
 use IPC::Open3 'open3';
+use Carp;
 
 sub WritePugs {
     my $self = shift;
@@ -107,6 +108,24 @@ sub pugs_fix_makefile {
     $full_pugs =~ s{'}{\\'}g;
     $full_blib =~ s{\\}{\\\\}g;
     $full_blib =~ s{'}{\\'}g;
+
+    # XXX - Pugs currently has issues under cygwin, and does not
+    # recognise cygwin absolute paths.  This kludge includes the
+    # win32ified path as well.
+
+    if ($Config{osname} eq q{cygwin}) {
+
+		# The world's ugliest cygwin variable gives us a hint to the
+		# cygwin root.  There is probably a better way to find this.
+		# (registry lookup?)
+
+		my $cygroot = $ENV{'!C:'};
+
+		$cygroot =~ s{\\bin$}{};
+
+        $full_blib .= join(q{}, q{:}, $cygroot, $full_blib)
+    }
+
     $makefile =~ s/\b(runtests \@ARGV|test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = q{$full_pugs}; \@ARGV = map glob, \@ARGV; ENV->{PERL6LIB} = q{$full_blib}; $1/;
     $makefile =~ s!("-MExtUtils::Command::MM")!"-I../../inc" "-I../inc" "-Iinc" $1!g;
     $makefile =~ s/\$\(UNINST\)/0/g;
@@ -149,34 +168,73 @@ sub warn_cygwin {
 sub assert_ghc {
     my $self = shift;
     my $ghc = $self->can_run($ENV{GHC} || ( 'ghc' . $Config{_exe} ) );
-    my $ghcver = `$ghc --version`;
-    ($ghcver =~ /Glasgow.*\bversion\s*(\S+)/s) or die << '.';
+
+    # This local subroutine returns the version of ghc passed to it.
+
+    my $test_ghc_ver = sub { 
+        (`$_[0] --version` =~ /Glasgow.*\bversion\s*(\S+)/s)[0]; 
+    };
+
+    my ($ghc_version) = $test_ghc_ver->($ghc);
+
+    if (!$ghc_version and (    $Config{osname} eq "cygwin" 
+                            or $Config{osname} eq "MSWin32"
+                          )
+       ) {
+
+        # Looks like we're on a Windows-ish system, without GHC
+        # in our path.   Let's hunt around for it.
+
+        my $ghc_root = "$ENV{SYSTEMDRIVE}/ghc";
+
+        warn "*** ghc not found in path.  Looking in $ghc_root\n";
+
+        if (-d $ghc_root) {
+            # Looks like we've found a GHC directory.  Find the latest
+            # ghc inside that.  Sort versions from highest to lowest.
+
+            my @ghc_choices = sort {
+                _normalize_version($b) cmp _normalize_version($a)
+            } glob(qq{$ghc_root/ghc-*});
+
+            GHC_TEST:
+            for my $ghc_dir (@ghc_choices) {
+                my $ghc_candidate = qq{$ghc_dir/bin/ghc.exe};
+                if ($ghc_version = $test_ghc_ver->($ghc_candidate)) {
+                    $ghc = $ghc_candidate;
+                    warn "*** Found $ghc\n";
+                }
+            }
+        }
+    }
+
+    $ghc_version or die << '.';
 *** Cannot find a runnable 'ghc' from path.
 *** Please install GHC from http://haskell.org/ghc/.
 .
 
-    my $ghc_version = $1;
     unless ($ghc_version =~ /^(\d)\.(\d+)/ and $1 >= 6 and $2 >= 4) {
         die << ".";
 *** Cannot find GHC 6.4 or above from path (we have $ghc_version).
 *** Please install a newer version from http://haskell.org/ghc/.
 .
     }
-    my $ghc_flags = "-H0 -L. -Lsrc -Lsrc/syck -Lsrc/pcre -I. -Isrc -Isrc/pcre -Isrc/syck ";
-    $ghc_flags .= " -i. -isrc -isrc/pcre -isrc/syck -static ";
+    my $ghc_flags = "-H0 ";
+    $ghc_flags .= " -i. -isrc -isrc/pcre -isrc/syck -isrc/cbits -I. -Isrc -Isrc/pcre -Isrc/syck -Isrc/cbits -static ";
     $ghc_flags .= " -Wall " #  -package-name Pugs -odir dist/build/src -hidir dist/build/src "
       unless $self->is_extension_build;
     $ghc_flags .= " -fno-warn-name-shadowing ";
     $ghc_flags .= " -I../../src -i../../src "
       if $self->is_extension_build;
     if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /perl5/i) {
-        $ghc_flags .= " -isrc/perl5 -Isrc/perl5 ";
+#        $ghc_flags .= " -isrc/perl5 -Isrc/perl5 ";
+        $ghc_flags .= " -isrc/perl5 ";
         $ghc_flags .= join(' ', grep { m{^/} or m{^-[DILl]} or m{^-Wl,-R} }
                         split (' ', `$^X -MExtUtils::Embed -e ccopts,ldopts`));
     }
     chomp $ghc_flags;
 
-    return ($ghc, $ghc_version, $ghc_flags, $self->assert_ghc_pkg);
+    return ($ghc, $ghc_version, $ghc_flags, $self->assert_ghc_pkg($ghc));
 }
 
 sub has_ghc_package {
@@ -185,21 +243,78 @@ sub has_ghc_package {
     `$ghc_pkg describe $package` =~ /package-url/;
 }
 
+sub _normalize_version {
+    my $dir = shift;
+    $dir =~ /.*ghc-(.*)$/i or die "Invalid version: $dir";
+    my $ver = $1;
+    $ver =~ s{(\d+)}{sprintf('%09s', $1)}eg;
+    return $ver;
+}
+
+=head2 assert_ghc_pkg
+
+Assert that we have F<ghc_pkg> installed.  This caches its result,
+any further calls to ghc_pkg This method expects to
+be called with a path (relative, absolute, or a command in
+C<$ENV{PATH}> that can be used to execute F<ghc>.
+
+=cut
+
 sub assert_ghc_pkg {
     my $self = shift;
+
+    # Return immediately if we've cached this.
+    return $self->{ghc_pkg} if $self->{ghc_pkg};
+
+    my $ghc  = shift || $self->{ghc} 
+        or croak "assert_ghc_pkg not cached, and called without path to ghc";
+
     my $ghc_pkg = $ENV{GHC_PKG};
 
     unless($ghc_pkg) {
-        $ghc_pkg = ($ENV{GHC} || 'ghc');
+        $ghc_pkg = $ghc;
         $ghc_pkg =~ s/\bghc(?=[^\\\/]*$)/ghc-pkg/  # ghc-6.5 => ghc-pkg-6.5
             or $ghc_pkg = 'ghc-pkg'; # fallback if !/^ghc/
-        $ghc_pkg = $self->can_run($ghc_pkg) || $self->can_run('ghc-pkg');
+
+
+        my $ghc_exe = $self->can_run($ghc_pkg) || $self->can_run('ghc-pkg');
+
+        # This above fails under cygwin with a Win32-flavoured ghc-pkg.
+        # https://rt.cpan.org/Ticket/Display.html?id=16375 fixes this,
+        # but we can't rely upon everyone having it.  As such, we have
+        # a very special cygwin work-around.  Ugh!
+
+
+        if (not $ghc_exe and $Config{osname} eq 'cygwin') {
+
+            warn "*** ghc-pkg not found in path.  Testing $ghc_pkg\n";
+
+            # If the file exists, and it looks like it's in windows
+            # land, and it has an executable extension...
+
+            if ( -f $ghc_pkg 
+                and $ghc_pkg =~ m{^(?:/cygdrive|[A-Za-z]:)/.*$Config{_exe}$}
+            ) {
+
+                # Smells like a Windows executable called from cygwin-land.
+                # Keep it.
+
+                $ghc_exe = $ghc_pkg;
+
+            }
+        }
+
+        # Our ghc-pkg is whatever executable we've found (which could be
+        # undef, if we didn't find anything).
+
+        $ghc_pkg = $ghc_exe;
+
     }
 
     die "*** Cannot find ghc-pkg; please set it in your GHC_PKG environment variable.\n"
         unless $ghc_pkg;
 
-    return $ghc_pkg;
+    return $self->{ghc_pkg} = $ghc_pkg;
 }
 
 

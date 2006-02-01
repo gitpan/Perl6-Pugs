@@ -1,5 +1,5 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
-{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
+{-# OPTIONS_GHC -fglasgow-exts -fvia-C -optc-w #-}
+{-# OPTIONS_GHC -#include "../UnicodeC.h" #-}
 
 {-|
     Lexical analyzer.
@@ -12,7 +12,7 @@
 
 module Pugs.Lexer (
     wordAlpha, wordAny, isWordAlpha, isWordAny,
-    maybeParens, parens, whiteSpace, lexeme, identifier,
+    maybeParens, parens, whiteSpace, mandatoryWhiteSpace, lexeme, identifier,
     braces, brackets, angles, balanced, balancedDelim, decimal,
 
     ruleDelimitedIdentifier, ruleQualifiedIdentifier, ruleWhiteSpaceLine,
@@ -21,7 +21,7 @@ module Pugs.Lexer (
 
     rule, verbatimRule, literalRule,
     tryRule, tryVerbatimRule,
-    tryChoice,
+    tryChoice, ruleComma,
 
     ruleScope, ruleTrait, ruleTraitName, ruleBareTrait, ruleType,
     verbatimParens, verbatimBrackets, verbatimBraces,
@@ -65,6 +65,8 @@ parens     :: CharParser st a -> CharParser st a
 parens     = P.parens     perl6Lexer
 whiteSpace :: CharParser st ()
 whiteSpace = P.whiteSpace perl6Lexer
+mandatoryWhiteSpace :: CharParser st ()
+mandatoryWhiteSpace = skipMany1 (oneOf " \t\n")  -- XXX unicode and whatnot
 lexeme     :: CharParser st a -> CharParser st a
 lexeme     = P.lexeme     perl6Lexer
 identifier :: CharParser st String
@@ -145,8 +147,8 @@ symbol s
     aheadSym '!' '~' = False -- XXX hardcode
     aheadSym x   '=' = not (x `elem` "!~+-*&/|.%^")
     aheadSym '?' y   = not (y `elem` "&|^?")
-    aheadSym '+' y   = not (y `elem` "&|^<>+")
-    aheadSym '~' y   = not (y `elem` "&|^<>~")
+    aheadSym '+' y   = not (y `elem` "&|^+")
+    aheadSym '~' y   = not (y `elem` "&|^~")
     aheadSym '^' y   = not (y `elem` "^.")
     aheadSym x   y   = y `elem` ";!" || x /= y
 
@@ -157,7 +159,7 @@ interpolatingStringLiteral :: RuleParser String -- ^ Opening delimiter
                                                 --     (without delims)
 interpolatingStringLiteral startrule endrule interpolator = do
     list <- stringList 0
-    return . Cxt (CxtItem $ mkType "Str") $ homogenConcat list
+    return $ Ann (Cxt (CxtItem $ mkType "Str")) (homogenConcat list)
     where
     homogenConcat :: [Exp] -> Exp
     homogenConcat [] = Val (VStr "")
@@ -191,23 +193,39 @@ interpolatingStringLiteral startrule endrule interpolator = do
         ]
 
 -- | Backslashed non-alphanumerics (except for @\^@) translate into themselves.
-escapeCode      :: GenParser Char st Char
-escapeCode      = charEsc <|> charNum <|> charAscii <|> charControl <|> anyChar
+escapeCode      :: GenParser Char st String
+escapeCode      = ch charEsc <|> charNum <|> ch charAscii <|> ch charControl <|> ch anyChar
                 <?> "escape code"
+    where
+    ch = fmap (:[])
 
 charControl :: GenParser Char st Char
-charControl     = do{ char '^'
-                    ; code <- upper
-                    ; return (toEnum (fromEnum code - fromEnum 'A'))
+charControl     = do{ char 'c'
+                    ; code <- upper <|> char '@'
+                    ; return (toEnum (fromEnum code - fromEnum '@'))
                     }
 
-charNum :: GenParser Char st Char                    
-charNum         = do{ code <- decimal 
-                              <|> do{ char 'o'; number 8 octDigit }
-                              <|> do{ char 'x'; number 16 hexDigit }
-                              <|> do{ char 'd'; number 10 digit }
-                    ; return (toEnum (fromInteger code))
-                    }
+-- This is currently the only escape that can return multiples.
+charNum :: GenParser Char st String
+charNum = do
+    codes <- choice
+        [ fmap (:[]) decimal 
+        , based 'o'  8 octDigit
+        , based 'x' 16 hexDigit
+        , based 'd' 10 digit
+        ]
+    return $ map (toEnum . fromInteger) codes
+    where
+    based ch num p = do
+        char ch
+        choice [ verbatimBrackets (number num p `sepEndBy1` ruleComma)
+               , fmap (:[]) (number num p)
+               ]
+
+ruleComma :: GenParser Char st ()
+ruleComma = do
+    lexeme (char ',')
+    return ()
 
 number :: Integer -> GenParser tok st Char -> GenParser tok st Integer
 number base baseDigit
@@ -274,6 +292,7 @@ ruleScope = tryRule "scope" $ do
     readScope "our"     = SOur
     readScope "let"     = SLet
     readScope "temp"    = STemp
+    readScope "env"     = SEnv
     readScope _         = SGlobal
 
 ruleScopeName :: RuleParser String
@@ -319,10 +338,10 @@ ruleBareTrait trait = rule "bare trait" $ do
 
 ruleType :: GenParser Char st String
 ruleType = literalRule "context" $ do
-    -- Valid type names: Foo, Bar::Baz, ::Grtz, ::?CLASS
-    lead    <- wordAlpha <|> char ':'
+    -- Valid type names: Foo, Bar::Baz, ::Grtz, ::?CLASS, but not :Foo
+    lead    <- count 1 wordAlpha <|> string "::"
     rest    <- many (wordAny <|> oneOf ":&|?")
-    return (lead:rest)
+    return (lead ++ rest)
 
 {-|
 Attempt each of the given parsers in turn until one succeeds, but if one of

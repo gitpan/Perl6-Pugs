@@ -51,51 +51,51 @@ class Net::IRC {
   has Bool  $.debug_raw    is rw;
 
   # Internal things
-  has Set   $:chans = set();
-  has IO    $:socket;
-  has Queue $:queue;
-  has Array %:handler;
-  has Hash  %:channels;
-  has Hash  %:users;
-  has Hash  %:cache353;
-  has Bool  $:in_login_phase;
-  has       $:nickgen;
+  has Set   $!chans = set();
+  has IO    $!socket;
+  has Queue $!queue;
+  has Array %!handler;
+  has Hash  %!channels;
+  has Hash  %!users;
+  has Hash  %!cache353;
+  has Bool  $!in_login_phase;
+  has       $!nickgen;
 
   submethod BUILD(
     Str $.nick,
-    Str ?$.username = $.nick,
-    Str ?$.ircname  = $.nick,
+    Str $.username = $.nick,
+    Str $.ircname  = $.nick,
     Str $.host,
-    Int ?$.port         = 6667,
-    Int ?$.autoping     = 90,   # Autoping the server when we haven't seen traffic for 90s
-    Int ?$.live_timeout = 120,  # Drop connection when we haven't seen traffic for 120s
-    Bool ?$floodcontrol = 0,    # Check that we don't flood excessively
-    Bool ?$.debug_raw   = 0,
+    Int $.port         = 6667,
+    Int $.autoping     = 90,   # Autoping the server when we haven't seen traffic for 90s
+    Int $.live_timeout = 120,  # Drop connection when we haven't seen traffic for 120s
+    Bool $floodcontrol = 0,    # Check that we don't flood excessively
+    Bool $.debug_raw   = 0,
   ) {
     ./:register_default_handlers;
-    $:nickgen = Permutation.new($.nick);
-    $:queue = new Queue: floodcontrol => $floodcontrol;
+    $!nickgen = Permutation.new($.nick);
+    $!queue = new Queue: floodcontrol => $floodcontrol;
   }
 
-  method :enqueue(Str $msg) {
-    $:queue.enqueue({ ./:send($msg) })
+  my method enqueue(Str $msg) {
+    $!queue.enqueue({ ./:send($msg) })
       if $.connected;
   }
 
-  method :send(Str $msg) {
+  my method send(Str $msg) {
     debug_sent $msg if $.debug_raw;
-    $:socket.print("$msg\13\10");
-    $:socket.flush();
+    $!socket.print("$msg\13\10");
+    $!socket.flush();
   }
 
-  method :register_default_handlers() {
+  my method register_default_handlers() {
     # Default (passive) handlers
     # First event we get, indicating a successful login
     ./add_handler("001", -> $event {
       $.inside++;
       $.servername     = $event<server>;
       $.curnick        = $event<to>;
-      $:in_login_phase = 0;
+      $!in_login_phase = 0;
       ./:handle_pseudo("loggedin");
       # We want to know our username and host, so we /WHO ourselves.
       ./who($curnick);
@@ -104,8 +104,8 @@ class Net::IRC {
 
     # Nick already used, so we permute our nick.
     ./add_handler("433", -> $event {
-      if $:in_login_phase {
-        ./nick($:nickgen.next);
+      if $!in_login_phase {
+        ./nick($!nickgen.next);
       }
     });
 
@@ -126,10 +126,10 @@ class Net::IRC {
       my ($chan, $topic) = split " ", $event<rest>;
       $topic = strip_colon($topic);
 
-      %:channels{normalize $chan}<topic> = $topic;
+      %!channels{normalize $chan}<topic> = $topic;
     });
     ./add_handler("TOPIC", -> $event {
-      %:channels{normalize $event<object>}<topic> = $event<rest>;
+      %!channels{normalize $event<object>}<topic> = $event<rest>;
     });
 
     # /NAMES response
@@ -143,23 +143,23 @@ class Net::IRC {
                  .grep:{ defined $_ }
                  .map:{ normalize $_ };
 
-      unless defined %:cache353{$chan} {
-        # We initialize %:cache353{$chan} by makeing %:cache353{$chan} a
+      unless defined %!cache353{$chan} {
+        # We initialize %!cache353{$chan} by makeing %!cache353{$chan} a
         # hashref which has the nicks, which we currently think are on the
         # channel, as keys. Then, we delete all nicks we see as response from
         # the /NAMES. Finally, we delete all nicks, which are still in
-        # %:cache353{$chan}.
+        # %!cache353{$chan}.
 
-        %:cache353{$chan}{$_}++ for %:channels{$chan}<users>.keys;
+        %!cache353{$chan}{$_}++ for %!channels{$chan}<users>.keys;
       }
 
-      # We have already initialized %:cache353{$chan}.
-      %:cache353{$chan}.delete(@nicks);
+      # We have already initialized %!cache353{$chan}.
+      %!cache353{$chan}.delete(@nicks);
 
       # For each nick, make sure we've registered them as people who are on
       # $chan:
       %_channels{$chan}<users>{$_}++ for @nicks;
-      %:users{$_}<channels>{$chan}++ for @nicks;
+      %!users{$_}<channels>{$chan}++ for @nicks;
     });
 
     # End of /NAMES
@@ -167,24 +167,24 @@ class Net::IRC {
       # (Perl 6)++ for new parenthesis rules! :)
       my $chan = normalize (split " ", $event<rest>)[0];
 
-      unless defined %:cache353{$chan} {
-        %:cache353{$chan} = %:channels{$chan}<users>;
+      unless defined %!cache353{$chan} {
+        %!cache353{$chan} = %!channels{$chan}<users>;
       }
 
-      %:channels{$chan}<users>.delete(%:cache353{$chan}.keys);
-      %:users{$_}<channels>.delete($chan) for %:cache353{$chan}.keys;
+      %!channels{$chan}<users>.delete(%!cache353{$chan}.keys);
+      %!users{$_}<channels>.delete($chan) for %!cache353{$chan}.keys;
     });
 
     # We track our status, especially the channels we've joined.
     # Somebody joined. Update %channels and %users accordingly.
     ./add_handler("JOIN", -> $event {
       if(normalize($event<from_nick>) eq normalize($curnick)) {
-        $:chans.insert(normalize $event<object>);
+        $!chans.insert(normalize $event<object>);
         debug "Joined channel \"$event<object>\".";
       }
 
-      %:channels{normalize $event<object>}<users>{$event<from_nick>}++;
-      %:users{normalize $event<from_nick>}<channels>{normalize $event<object>}++;
+      %!channels{normalize $event<object>}<users>{$event<from_nick>}++;
+      %!users{normalize $event<from_nick>}<channels>{normalize $event<object>}++;
     });
 
     # Somebody left a channel. Update %channels and %users accordingly.
@@ -192,16 +192,16 @@ class Net::IRC {
       my $chan = normalize $event<object>;
 
       if(normalize($event<from_nick>) eq normalize($curnick)) {
-        $:chans.remove(normalize $event<object>);
-        for %:channels{$chan}<users>.keys {
-          %:users{$_}<channels>.delete($chan) if %:users{$_}<channels>;
+        $!chans.remove(normalize $event<object>);
+        for %!channels{$chan}<users>.keys {
+          %!users{$_}<channels>.delete($chan) if %!users{$_}<channels>;
         }
-        %:channels.delete($chan);
+        %!channels.delete($chan);
         debug "Left channel \"$chan\".";
       } else {
-        %:channels{$chan}<users>.delete(normalize $event<from_nick>);
-        %:users{normalize $event<from_nick>}<channels>.delete($chan)
-          if %:users{normalize $event<from_nick>}<channels>;
+        %!channels{$chan}<users>.delete(normalize $event<from_nick>);
+        %!users{normalize $event<from_nick>}<channels>.delete($chan)
+          if %!users{normalize $event<from_nick>}<channels>;
       }
     });
 
@@ -212,16 +212,16 @@ class Net::IRC {
       my $chan = normalize $event<object>;
 
       if(normalize($kickee) eq normalize($curnick)) {
-        $:chans.remove(normalize $event<object>);
-        for %:channels{$chan}<users>.keys {
-          %:users{$_}<channels>.delete($chan) if %:users{$_}<channels>;
+        $!chans.remove(normalize $event<object>);
+        for %!channels{$chan}<users>.keys {
+          %!users{$_}<channels>.delete($chan) if %!users{$_}<channels>;
         }
-        %:channels.delete($chan);
+        %!channels.delete($chan);
         debug "Was kicked from channel \"$chan\" by \"$event<from>\" (\"$reason\").";
       } else {
-        %:channels{$chan}<users>.delete(normalize $kickee);
-        %:users{normalize $kickee}<channels>.delete($chan)
-          if %:users{normalize $kickee}<channels>;
+        %!channels{$chan}<users>.delete(normalize $kickee);
+        %!users{normalize $kickee}<channels>.delete($chan)
+          if %!users{normalize $kickee}<channels>;
       }
     });
 
@@ -229,20 +229,20 @@ class Net::IRC {
     ./add_handler("KILL", -> $event {
       my ($killee, $reason) = $event<object rest>;
       if(normalize($killee) eq normalize($curnick)) {
-        $:chans.clear;
+        $!chans.clear;
         debug "Was killed by \"$event<from>\" (\"$reason\").";
       }
 
       my @chans = %users{normalize $killee}<channels>.keys;
-      %:channels{$_}<users>.delete(normalize $killee) for @chans;
-      %:users.delete(normalize $killee);
+      %!channels{$_}<users>.delete(normalize $killee) for @chans;
+      %!users.delete(normalize $killee);
     });
 
     # Somebody quit. Remove him/she from %users and %channels.
     ./add_handler("QUIT", -> $event {
-      my @chans = %:users{normalize $event<from_nick>}<channels>.keys;
-      %:channels{$_}<users>.delete(normalize $event<from_nick>) for @chans;
-      %:users.delete(normalize $event<from_nick>);
+      my @chans = %!users{normalize $event<from_nick>}<channels>.keys;
+      %!channels{$_}<users>.delete(normalize $event<from_nick>) for @chans;
+      %!users.delete(normalize $event<from_nick>);
     });
 
     # Somebody changed his/her nick. Rename his/her entry in %users, and update
@@ -255,10 +255,10 @@ class Net::IRC {
 
       my $oldnick = normalize $event<from_nick>;
       my $newnick = normalize $event<object>;
-      if %:users{$oldnick}<channels> {
-        for %:users{$oldnick}<channels>.keys {
-          %:channels{$_}<users>.delete($oldnick);
-          %:channels{$_}<users>{$newnick}++;
+      if %!users{$oldnick}<channels> {
+        for %!users{$oldnick}<channels>.keys {
+          %!channels{$_}<users>.delete($oldnick);
+          %!channels{$_}<users>{$newnick}++;
         }
       }
 
@@ -266,18 +266,18 @@ class Net::IRC {
       # yet in Pugs, because, so it seems, delete stringifies its return values,
       # but I was unable to work out a test case, and in interactive Pugs delete
       # seems to work...
-      %:users{$newnick} = %:users{$oldnick};
-      %:users.delete($oldnick);
+      %!users{$newnick} = %!users{$oldnick};
+      %!users.delete($oldnick);
     });
   }
 
   # Instance methods
-  method channels()            { $:chans.members }
-  method user(Str $nick)       { %:users{normalize $nick} }
-  method channel(Str $channel) { %:channels{normalize $channel} }
+  method channels()            { $!chans.members }
+  method user(Str $nick)       { %!users{normalize $nick} }
+  method channel(Str $channel) { %!channels{normalize $channel} }
 
   method add_handler(Str $event, Code $callback) {
-    push %:handler{$event}: $callback;
+    push %!handler{$event}: $callback;
   }
 
   method connect() { ./reconnect }
@@ -285,9 +285,9 @@ class Net::IRC {
     ./disconnect if $.connected;
 
     debug "Connecting to $.host:$.port... ";
-    try { $:socket = connect($.host, $.port) }
-    if($:socket) {
-      try { $:socket.autoflush(1) }
+    try { $!socket = connect($.host, $.port) }
+    if($!socket) {
+      try { $!socket.autoflush(1) }
       $.connected++;
       $.last_traffic  = time;
       $.last_autoping = time;
@@ -301,35 +301,35 @@ class Net::IRC {
     return unless $.connected;
 
     debug "Disconnecting from $host:$port... ";
-    try { $:socket.close }
+    try { $!socket.close }
     # We want to have a sane state when we connect next time.
     $.connected      = 0;
     $.inside         = 0;
-    $:chans          = set();
+    $!chans          = set();
     $.servername     = undef;
-    $:socket            = undef;
+    $!socket            = undef;
     $.curnick        = undef;
     $.curusername    = undef;
     $.curircname     = undef;
     $.curhostname    = undef;
     $.last_traffic   = 0;
     $.last_autoping  = 0;
-    $:in_login_phase = 0;
-    %:channels       = ();
-    $:queue.clear;
-    $:nickgen.reset;
+    $!in_login_phase = 0;
+    %!channels       = ();
+    $!queue.clear;
+    $!nickgen.reset;
     debug "done.";
   }
 
   method login() {
     return unless $.connected;
 
-    $:queue.enqueue({
+    $!queue.enqueue({
       # Indicate that we're currently logging in, so our nick_already_used
       # handler can choose a different nick. $in_login_phase is reset to 0
       # when we're successfully logged in.
       $in_login_phase++;
-      $say("NICK {$:nickgen.next}");
+      $say("NICK {$!nickgen.next}");
       $say("USER $.username * * :$.ircname");
     });
   }
@@ -346,7 +346,7 @@ class Net::IRC {
 
   # Read a line from the server and process it
   method readline() {
-    my $line = readline $:socket;
+    my $line = readline $!socket;
     $line ~~ s:P5/[\015\012]*$//; # Hack to remove all "\r\n"s
     debug_recv $line if $.debug_raw;
     # We record the time the last traffic from the server was seen, so we can
@@ -368,7 +368,7 @@ class Net::IRC {
   }
 
   # Handle numeric commands (e.g. 001 -> welcome)
-  method :handle_numeric(Str $line, Str $server, Str $code, Str $to, Str $rest) {
+  my method handle_numeric(Str $line, Str $server, Str $code, Str $to, Str $rest) {
     my $event = {
       line   => $line,
       server => $server,
@@ -376,13 +376,13 @@ class Net::IRC {
       rest   => strip_colon($rest),
     };
 
-    if %:handler{$code} {
-      $_($event) for *%:handler{$code};
+    if %!handler{$code} {
+      $_($event) for *%!handler{$code};
     }
   }
 
   # Handle word commands (e.g. JOIN, INVITE)
-  method :handle_command(Str $line, Str $from, Str $command, Str $object, Str $rest) {
+  my method handle_command(Str $line, Str $from, Str $command, Str $object, Str $rest) {
     my $from_nick; $from_nick = $0 if $from ~~ rx:P5/^([^!]+)!/; #/#--vim
     my $event = {
       line      => $line,
@@ -392,25 +392,25 @@ class Net::IRC {
       object    => strip_colon($object),
     };
 
-    if %:handler{$command} {
-      $_($event) for *%:handler{$command};
+    if %!handler{$command} {
+      $_($event) for *%!handler{$command};
     }
   }
 
   # Handle pseudo events (runloop, loggedin)
-  method :handle_pseudo(Str $pseudo, *@args) {
+  my method handle_pseudo(Str $pseudo, *@args) {
     my $event = {
       pseudo => $pseudo,
       args   => @args,
     };
 
-    if %:handler{$pseudo} {
-      $_($event) for *%:handler{$pseudo};
+    if %!handler{$pseudo} {
+      $_($event) for *%!handler{$pseudo};
     }
   }
 
   # Check that our connection is still alive.
-  method :livecheck() {
+  my method livecheck() {
     return unless $.connected;
 
     # We haven't seen any traffic for at least $autoping seconds, so we
@@ -433,7 +433,7 @@ class Net::IRC {
   }
 
   # JOIN/PART/KICK/...
-  method join(Str $channel, Str ?$key) {
+  method join(Str $channel, Str $key?) {
     if $.connected {
       if defined $key {
         ./:enqueue("JOIN $channel $key");
@@ -448,17 +448,17 @@ class Net::IRC {
   method who(Str $target)   { ./:enqueue("WHO $target") }
   method whois(Str $target) { ./:enqueue("WHOIS $target") }
   method ison(Str @targets) { ./:enqueue("ISON @targets[]") }
-  method topic(Str $channel, Str ?$topic) {
+  method topic(Str $channel, Str $topic?) {
     if defined $topic {
       ./:enqueue("TOPIC $channel :$topic");
     } else {
       ./:enqueue("TOPIC $channel");
     }
   }
-  method kick(Str $channel, Str $nick, Str ?$reason) {
+  method kick(Str $channel, Str $nick, Str $reason?) {
     ./:enqueue("KICK $channel $nick :{$reason // ""}");
   }
-  method mode(Str $target, Str ?$mode) {
+  method mode(Str $target, Str $mode?) {
     if defined $mode {
       ./:enqueue("MODE $target $mode");
     } else {
@@ -477,47 +477,47 @@ class Net::IRC {
 
   class Queue {
     has Bool $.floodcontrol;
-    has Code @:queue;
-    has      $:bucket;
+    has Code @!queue;
+    has      $!bucket;
 
-    submethod BUILD(Bool ?$.floodcontrol = 0) {
-      $:bucket = $.floodcontrol
+    submethod BUILD(Bool $.floodcontrol = 0) {
+      $!bucket = $.floodcontrol
         ?? Bucket.new(rate => (1/2),    burst_size => 5)
         !! Bucket.new(rate => (1000/2), burst_size => 5000); # hack
-      $:bucket.fill;
+      $!bucket.fill;
     }
 
     # Run all entries of @queue. Will need throttling later.
     method run() {
-      my @q = splice @:queue;
+      my @q = splice @!queue;
       while @q {
-        if $:bucket.conform(1) {
-          $:bucket.count(1);
+        if $!bucket.conform(1) {
+          $!bucket.count(1);
           @q.shift().();
         } else {
           last;
         }
       }
-      @:queue.unshift(@q);
+      @!queue.unshift(@q);
     }
 
     # Enqueue a new callback
-    method enqueue(Code $code) { push @:queue, $code }
+    method enqueue(Code $code) { push @!queue, $code }
 
     # Remove all items from the queue
-    method clear() { @:queue = () }
+    method clear() { @!queue = () }
   }
 
   class Permutation {
     has Str $.orig is rw;
-    has Str @:perms;
+    has Str @!perms;
 
     submethod BUILD(Str $.orig) {
       ./reset;
     }
 
     method reset() {
-      @:perms = (
+      @!perms = (
         "$.orig",
         "{$.orig}_", "{$.orig}__",
         "_{$.orig}", "__{$.orig}",
@@ -526,8 +526,8 @@ class Net::IRC {
     }
 
     method next() {
-      my $cur = @:perms.shift;
-      @:perms.push($cur);
+      my $cur = @!perms.shift;
+      @!perms.push($cur);
 
       return $cur;
     }

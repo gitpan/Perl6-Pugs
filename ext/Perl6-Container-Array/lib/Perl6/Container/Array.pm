@@ -94,18 +94,18 @@ method _shift_n ($array: Int $length ) returns List {
         return @tmp;
     }    
     while @tmp {
-        last if @ret.elems >= $length;
+        last if @ret >= $length;
         if ! @tmp[0].isa('Perl6::Value::List') {
-            &*push( @ret, Perl6::Array::shift @tmp );
+            &*push( @ret, &*shift(@tmp) );
             next;
         }
         my $i = @tmp[0].shift;
         if defined $i {
-            Perl6::Array::push @ret, $i;
-            last if @ret.elems >= $length;
+            &*push(@ret, $i);
+            last if @ret >= $length;
         }
         else {
-            Perl6::Array::shift @tmp;
+            &*shift(@tmp);
         }
     };
     $array.items = @tmp;    
@@ -120,61 +120,55 @@ method _pop_n ($array: Int $length ) returns List {
         return @tmp;
     }    
     while @tmp {
-        last if @ret.elems >= $length;
+        last if @ret >= $length;
         if ! @tmp[-1].isa('Perl6::Value::List') {
-            Perl6::Array::unshift @ret, Perl6::Array::pop @tmp;
+            &*unshift(@ret, &*pop(@tmp));
             next;
         }
         my $i = @tmp[-1].pop;
         if defined $i {
-            Perl6::Array::unshift @ret, $i;
-            last if @ret.elems >= $length;
+            &*unshift(@ret, $i);
+            last if @ret >= $length;
         }
         else {
-            Perl6::Array::pop @tmp;
+            &*pop(@tmp);
         }
     };
     $array.items = @tmp;    
     return @ret;
 }
 
-method elems ( $array: ) {
-    my $count = 0;
-    for $.items {
-        $count += $_.isa( 'Perl6::Value::List' )  ?? 
-                  $_.Perl6::Value::List::elems  !! 
-                  1;
-    }
-    $count;
+method elems () {
+    [+] &*map({
+        $_.isa( 'Perl6::Value::List' )
+            ?? $_.Perl6::Value::List::elems
+            !! 1;
+    }, @.items);
 }  
 
-method is_infinite ( $array: ) {
-    for $.items {
-        return bool::true if $_.isa( 'Perl6::Value::List' ) && $_.is_infinite;
-    }
-    bool::false;
-}  
+method is_infinite () {
+    [||] @.items.map:{
+        ($_.isa( 'Perl6::Value::List' ) && $_.is_infinite);
+    }, bool::false;
+}
 
-method is_lazy ( $array: ) {
-    for $.items {
-        return bool::true if $_.isa( 'Perl6::Value::List' ) && $_.is_lazy;
-    }
-    bool::false;
-}  
+method is_lazy () {
+    [||] @.items.map:{
+        ($_.isa( 'Perl6::Value::List' ) && $_.is_lazy);
+    }, bool::false;
+}
 
-method flatten ( $self: ) { 
+method flatten () { 
     # this needs optimization
-    my $ret = $array;
-    for $ret.items {
-        $_ = $_.flatten() if $_.isa( 'Perl6::Value::List' ) && $_.is_lazy;
+    for @.items {
+        $_ .= flatten if (.isa( 'Perl6::Value::List' ) && .is_lazy);
     }
-    $ret;
 }
 
 method splice ( 
     Perl6::Container::Array $array: 
-    ?$offset = 0, 
-    ?$length = Inf, 
+    $offset? = 0, 
+    $length? = Inf, 
     *@list 
 )
     returns Perl6::Container::Array 
@@ -199,15 +193,15 @@ method splice (
         if $length >= 0 {
             # make $#body = $length
             while @tail {
-                last if @body.elems >= $length;
-                Perl6::Array::push @body, Perl6::Array::shift @tail;
+                last if @body >= $length;
+                &*push(@body, &*shift(@tail));
             }
         }
         else {
             # make $#tail = -$length
             while @tail {
-                last if @tail.elems <= -$length;
-                Perl6::Array::push @body, Perl6::Array::shift @tail;
+                last if @tail <= -$length;
+                &*push(@body, &*shift(@tail));
             }
         }
     };
@@ -225,12 +219,12 @@ method pop ( $array: ) {
 }
 
 method unshift ( $array: *@item ) {
-    Perl6::Array::unshift $array.items, @item;
+    &*unshift($array.items, @item);
     return $array; 
 }
 
 method push ( $array: *@item ) {
-    Perl6::Array::push $array.items, @item;
+    &*push($array.items, @item);
     return $array; 
 }
 
@@ -259,8 +253,8 @@ method store ( $array: Int $pos, $item ) {
 # method previous ( Perl6::Container::Array $array: ) { $array.pop }    # just in case 
 
 method reverse ( $array: ) { 
-    my $rev = Perl6::Array::reverse $array.items;
-    $rev = $rev.Perl6::Array::map:{
+    my $rev = &*reverse($array.items);
+    $rev = $rev.map:{
             $_.isa('Perl6::Value::List') ?? $_.Perl6::Value::List::reverse !! $_
         };
     return Perl6::Container::Array.from_list( @{$rev} );

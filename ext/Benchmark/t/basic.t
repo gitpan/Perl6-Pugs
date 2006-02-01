@@ -1,11 +1,11 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 plan 4;
 
-use_ok('Benchmark');
+use Benchmark; pass "(dummy instead of broken use_ok)";
 
 
 {

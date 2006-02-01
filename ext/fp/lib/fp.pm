@@ -15,12 +15,12 @@ multi *infix:<⇒> ($x, $y) { $x => $y }
 multi *infix:<≥> ($a, $b) { $a >= $b }
 multi *infix:<≤> ($a, $b) { $a <= $b }
 multi *infix:<≠> ($a, $b) { $a != $b }
-multi *infix:<≣> ($a, $b) { $a =:= $b }
-multi *infix:<≡> ($a, $b) { $a =:= $b }
+multi *infix:<≣> ($a, $b) { $a === $b }
+multi *infix:<≡> ($a, $b) { $a === $b }
 
 # Misc. mathematical chars
-multi *prefix:<∑>  (@nums) { [+] *@nums }
-multi *prefix:<∏>  (@nums) { [*] *@nums }
+multi *prefix:<∑>  ($nums) { [+] @$nums }
+multi *prefix:<∏>  ($nums) { [*] @$nums }
 multi *postfix:<!> ($x) { [*] 1..$x }
 # multi ∞()       { Inf } -- doesn't work
 multi *infix:<÷>   ($a, $b) { $a / $b }
@@ -78,7 +78,7 @@ Standard comparision operators.
 
 =head2 C<≣>, C<≡>
 
-Equivalent to C<=:=>.
+Equivalent to C<===>.
 
 =head2 C<< prefix:<∑>(@nums) >>, C<< prefix:<∏>(@nums) >>
 

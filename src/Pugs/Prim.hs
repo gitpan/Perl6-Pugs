@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fno-full-laziness -fno-cse #-}
-{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
+{-# OPTIONS_GHC -#include "../UnicodeC.h" #-}
 
 {-|
     Primitive operators.
@@ -14,15 +14,13 @@ module Pugs.Prim (
     primOp,
     primDecl,
     initSyms,
-    op2DefinedOr,
     op2ChainedList,
     op1Exit,
+    op1Return,
     -- used by Pugs.Compile.Haskell
     op0, op1, op2,
     -- used Pugs.Eval
     foldParam, op2Hyper, op1HyperPrefix, op1HyperPostfix,
-    -- horrible hack for at-exit finalization
-    _GlobalFinalizer,
 ) where
 import Pugs.Internals
 import Pugs.Junc
@@ -30,9 +28,11 @@ import Pugs.AST
 import Pugs.Types
 import Pugs.Monads
 import Pugs.Pretty
+import Pugs.DeepSeq
 import Text.Printf
 import Pugs.External
 import Pugs.Embed
+import Pugs.Eval.Var
 import qualified Data.Map as Map
 import Data.IORef
 import System.IO.Error (isEOFError)
@@ -47,10 +47,6 @@ import Pugs.Prim.Lifts
 import Pugs.Prim.Eval
 import Pugs.Prim.Code
 import Pugs.Prim.Param
-
-{-# NOINLINE _GlobalFinalizer #-}
-_GlobalFinalizer :: IORef (IO ())
-_GlobalFinalizer = unsafePerformIO $ newIORef (return ())
 
 -- |Implementation of 0-ary and variadic primitive operators and functions
 -- (including list ops).
@@ -75,7 +71,6 @@ op0 "times"  = const $ do
     ProcessTimes _ u s cu cs <- guardIO getProcessTimes
     return . VList $ map (castV . (% (clocksPerSecond :: VInt)) . toInteger . fromEnum)
         [u, s, cu, cs]
-op0 "so" = const (return $ VBool True)
 op0 "¥" = op0Zip
 op0 "Y" = op0 "¥"
 op0 "File::Spec::cwd" = const $ do
@@ -85,6 +80,7 @@ op0 "File::Spec::tmpdir" = const $ do
     tmp <- guardIO getTemporaryDirectory
     return $ VStr tmp
 op0 "pi" = const $ return (VNum pi)
+op0 "self" = const $ evalExp $ Var "$?SELF"
 op0 "say" = const $ op1 "IO::say" (VHandle stdout)
 op0 "print" = const $ op1 "IO::print" (VHandle stdout)
 op0 "return" = const $ op1Return (shiftT . const $ retEmpty)
@@ -101,13 +97,6 @@ op1 "id" = \x -> do
     case val of
         VObject o   -> return . castV . hashUnique $ objId o
         _           -> return undef
-op1 "clone" = \x -> do
-    (VObject o) <- fromVal x
-    attrs   <- readIVar (IHash $ objAttrs o)
-    attrs'  <- liftSTM $ newTVar Map.empty
-    uniq    <- liftIO $ newUnique
-    writeIVar (IHash attrs') attrs
-    return $ VObject o{ objAttrs = attrs', objId = uniq }
 op1 "chop" = \x -> do
     str <- fromVal x
     if null str
@@ -224,6 +213,7 @@ op1 "\\"   = \v -> do
         (VRef _)    -> v
         (VList vs)  -> VRef . arrayRef $ vs
         _           -> VRef . scalarRef $ v
+op1 "^" = op2RangeExclRight (VNum 0)
 op1 "post:..."  = op1Range
 op1 "true" = op1 "?"
 op1 "any"  = op1Cast opJuncAny
@@ -231,6 +221,7 @@ op1 "all"  = op1Cast opJuncAll
 op1 "one"  = op1Cast opJuncOne
 op1 "none" = op1Cast opJuncNone
 op1 "perl" = fmap VStr . prettyVal 0
+op1 "yaml" = dumpYaml 1024 -- number == max recursion depth
 op1 "require_haskell" = \v -> do
     name    <- fromVal v
     externRequire "Haskell" name
@@ -250,7 +241,12 @@ op1 "Pugs::Internals::eval_parrot" = \v -> do
     code    <- fromVal v
     liftIO . evalParrot $ case code of
         ('.':_) -> code
-        _       -> ".sub pugs_eval_parrot\n" ++ code ++ "\n.end\n"
+        _       -> unlines
+            [ ".sub pugs_eval_parrot"
+            -- , "trace 1"
+            , code
+            , ".end"
+            ]
     return $ VBool True
 op1 "use" = opRequire True
 op1 "require" = opRequire False
@@ -279,8 +275,19 @@ op1 "try" = \v -> do
                              ,evalError=EvalErrorUndef}
 -- Tentative implementation of nothingsmuch's lazy proposal.
 op1 "lazy" = \v -> do
-    sub <- fromVal v
-    return $ VRef . thunkRef . MkThunk . evalExp $ App (Val $ VCode sub) Nothing []
+    sub     <- fromVal v
+    result  <- liftSTM $ newTVar Nothing
+    let exp = App (Val $ VCode sub) Nothing []
+        thunk = do
+            cur <- liftSTM $ readTVar result
+            maybe eval return cur
+        eval = do
+            res <- evalExp exp
+            liftSTM $ writeTVar result (Just res)
+            return res
+    typ <- inferExpType exp
+    return . VRef . thunkRef $ MkThunk thunk typ
+
 op1 "defined" = op1Cast (VBool . defined)
 op1 "last" = const $ fail "cannot last() outside a loop"
 op1 "next" = const $ fail "cannot next() outside a loop"
@@ -311,35 +318,35 @@ op1 "Pugs::Safe::safe_print" = \v -> do
     guardIO $ hPutStr stdout $ encodeUTF8 str
     return $ VBool True
 op1 "die" = \v -> do
-    strs <- fromVal v
-    fail (errmsg . concat $ strs)
-    -- To avoid the uncatchable error "Prelude.last: empty list" and to present
-    -- a nicer error message to the user.
+    pos <- asks envPos
+    shiftT . const . return $ VError (errmsg v) [pos]
     where
-    errmsg "" = "Died"
-    errmsg x  = x
+    errmsg VUndef      = VStr "Died"
+    errmsg (VStr "")   = VStr "Died"
+    errmsg (VList [])  = VStr "Died"
+    errmsg (VList [x]) = x
+    errmsg x           = x
 op1 "warn" = \v -> do
     strs <- fromVal v
     errh <- readVar "$*ERR"
     pos  <- asks envPos
     op2 "IO::say" errh $ VList [ VStr $ pretty (VError (errmsg strs) [pos]) ]
     where
-    errmsg "" = "Warning: something's wrong"
-    errmsg x  = x
+    errmsg "" = VStr "Warning: something's wrong"
+    errmsg x  = VStr x
+op1 "fail" = op1 "fail_" -- XXX - to be replaced by Prelude later
 op1 "fail_" = \v -> do
-    strs  <- fromVal v
     throw <- fromVal =<< readVar "$?FAIL_SHOULD_DIE"
+    if throw then op1 "die" (errmsg v) else do
     pos   <- asks envPos
-    let msg = pretty (VError (errmsg strs) [pos]) ++ "\n"
-    if throw
-        -- "use fatal" is in effect, so die.
-        then fail msg
-        -- We've to return a unthrown exception.
-        -- The error message to output
-        else shiftT . const $ return . VRef . thunkRef . MkThunk $ fail msg
+    let die = shiftT . const . return $ VError (errmsg v) [pos]
+    shiftT . const . return . VRef . thunkRef $ MkThunk die anyType
     where
-    errmsg "" = "Failed"
-    errmsg x  = x
+    errmsg VUndef      = VStr "Failed"
+    errmsg (VStr "")   = VStr "Failed"
+    errmsg (VList [])  = VStr "Failed"
+    errmsg (VList [x]) = x
+    errmsg x           = x
 op1 "exit" = op1Exit
 op1 "readlink" = \v -> do
     str  <- fromVal v
@@ -365,7 +372,7 @@ op1 "-s"    = FileTest.fileSize
 op1 "-f"    = FileTest.isFile
 op1 "-d"    = FileTest.isDirectory
 op1 "List::end"   = op1Cast (VInt . (-1 +) . (genericLength :: VList -> VInt))
-op1 "List::elems" = op1Cast (VInt . (genericLength :: VList -> VInt))
+op1 "elems" = op1Cast (VInt . (genericLength :: VList -> VInt))
 op1 "graphs"= op1Cast (VInt . (genericLength :: String -> VInt)) -- XXX Wrong
 op1 "codes" = op1Cast (VInt . (genericLength :: String -> VInt))
 op1 "chars" = op1Cast (VInt . (genericLength :: String -> VInt))
@@ -539,8 +546,8 @@ op1 "getc"     = \v -> op1Read v (getChar) (getChar)
             return $ char:new
 
 op1 "ref"   = fmap VType . evalValType
-op1 "pop"   = \x -> join $ doArray x array_pop -- monadic join
-op1 "shift" = \x -> join $ doArray x array_shift -- monadic join
+op1 "List::pop"   = \x -> join $ doArray x array_pop -- monadic join
+op1 "List::shift" = \x -> join $ doArray x array_shift -- monadic join
 op1 "pick"  = op1Pick
 op1 "sum"   = op1Sum
 op1 "min"   = op1Min
@@ -548,7 +555,8 @@ op1 "max"   = op1Max
 op1 "uniq"  = op1Uniq
 op1 "chr"   = op1Cast (VStr . (:[]) . chr)
 op1 "ord"   = op1Cast $ \str -> if null str then undef else (castV . ord . head) str
-op1 "hex"   = op1Cast (VInt . read . ("0x"++))
+op1 "hex"   = fail "hex() is not part of Perl 6 - use :16() instead."
+op1 "oct"   = fail "oct() is not part of Perl 6 - use :8() instead."
 op1 "log"   = op1Cast (VNum . log)
 op1 "log10" = op1Cast (VNum . logBase 10)
 op1 "from"  = op1Cast (castV . matchFrom)
@@ -572,6 +580,8 @@ op1 "IO::tell"    = \v -> do
     h <- fromVal v
     res <- guardIO $ hTell h
     return $ VInt res
+op1 "Rat::numerator" = \(VRat t) -> return . VInt $ numerator t
+op1 "Rat::denominator" = \(VRat t) -> return . VInt $ denominator t
 op1 "TEMP" = \v -> do
     ref <- fromVal v
     val <- readRef ref
@@ -613,6 +623,7 @@ op1 "Pugs::Internals::caller_pragma_value" = \v -> do
     case caller of
         Just env -> local (const env) (op1 "Pugs::Internals::current_pragma_value" v)
         _        -> return $ VUndef
+op1 "**"    = \v -> return $ deepSeq v v
 op1 other   = \_ -> fail ("Unimplemented unaryOp: " ++ other)
 
 op1IO :: Value a => (Handle -> IO a) -> Val -> Eval Val
@@ -620,10 +631,15 @@ op1IO = \fun v -> do
     val <- fromVal v
     fmap castV (guardIO $ fun val)
 
+{-
 returnList :: [Val] -> Eval Val
 returnList vals = ifListContext
     (return . VRef $ arrayRef vals)
     (return . VList $ vals)
+-}
+
+returnList :: [Val] -> Eval Val
+returnList = return . VList
 
 op1WalkAllNoArgs :: ([VStr] -> [VStr]) -> VStr -> Val -> Eval Val
 op1WalkAllNoArgs f meth v = do
@@ -642,7 +658,7 @@ op1WalkAll f meth v hashval = do
         let sym = ('&':pkg) ++ "::" ++ meth
         maybeM (fmap (findSym sym) askGlobal) $ \_ -> do
             enterEvalContext CxtVoid (App (Var sym) (Just $ Val v)
-                [ App (Var "&infix:=>") Nothing [Val (VStr key), Val val]
+                [ Syn "named" [Val (VStr key), Val val]
                 | (key, val) <- Map.assocs named ])
     return undef
 
@@ -651,12 +667,16 @@ op1Return action = do
     depth <- asks envDepth
     if depth == 0 then fail "cannot return() outside a subroutine" else do
     sub   <- fromVal =<< readVar "&?SUB"
+    -- If this is a coroutine, reset the entry point
     case subCont sub of
-        {- shiftT :: ((a -> Eval Val) -> Eval Val) -> Eval a -}
-        {- const :: a -> b -> a -}
-        {- FIXME: This should involve shiftT somehow, I think, but I'm not clear how. -}
         Nothing -> action
-        _       -> fail $ "cannot return() from a " ++ pretty (subType sub)
+        Just tvar -> do
+            let thunk = (`MkThunk` anyType) . fix $ \redo -> do
+                evalExp $ subBody sub
+                liftSTM $ writeTVar tvar thunk
+                redo
+            liftSTM $ writeTVar tvar thunk
+            action
 
 op1Yield :: Eval Val -> Eval Val
 op1Yield action = do
@@ -666,7 +686,7 @@ op1Yield action = do
     case subCont sub of
         Nothing -> fail $ "cannot yield() from a " ++ pretty (subType sub)
         Just tvar -> callCC $ \esc -> do
-            liftSTM $ writeTVar tvar (MkThunk (esc undef))
+            liftSTM $ writeTVar tvar (MkThunk (esc undef) anyType)
             action
 
 op1ShiftOut :: Val -> Eval Val
@@ -815,7 +835,7 @@ op2 "ge" = op2Cmp vCastStr (>=)
 op2 "~~" = op2Match
 op2 "!~" = \x y -> op1Cast (VBool . not) =<< op2Match x y
 op2 "=:=" = op2Identity -- XXX wrong, needs to compare container only
-op2 "eqv" = op2Identity -- XXX wrong, needs to compare objects only
+op2 "===" = op2Identity -- XXX wrong, needs to compare objects only
 op2 "&&" = op2Logical (fmap not . fromVal)
 op2 "||" = op2Logical (fmap id . fromVal)
 op2 "^^" = \x y -> do
@@ -942,7 +962,37 @@ op2 "Pugs::Internals::install_pragma_value" = \x y -> do
     liftSTM $ writeTVar idat idatval{initPragmas = 
         MkPrag{ pragName=name, pragDat=val } : prag }
     return (VBool True)
+op2 "Pugs::Internals::base" = \x y -> do
+    base <- fromVal x
+    case y of
+        VRef{}  -> op2BasedDigits base =<< fromVal y
+        VList xs-> op2BasedDigits base =<< fromVal y
+        _       -> do
+            str <- fromVal y
+            op2BasedDigits base [ s | Just s <- map baseDigit str ]
 op2 other = \_ _ -> fail ("Unimplemented binaryOp: " ++ other)
+
+baseDigit :: Char -> Maybe Val
+baseDigit '.'       = return (VStr ".")
+baseDigit ch | ch >= '0' && ch <= '9' = return (castV (ord ch - ord '0'))
+baseDigit ch | ch >= 'a' && ch <= 'z' = return (castV (ord ch - ord 'a' + 10))
+baseDigit ch | ch >= 'A' && ch <= 'Z' = return (castV (ord ch - ord 'A' + 10))
+baseDigit _         = Nothing
+
+op2BasedDigits :: VInt -> [Val] -> Eval Val
+op2BasedDigits base vs
+    | null post = do
+        pre' <- mapM fromVal pre
+        return $ VInt (asIntegral pre')
+    | otherwise = do
+        pre'  <- mapM fromVal pre
+        post' <- mapM fromVal $ tail post
+        return $ VRat (asFractional (0:post') + (asIntegral pre' % 1))
+    where
+    (pre, post) = break (== VStr ".") $ filter (/= VStr "_") vs
+    asIntegral = foldl (\x d -> base * x + d) 0
+    asFractional :: [VInt] -> VRat
+    asFractional = foldr (\d x -> (x / (base % 1)) + (d % 1)) (0 % 1)
 
 op2Print :: (Handle -> String -> IO ()) -> Val -> Val -> Eval Val
 op2Print f h v = do
@@ -1047,10 +1097,19 @@ op3 "Object::new" = \t n p -> do
     -- Now start calling BUILD for each of parent classes (if defined)
     op2 "BUILDALL" obj $ (VRef . hashRef) named
     -- Register finalizers by keeping weakrefs somehow
-    guardIO $ do
+    liftIO $ do
         objRef <- mkWeakPtr obj (Just $ objectFinalizer env obj)
         modifyIORef _GlobalFinalizer (>> finalize objRef)
     return obj
+op3 "Object::clone" = \t n p -> do
+    named <- fromVal n
+    (VObject o) <- fromVal t
+    attrs   <- readIVar (IHash $ objAttrs o)
+    attrs'  <- liftSTM $ newTVar Map.empty
+    uniq    <- liftIO $ newUnique
+    writeIVar (IHash attrs') (named `Map.union` attrs)
+    return $ VObject o{ objAttrs = attrs', objId = uniq }
+
 op3 "Pugs::Internals::localtime"  = \x y z -> do
     wantString <- fromVal x
     sec <- fromVal y
@@ -1202,9 +1261,6 @@ op2Logical f x y = do
     ref <- fromVal y
     forceRef ref
 
-op2DefinedOr :: Val
-op2DefinedOr = undefined
-
 op2Identity :: Val -> Val -> Eval Val
 op2Identity (VObject x) (VObject y) = return $ VBool (objId x == objId y)
 op2Identity (VRef ref) y = do
@@ -1283,7 +1339,7 @@ op3Caller kind skip _ = do                                 -- figure out label
 -- the default is 'op0'.
 -- The Pad symbol name is prefixed with \"&*\" for functions and
 -- \"&*\" ~ fixity ~ \":\" for operators.
-primOp :: String -> String -> Params -> String -> Bool -> STM (Pad -> Pad)
+primOp :: String -> String -> Params -> String -> Bool -> STM (PadMutator)
 primOp sym assoc prms ret isSafe =
     -- In safemode, we filter all prims marked as "unsafe".
     if (not isSafe) && safeMode
@@ -1333,7 +1389,7 @@ primOp sym assoc prms ret isSafe =
         other       -> (0, other, True)
 
 -- |Produce a Pad update transaction with 'primOp' from a string description
-primDecl :: String -> STM (Pad -> Pad)
+primDecl :: String -> STM PadMutator
 primDecl str = primOp sym assoc params ret (safe == "safe")
     where
     (ret:assoc:sym:safe:prms) = words str
@@ -1366,13 +1422,20 @@ prettyVal d v@(VRef r) = do
         )
 prettyVal d (VList vs) = do
     vs' <- mapM (prettyVal (d+1)) vs
-    return $ "(" ++ concat (intersperse ", " vs') ++ ")"
+    -- (3,) should dump as (3,), not a (3), which would be the same as 3.
+    return $ case vs' of
+        []  -> "()"
+        [x] -> "(" ++ x ++ ",)"
+        _   -> "(" ++ concat (intersperse ", " vs') ++ ")"
 prettyVal d v@(VObject obj) = do
     -- ... dump the objAttrs
+    -- XXX this needs fixing WRT demagicalized pairs:
+    -- currently, this'll return Foo.new((attr => "value)), with the inner
+    -- parens, which is, of course, wrong.
     hash    <- fromVal v :: Eval VHash
     str     <- prettyVal d (VRef (hashRef hash))
     return $ showType (objType obj)
-        ++ ".new(" ++ init (tail str) ++ ");"
+        ++ ".new(" ++ init (tail str) ++ ")"
 prettyVal _ v = return $ pretty v
 
 -- | Call object destructors when GC takes them away
@@ -1392,7 +1455,7 @@ objectFinalizer env obj = do
 --  The source string format is:
 --
 -- >  ret_val   assoc   op_name [safe|unsafe] args
-initSyms :: STM [Pad -> Pad]
+initSyms :: STM [PadMutator]
 initSyms = mapM primDecl syms
     where
     syms = filter (not . null) . lines $ decodeUTF8 "\
@@ -1409,6 +1472,7 @@ initSyms = mapM primDecl syms
 \\n   Num       pre     sin     safe   (?Num=$_)\
 \\n   Num       pre     tan     safe   (?Num=$_)\
 \\n   Any       pre     pi      safe   ()\
+\\n   Any       pre     self    safe   ()\
 \\n   Bool      pre     nothing safe   ()\
 \\n   Num       pre     exp     safe   (?Num=$_, ?Num)\
 \\n   Num       pre     sqrt    safe   (?Num=$_)\
@@ -1439,11 +1503,12 @@ initSyms = mapM primDecl syms
 \\n   Int       spre    ~^      safe   (Str)\
 \\n   Bool      spre    ?^      safe   (Bool)\
 \\n   Ref       spre    \\      safe   (rw!Any)\
+\\n   List      spre    ^       safe   (Scalar)\
 \\n   List      post    ...     safe   (Str)\
 \\n   List      post    ...     safe   (Scalar)\
 \\n   Any       pre     undef     safe   ()\
 \\n   Any       pre     undefine  safe   (?rw!Any)\
-\\n   Str       pre     chop    safe   (?rw!Str=$_)\
+\\n   Str       pre     chop    safe   (?Str=$_)\
 \\n   Str       pre     chomp   safe   (?Str=$_)\
 \\n   Any       right   =       safe   (rw!Any, Any)\
 \\n   Int       pre     index   safe   (Str, Str, ?Int=0)\
@@ -1454,9 +1519,13 @@ initSyms = mapM primDecl syms
 \\n   Str       pre     uc      safe   (?Str=$_)\
 \\n   Str       pre     ucfirst safe   (?Str=$_)\
 \\n   Str       pre     capitalize safe   (?Str=$_)\
-\\n   Any       post    ++      safe   (rw!Num)\
+\\n   Str       post    ++      safe   (rw!Str)\
+\\n   Str       post    --      safe   (rw!Str)\
+\\n   Num       post    ++      safe   (rw!Num)\
 \\n   Num       post    --      safe   (rw!Num)\
-\\n   Any       spre    ++      safe   (rw!Num)\
+\\n   Str       spre    ++      safe   (rw!Str)\
+\\n   Str       spre    --      safe   (rw!Str)\
+\\n   Num       spre    ++      safe   (rw!Num)\
 \\n   Num       spre    --      safe   (rw!Num)\
 \\n   Bool      pre     not     safe   (List)\
 \\n   Bool      pre     true    safe   (Bool)\
@@ -1475,8 +1544,8 @@ initSyms = mapM primDecl syms
 \\n   Any       pre     splice  safe   (rw!Array, Int, Int, List)\
 \\n   Int       pre     push    safe   (rw!Array, List)\
 \\n   Int       pre     unshift safe   (rw!Array, List)\
-\\n   Scalar    pre     pop     safe   (rw!Array)\
-\\n   Scalar    pre     shift   safe   (rw!Array)\
+\\n   Scalar    pre     List::pop     safe   (rw!Array)\
+\\n   Scalar    pre     List::shift   safe   (rw!Array)\
 \\n   Scalar    pre     sum     safe   (List)\
 \\n   Scalar    pre     min     safe   (List)\
 \\n   Scalar    pre     max     safe   (List)\
@@ -1507,6 +1576,7 @@ initSyms = mapM primDecl syms
 \\n   Any       pre     Pugs::Internals::eval_perl5   unsafe (Str)\
 \\n   Any       pre     Pugs::Internals::eval_haskell unsafe (Str)\
 \\n   Any       pre     Pugs::Internals::eval_yaml    safe   (Str)\
+\\n   Str       pre     yaml    safe   (rw!Any|Junction|Pair)\
 \\n   Any       pre     require unsafe (?Str=$_)\
 \\n   Any       pre     use     unsafe (?Str=$_)\
 \\n   Any       pre     require_haskell unsafe (Str)\
@@ -1541,9 +1611,10 @@ initSyms = mapM primDecl syms
 \\n   Bool      pre     close   unsafe (IO)\
 \\n   Bool      pre     flush   unsafe (IO)\
 \\n   Bool      pre     close   unsafe (Socket)\
-\\n   Bool      pre     die     safe   (List)\
+\\n   Bool      pre     die     safe   (?Object)\
 \\n   Bool      pre     warn    safe   (List)\
-\\n   Bool      pre     fail_   safe   (List)\
+\\n   Bool      pre     fail_   safe   (?Object)\
+\\n   Bool      pre     fail    safe   (?Object)\
 \\n   Socket    pre     listen  unsafe (Int)\
 \\n   Socket    pre     connect unsafe (Str, Int)\
 \\n   Any       pre     accept  unsafe (Any)\
@@ -1571,7 +1642,7 @@ initSyms = mapM primDecl syms
 \\n   Bool      pre     rmdir   unsafe (?Str=$_)\
 \\n   Bool      pre     mkdir   unsafe (Str)\
 \\n   Bool      pre     chdir   unsafe (Str)\
-\\n   Int       pre     List::elems   safe   (Array)\
+\\n   Int       pre     elems   safe   (Array)\
 \\n   Int       pre     List::end     safe   (Array)\
 \\n   Int       pre     graphs  safe   (?Str=$_)\
 \\n   Int       pre     codes   safe   (?Str=$_)\
@@ -1615,6 +1686,7 @@ initSyms = mapM primDecl syms
 \\n   Str       left    ~&      safe   (Str, Str)\
 \\n   Str       left    ~<      safe   (Str, Str)\
 \\n   Str       left    ~>      safe   (Str, Str)\
+\\n   Any       spre    **      safe   (Any)\
 \\n   Num       right   **      safe   (Num, Num)\
 \\n   Num       left    +       safe   (Num, Num)\
 \\n   Num       left    -       safe   (Num, Num)\
@@ -1634,7 +1706,7 @@ initSyms = mapM primDecl syms
 \\n   Bool      chain   !=      safe   (Num, Num)\
 \\n   Bool      chain   ==      safe   (Num, Num)\
 \\n   Bool      chain   =:=     safe   (rw!Any, rw!Any)\
-\\n   Bool      chain   eqv     safe   (Any, Any)\
+\\n   Bool      chain   ===     safe   (Any, Any)\
 \\n   Bool      chain   ~~      safe   (rw!Any, Any)\
 \\n   Bool      chain   !~      safe   (Any, Any)\
 \\n   Bool      chain   <       safe   (Num, Num)\
@@ -1663,11 +1735,11 @@ initSyms = mapM primDecl syms
 \\n   Scalar    left    err     safe   (Bool, ~Bool)\
 \\n   Str       pre     chr     safe   (?Int=$_)\
 \\n   Int       pre     ord     safe   (?Str=$_)\
-\\n   Str       pre     hex     safe   (?Str=$_)\
+\\n   Str       pre     oct     safe   (?Str=$_)\
 \\n   Int       pre     from    safe   (Match)\
 \\n   Int       pre     to      safe   (Match)\
 \\n   List      pre     matches safe   (Match)\
-\\n   Str       pre     hex     safe   (Int)\
+\\n   Str       pre     oct     safe   (Int)\
 \\n   Num       pre     log     safe   (Int)\
 \\n   Num       pre     log     safe   (Num)\
 \\n   Num       pre     log10   safe   (Num)\
@@ -1679,8 +1751,10 @@ initSyms = mapM primDecl syms
 \\n   Object    pre     BUILDALL   safe   (Object)\
 \\n   Object    pre     DESTROYALL safe   (Object)\
 \\n   Code      pre     TEMP    safe   (rw!Any)\
-\\n   Object    pre     clone   safe   (Any)\
+\\n   Object    pre     Object::clone   safe   (Object: Named)\
 \\n   Object    pre     id      safe   (Any)\
+\\n   Int       pre     Rat::numerator   safe   (Rat:)\
+\\n   Int       pre     Rat::denominator safe   (Rat:)\
 \\n   Bool      pre     Thread::yield   safe   (Thread)\
 \\n   List      pre     Pugs::Internals::runInteractiveCommand  unsafe (Str)\
 \\n   Bool      pre     Pugs::Internals::hSetBinaryMode         unsafe (IO, Str)\
@@ -1713,4 +1787,5 @@ initSyms = mapM primDecl syms
 \\n   Int       pre     Pugs::Internals::install_pragma_value safe (Str, Int)\
 \\n   Bool      pre     Pugs::Internals::current_pragma_value safe (Str)\
 \\n   Bool      pre     Pugs::Internals::caller_pragma_value safe (Str)\
+\\n   Num       pre     Pugs::Internals::base      safe (Int, Any)\
 \\n"

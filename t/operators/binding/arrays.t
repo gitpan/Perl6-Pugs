@@ -5,11 +5,11 @@ use Test;
 
 # L<S03/"Binding">
 
-plan 43;
+plan 46;
 
 # Binding of array elements.
 # See thread "Binding of array elements" on p6l started by Ingo Blechschmidt:
-# http://www.nntp.perl.org/group/perl.perl6.language/22915
+# L<"http://www.nntp.perl.org/group/perl.perl6.language/22915">
 {
   my @array  = <a b c>;
   my $var    = "d";
@@ -204,4 +204,20 @@ plan 43;
   is $var,        "f",     "array binding does not create new containers (2)";
   is ~@array,     "a f c", "array binding does not create new containers (3)";
   is ~@new_array, "a f c", "array binding does not create new containers (4)";
+}
+
+# Binding @array := $arrayref.
+# See
+# http://colabti.de/irclogger/irclogger_log/perl6?date=2005-11-06,Sun&sel=388#l564
+# and consider the magic behind parameter binding (which is really normal
+# binding).
+{
+  my $arrayref  = [<a b c>];
+  my @array    := $arrayref;
+
+  is +@array, 3,          'binding @array := $arrayref works (1)';
+
+  @array[1] = "B";
+  is ~$arrayref, "a B c", 'binding @array := $arrayref works (2)';
+  is ~@array,    "a B c", 'binding @array := $arrayref works (3)';
 }

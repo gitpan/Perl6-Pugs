@@ -3,21 +3,22 @@
 use v6;
 use Test;
 
-# L<S02/Names and Variables /To get a Perlish representation of any data value/>
+# L<S02/"Names and Variables" /To get a Perlish representation of any data value/>
 
 my @tests = (
     # Basic scalar values
-    42, 3e5, Inf, -Inf, NaN,
-    "a string", "", "\0", "\t", "\n", "\r\n",
+    42, 42/10, 4.2, sqrt(2), 3e5, Inf, -Inf, NaN,
+    "a string", "", "\0", "\t", "\n", "\r\n", "\7", '{', '}', "\123", '$a @string %with &sigils()',
     ?1, ?0,
     undef,
+    rx:Perl5{foo}, rx:Perl5{}, rx:Perl5{^.*$},
 
     # References to scalars
-    \42, \Inf, \"string", \"", \?1, \?0, \undef,
+    \42, \Inf, \-Inf, \NaN, \"string", \"", \?1, \?0, \undef,
 
     # Pairs - XXX - Very Broken - FIXME!
-#    (a => 1),
-#    :b(2),
+    (a => 1),
+    :b(2),
 
     # References to aggregates
     [],      # empty array
@@ -42,7 +43,7 @@ my @tests = (
 );
 
 plan 7 + 2*@tests;
-force_todo 4, 7..8, 49..50, 53..54, 59..61, 64, 66, 68;
+force_todo 8, 45..50, 94, 96;
 
 unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
   skip_rest "eval() not yet implemented in $?PUGS_BACKEND.";
@@ -50,6 +51,7 @@ unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
 }
 
 
+# L<S02/"Names and Variables" /to get a Perlish representation/>
 # Quoting S02 (emphasis added):
 #   To get a Perlish representation of any data value, use the .perl method.
 #   This will put quotes around strings, square brackets around list values,
@@ -58,9 +60,9 @@ unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
 {
     for @tests -> $obj {
         is ~$obj.perl.eval, ~$obj,
-            ".perl returned something whose eval()ed stringification is unchanged";
+            "($obj.perl()).perl returned something whose eval()ed stringification is unchanged";
         is $obj.perl.eval.ref, $obj.ref,
-            ".perl returned something whose eval()ed .ref is unchanged";
+            "($obj.perl()).perl returned something whose eval()ed .ref is unchanged";
     }
 }
 
@@ -70,7 +72,7 @@ unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
     is $foo[1][1][1][0], 42, "basic recursive arrayref";
 
     # XXX hangs
-    fail "skipping hanging test";
+    flunk "skipping hanging test", :todo<feature>;
     #is ~$foo.perl.eval, ~$foo,
     #    ".perl worked correctly on a recursive arrayref";
 }
@@ -80,7 +82,7 @@ unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
     is $foo<b><b><b><a>, 42, "basic recursive hashref";
 
     # XXX hangs
-    fail "skipping hanging test";
+    flunk "skipping hanging test", :todo<feature>;
     #is ~$foo.perl.eval, ~$foo,
     #    ".perl worked correctly on a recursive hashref";
 }
@@ -94,7 +96,7 @@ unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
     is $foo[1]<b>[1]<b>[0], 42, "mixed arrayref/hashref recursive structure";
 
     # XXX hangs
-    fail "skipping hanging test";
+    flunk "skipping hanging test", :todo<feature>;
     #is ~$foo.perl.eval, ~$foo,
     #    ".perl worked correctly on a mixed arrayref/hashref recursive structure";
 }

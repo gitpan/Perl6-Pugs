@@ -8,7 +8,7 @@ $Test::ALWAYS_CALLER = %ENV<TEST_ALWAYS_CALLER>;
 ### GLOBALS
 
 # globals to keep track of our tests
-$Test::num_of_tests_run    = 0; 
+$Test::num_of_tests_run    = 0;
 $Test::num_of_tests_failed = 0;
 $Test::num_of_tests_badpass = 0;
 $Test::num_of_tests_planned;
@@ -35,51 +35,51 @@ sub force_todo (*@todo_tests) returns Void is export {
 
 ## ok
 
-sub ok (Bool $cond, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub ok (Bool $cond, Str $desc?, :$todo, :$depends) returns Bool is export {
     Test::proclaim($cond, $desc, $todo, :depends($depends));
 }
 
 ## is
 
-sub is (Str $got, Str $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub is (Str $got, Str $expected, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $test := $got eq $expected;
     Test::proclaim($test, $desc, $todo, $got, $expected, $depends);
 }
 
 ## is_deeply
-sub is_deeply(Any $wanted, Any $got, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub is_deeply(Any $got, Any $expected, Str $desc?, :$todo, :$depends) returns Bool is export {
     # hack for now
     my $got_perl = $got.perl;
-    my $wanted_perl = $wanted.perl;
-    my $test := ($got_perl eq $wanted_perl);
-    Test::proclaim($test, $desc, $todo, $got_perl, $wanted_perl, $depends);
+    my $expected_perl = $expected.perl;
+    my $test := ($got_perl eq $expected_perl);
+    Test::proclaim($test, $desc, $todo, $got_perl, $expected_perl, $depends);
 }
 
 
 ## isnt
 
-sub isnt (Str $got, Str $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub isnt (Str $got, Str $expected, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $test := not($got eq $expected);
     Test::proclaim($test, "Should not match: $desc", $todo, $got, $expected, $depends, :negate);
 }
 
 ## like
 
-sub like (Str $got, Rule $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub like (Str $got, Rule $expected, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $test := $got ~~ $expected;
     Test::proclaim($test, $desc, $todo, $got, $expected, $depends);
 }
 
 ## unlike
 
-sub unlike (Str $got, Rule $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub unlike (Str $got, Rule $expected, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $test := not($got ~~ $expected);
     Test::proclaim($test, $desc, $todo, $got, $expected, $depends, :negate);
 }
 
 ## eval_ok
 
-sub eval_ok (Str $code, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub eval_ok (Str $code, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $result := eval $code;
     if (defined $!) {
         Test::proclaim(undef, $desc, $todo, "eval was fatal: $!", :depends($depends));
@@ -92,7 +92,7 @@ sub eval_ok (Str $code, Str ?$desc, +$todo, +$depends) returns Bool is export {
 
 ## eval_is
 
-sub eval_is (Str $code, Str $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub eval_is (Str $code, Str $expected, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $result := eval $code;
     if (defined $!) {
         Test::proclaim(undef, $desc, $todo, "eval was fatal: $!", $expected, $depends);
@@ -105,14 +105,14 @@ sub eval_is (Str $code, Str $expected, Str ?$desc, +$todo, +$depends) returns Bo
 
 ## cmp_ok
 
-sub cmp_ok (Str $got, Code &compare_func, Str $expected, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub cmp_ok (Str $got, Code &compare_func, Str $expected, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $test := compare_func($got, $expected);
     Test::proclaim($test, $desc, $todo, $got, "&compare_func.name() $expected", $depends);
 }
 
 ## isa_ok
 
-sub isa_ok (Any|Junction|Pair $ref is rw, Str $expected_type, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub isa_ok (Any|Junction|Pair $ref is rw, Str $expected_type, Str $desc?, :$todo, :$depends) returns Bool is export {
     my $out := defined($desc) ?? $desc !! "The object is-a '$expected_type'";
     my $test := $ref.isa($expected_type);
     Test::proclaim($test, $out, $todo, $ref.ref, $expected_type, $depends);
@@ -120,15 +120,15 @@ sub isa_ok (Any|Junction|Pair $ref is rw, Str $expected_type, Str ?$desc, +$todo
 
 ## use_ok
 
-sub use_ok (Str $module, +$todo, +$depends) is export {
+sub use_ok (Str $module, :$todo, :$depends) is export {
     my $caller = caller().package;
-    
+
     eval "package $caller; require $module";
-    
+
     #try {
     #    &::($module)::import.goto();
     #};
-    
+
     if ($!) {
         Test::proclaim(undef, "require $module;", $todo, "Import error when loading $module: $!", :depends($depends));
     }
@@ -139,7 +139,7 @@ sub use_ok (Str $module, +$todo, +$depends) is export {
 
 ## throws ok
 
-sub throws_ok (Code &code, Any $match, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub throws_ok (Code &code, Any $match, Str $desc?, :$todo, :$depends) returns Bool is export {
     try { code() };
     if ($!) {
         &Test::ok.goto($! ~~ $match, $desc, :todo($todo), :depends($depends));
@@ -151,7 +151,7 @@ sub throws_ok (Code &code, Any $match, Str ?$desc, +$todo, +$depends) returns Bo
 
 ## dies_ok
 
-sub dies_ok (Code &code, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub dies_ok (Code &code, Str $desc?, :$todo, :$depends) returns Bool is export {
     try { code() };
     if ($!) {
         &Test::ok.goto(1, $desc, :todo($todo));
@@ -163,7 +163,7 @@ sub dies_ok (Code &code, Str ?$desc, +$todo, +$depends) returns Bool is export {
 
 ## lives ok
 
-sub lives_ok (Code &code, Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub lives_ok (Code &code, Str $desc?, :$todo, :$depends) returns Bool is export {
     try { code() };
     if ($!) {
         Test::proclaim(undef, $desc, $todo, "An exception was thrown : $!", :depends($depends));
@@ -175,11 +175,11 @@ sub lives_ok (Code &code, Str ?$desc, +$todo, +$depends) returns Bool is export 
 
 ## misc. test utilities
 
-multi sub skip (Str ?$reason, +$depends) returns Bool is export {
+multi sub skip (Str $reason?, :$depends) returns Bool is export {
     Test::proclaim(1, "", "skip $reason", :depends($depends));
 }
 
-multi sub skip (Int $count, Str $reason, +$depends) returns Bool is export {
+multi sub skip (Int $count, Str $reason, :$depends) returns Bool is export {
     for (1 .. $count) {
         # Hack -- PIL2JS doesn't support multisubs correctly yet
         if $*OS eq "browser" {
@@ -190,15 +190,15 @@ multi sub skip (Int $count, Str $reason, +$depends) returns Bool is export {
     }
 }
 
-sub skip_rest (Str ?$reason, +$depends) returns Bool is export {
+sub skip_rest (Str $reason?, :$depends) returns Bool is export {
     Test::skip($Test::num_of_tests_planned - $Test::num_of_tests_run, $reason // "", :depends($depends));
 }
 
-sub pass (Str ?$desc) returns Bool is export {
+sub pass (Str $desc?) returns Bool is export {
     Test::proclaim(1, $desc);
 }
 
-sub fail (Str ?$desc, +$todo, +$depends) returns Bool is export {
+sub flunk (Str $desc?, :$todo, :$depends) returns Bool is export {
     Test::proclaim(0, $desc, $todo, :depends($depends));
 }
 
@@ -210,21 +210,21 @@ sub diag (Str $diag) is export {
 
 ## 'private' subs
 
-sub proclaim (Bool $cond, Str ?$desc is copy, ?$todo, Str ?$got, Str ?$expected, ?$depends, ?$negate) returns Bool {
+sub proclaim (Bool $cond, Str $desc? is copy, $todo?, Str $got?, Str $expected?, $depends?, $negate?) returns Bool {
     $Test::testing_started = 1;
     $Test::num_of_tests_run++;
 
     # $context is now the raw TODO, so we have to check it
     my $context;
 
-    # Check if we have to forcetodo this test 
+    # Check if we have to forcetodo this test
     # because we're preparing for a release.
     $context = "TODO for release"
         if $Test::num_of_tests_run == $Test::force_todo_test_junction;
 
     if $todo {
         if (substr($todo, 0, 4) eq 'skip') {
-            $context = $todo;        
+            $context = $todo;
         }
         else {
             $context =  "TODO" ~ ($todo.isa('Str') ?? " $todo" !! '');
@@ -240,6 +240,8 @@ sub proclaim (Bool $cond, Str ?$desc is copy, ?$todo, Str ?$got, Str ?$expected,
 
     my $out = $desc.defined ?? " - $desc" !! "";
     $out = "$out <pos:$?CALLER::CALLER::POSITION>" if $Test::ALWAYS_CALLER;
+    # message like "test #1 # TODO" confuse the harness. Escape desc #s.
+    $out ~~ s:P5:g/#/\\#/;
 
     my $context_out = $context.defined ?? " # $context" !! "";
 
@@ -251,7 +253,7 @@ sub proclaim (Bool $cond, Str ?$desc is copy, ?$todo, Str ?$got, Str ?$expected,
     return $cond;
 }
 
-sub report_failure (Str ?$todo, Str ?$got, Str ?$expected, Bool ?$negate) returns Bool {
+sub report_failure (Str $todo?, Str $got?, Str $expected?, Bool $negate?) returns Bool {
     if ($todo) {
         Test::diag("  Failed ($todo) test ($?CALLER::CALLER::CALLER::POSITION)");
     }
@@ -308,30 +310,30 @@ Test - Test support module for perl6
 
   use v6;
   require Test;
-  
+
   plan 10;
   force_todo(1, 3 .. 5, 9);
-  
+
   use_ok('Some::Module');
   use_ok('Some::Other::Module', todo => 1);
-  
+
   ok(2 + 2 == 4, '2 and 2 make 4');
   is(2 + 2, 4, '2 and 2 make 4');
   isa_ok([1, 2, 3], 'List');
-  
+
   ok(2 + 2 == 5, '2 and 2 make 5', :todo(1));
   is(2 + 2, 5, desc => '2 and 2 make 5', todo => 1);
   isa_ok({'one' => 1}, 'Hash', :todo(1));
-  
+
   use_ok('My::Module');
-  
+
   pass('This test passed');
-  fail('This test failed');
-  
+  flunk('This test failed');
+
   skip('skip this test for now');
-  
-  fail('this fails, but might work soon', :todo(1));
-  
+
+  flunk('this fails, but might work soon', :todo(1));
+
   diag('some misc comments and documentation');
 
 = DESCRIPTION
@@ -358,29 +360,29 @@ expected to run. This should be specified at the very top of your tests.
 
 If you have some tests which you would like to force into being TODO tests
 then you can pass them through this function. This is primarily a release
-tool, but can be useful in other contexts as well. 
+tool, but can be useful in other contexts as well.
 
 == Testing Functions
 
-- `use_ok (Str $module, Bool +$todo, Str +$depends) returns Bool`
+- `use_ok (Str $module, Bool :$todo, Str :$depends) returns Bool`
 
 *NOTE:* This function currently uses `require()` since Pugs does not yet have
 a proper `use()` builtin.
 
-- `ok (Bool $cond, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `ok (Bool $cond, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
-- `is (Str $got, Str $expected, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `is (Str $got, Str $expected, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
-- `isnt (Str $got, Str $expected, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `isnt (Str $got, Str $expected, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
-- `like (Str $got, Rule $expected, Str ?$desc, Bool +$todo, Str +$depends) returns Bool is export`
-- `unlike (Str $got, Rule $expected, Str ?$desc, Bool +$todo, Str +$depends) returns Bool is export`
+- `like (Str $got, Rule $expected, Str $desc?, Bool :$todo, Str :$depends) returns Bool is export`
+- `unlike (Str $got, Rule $expected, Str $desc?, Bool :$todo, Str :$depends) returns Bool is export`
 
 These functions should work with most reg-exps, but given that they are still a
 somewhat experimental feature in Pugs, it is suggested you don't try anything
 too funky.
 
-- `cmp_ok (Str $got, Code &compare_func, Str $expected, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `cmp_ok (Str $got, Code &compare_func, Str $expected, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
 This function will compare `$got` and `$expected` using `&compare_func`. This will
 eventually allow Test::More-style cmp_ok() though the following syntax:
@@ -392,27 +394,27 @@ a little while. Until then, you can just write your own functions like this:
 
   cmp_ok('test', sub ($a, $b) { ?($a gt $b) }, 'me', '... testing gt on two strings');
 
-- `isa_ok ($ref, Str $expected_type, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `isa_ok ($ref, Str $expected_type, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
 This function currently on checks with ref() since we do not yet have
 object support. Once object support is created, we will add it here, and
 maintain backwards compatibility as well.
 
-- `eval_ok (Str $code, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `eval_ok (Str $code, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
-- `eval_is (Str $code, Str $expected, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `eval_is (Str $code, Str $expected, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
 These functions will eval a code snippet, and then pass the result to is or ok
 on success, or report that the eval was not successful on failure.
 
-- `throws_ok (Code &code, Any $expected, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `throws_ok (Code &code, Any $expected, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
-This function takes a block of code and runs it. It then smart-matches (`~~`) any `$!` 
+This function takes a block of code and runs it. It then smart-matches (`~~`) any `$!`
 value with the `$expected` value.
 
-- `dies_ok (Code &code, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `dies_ok (Code &code, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
-- `lives_ok (Code &code, Str ?$desc, Bool +$todo, Str +$depends) returns Bool`
+- `lives_ok (Code &code, Str $desc?, Bool :$todo, Str :$depends) returns Bool`
 
 These functions both take blocks of code, run the code, and test whether they live or die.
 
@@ -429,24 +431,24 @@ could be started).  This is most useful when writing modules and you
 find there is some language feature missing, or core bug that needs to
 be sorted out before you can continue.
 
-It is also possible to use the `force_todo()` function to do large scale 
+It is also possible to use the `force_todo()` function to do large scale
 TODO-ing of tests.
 
 == Misc. Functions
 
-- `skip (Str ?$reason) returns Bool`
-- `skip (Int $count, Str ?$reason) returns Bool`
+- `skip (Str $reason?) returns Bool`
+- `skip (Int $count, Str $reason?) returns Bool`
 
 If for some reason a test is to be skipped, you can use this
 function to do so.
 
-- `pass (Str ?$desc) returns Bool`
+- `pass (Str $desc?) returns Bool`
 
 Sometimes what you need to test does not fit into one of the standard
 testing functions. In that case, you can use the rather blunt pass()
-functions and its compliment the fail() function.
+functions and its compliment the flunk() function.
 
-- `fail (Str ?$desc, Bool +$todo) returns Bool`
+- `flunk (Str $desc?, Bool :$todo) returns Bool`
 
 This is the opposite of pass()
 
@@ -475,10 +477,10 @@ sub which will be able to handle structures of arbitrary depth and of
 an arbitrary type. The function signatures will likely look something
 like this:
 
-  multi sub is_deeply (Array @got, Array @expected, Str ?$desc) returns Bool;
-  multi sub is_deeply (List  $got, List  $expected, Str ?$desc) returns Bool;
-  multi sub is_deeply (Hash  %got, Hash  %expected, Str ?$desc) returns Bool;
-  multi sub is_deeply (Pair  $got, Pair  $expected, Str ?$desc) returns Bool;
+  multi sub is_deeply (Array @got, Array @expected, Str $desc?) returns Bool;
+  multi sub is_deeply (List  $got, List  $expected, Str $desc?) returns Bool;
+  multi sub is_deeply (Hash  %got, Hash  %expected, Str $desc?) returns Bool;
+  multi sub is_deeply (Pair  $got, Pair  $expected, Str $desc?) returns Bool;
 
 Because these functions will be mutually recursive, they will easily be
 able handle arbitrarily complex data structures automatically (at least
@@ -502,7 +504,7 @@ distribution.
 
 = AUTHORS
 
-Autrijus Tang <autrijus@autrijus.org>
+Audrey Tang <autrijus@autrijus.org>
 
 Benjamin Smith
 
@@ -528,7 +530,7 @@ Gaal Yahas <gaal@forum2.org>
 
 = COPYRIGHT
 
-Copyright (c) 2005. Autrijus Tang. All rights reserved.
+Copyright (c) 2005. Audrey Tang. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

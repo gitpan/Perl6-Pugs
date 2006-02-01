@@ -15,6 +15,7 @@ module Pugs.Shell (
     RunOptions(..),
     initializeShell,
     getCommand,
+    readline,
 ) where
 import Pugs.Internals
 
@@ -27,7 +28,7 @@ data Command
    | CmdQuit
    | CmdParse String
    | CmdParseRaw String
-   | CmdRun RunOptions String
+   | CmdRun { runOpt :: RunOptions, runProg :: String }
    | CmdHelp
    | CmdReset
 
@@ -64,21 +65,21 @@ parseCommandLine (':':'l':str)  = CmdLoad $ unwords (words str)
 parseCommandLine str            = CmdRun (RunOpts False False True) str
 
 initializeShell :: IO ()
-initializeShell
+initializeShell = do
 #ifdef PUGS_HAVE_READLINE
-   = Readline.initialize
-#else
-   = return ()
+    Readline.setCatchSignals False
+    Readline.initialize
 #endif
+    return ()
 
 readline :: String -> IO (Maybe String)
-readline prompt
+readline prompt = do
 #ifdef PUGS_HAVE_READLINE
-   = Readline.readline prompt
+    Readline.readline prompt
 #else
-   = do putStr prompt
-        input <- getLine
-        return $ Just input
+    putStr prompt
+    input <- getLine
+    return $ Just input
 #endif
 
 addHistory :: String -> IO ()

@@ -59,24 +59,31 @@ plan 31;
   is $a, 42, "temp() restored the variable, the block was exited using an exception";
 }
 
+eval('
 {
   my @array = (0, 1, 2);
   {
-    eval 'temp @array[1] = 42';
-    is @array[1], 42, "temp() changed our array element", :todo<feature>;
+    temp @array[1] = 42;
+    is @array[1], 42, "temp() changed our array element";
   }
   is @array[1], 1, "temp() restored our array element";
 }
+"1 - delete this line when the parsefail eval() is removed";
+') or skip(2, "parsefail: temp \@array[1]");
 
+eval('
 {
   my %hash = (:a(1), :b(2), :c(3));
   {
-    eval 'temp %hash<b> = 42';
-    is %hash<b>, 42, "temp() changed our hash element", :todo<feature>;
+    temp %hash<b> = 42;
+    is %hash<b>, 42, "temp() changed our hash element";
   }
   is %hash<b>, 2, "temp() restored our array element";
 }
+"1 - delete this line when the parsefail eval() is removed";
+') or skip(2, "parsefail: temp \%hash<b>");
 
+eval('
 {
   my $struct = [
     "doesnt_matter",
@@ -90,11 +97,13 @@ plan 31;
   ];
 
   {
-    eval 'temp $struct[1]<key>[1] = 23';
+    temp $struct[1]<key>[1] = 23;
     is $struct[1]<key>[1], 23, "temp() changed our nested arrayref/hashref element", :todo<feature>;
   }
   is $struct[1]<key>[1], 1, "temp() restored our nested arrayref/hashref element", :todo<feature>;
 }
+"1 - delete this line when the parsefail eval() is removed";
+') or skip(2, "parsefail: temp \$struct[1]<key>[1]");
 
 # Block TEMP{}
 # L<S06/"Temporization" /You can also modify the behaviour of temporized code structures/>
@@ -118,16 +127,16 @@ plan 31;
   is advance(), 2, "TEMP{} block (3)", :todo<feature>;
   is $next,     3, "TEMP{} block (4)", :todo<feature>;
 
-  fail "TEMP{} block (5)", :todo<feature>;
-  fail "TEMP{} block (6)", :todo<feature>;
-  fail "TEMP{} block (7)", :todo<feature>;
-  fail "TEMP{} block (8)", :todo<feature>;
+  flunk "TEMP{} block (5)", :todo<feature>;
+  flunk "TEMP{} block (6)", :todo<feature>;
+  flunk "TEMP{} block (7)", :todo<feature>;
+  flunk "TEMP{} block (8)", :todo<feature>;
 
   # Following does parse, but isn't executed (don't know why).
   # If the "{" on the following line is changed to "if(1) {", it is executed,
   # too, but then it dies complaining about not finding a matching temp()
   # function.  So, for now, we just comment the following block and add
-  # unconditional fail()s.
+  # unconditional flunk()s.
   #{
   #  is temp(advance()), 3, "TEMP{} block (5)", :todo<feature>;
   #  is $next,           4, "TEMP{} block (6)", :todo<feature>;
@@ -154,12 +163,13 @@ plan 31;
   ';
 
   my $a = eval 'WierdTemp.new()';
-  ok defined($a), "instantiating a WierdTemp worked", :todo<feature>;
+  ok defined($a), "instantiating a WierdTemp worked";
   is $was_in_own_temp_handler, 0, ".TEMP method wasn't yet executed";
 
   {
     temp $a;
-    is $was_in_own_temp_handler, 1, ".TEMP method was executed on temporization", :todo<feature>;
+    is $was_in_own_temp_handler, 1, ".TEMP method was executed on temporization";
   }
-  is $was_in_own_temp_handler, 2, ".TEMP method was executed on restoration", :todo<feature>;
+  is $was_in_own_temp_handler, 2, ".TEMP method was executed on restoration";
 }
+

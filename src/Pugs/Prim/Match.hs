@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
-{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
+{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 module Pugs.Prim.Match (
     op2Match, rxSplit, rxSplit_n, matchFromMR, pkgParents
@@ -9,11 +9,14 @@ import Pugs.Embed
 import Pugs.AST
 import Pugs.Types
 import Pugs.Config
+import Pugs.Prim.Code
 import qualified RRegex.PCRE as PCRE
 import qualified Data.Map as Map
 import qualified Data.Array as Array
 
 doMatch :: String -> VRule -> Eval VMatch
+-- Work around PGE bug on Parrot 0.3.1 -- empty rules are errors
+doMatch _ MkRulePGE{ rxRule = "" } = fail "Null patterns are invalid; use <?null> or an empty string instead"
 doMatch cs MkRulePGE{ rxRule = re } = do
     let pwd1 = getConfig "installarchlib" ++ "/CORE/pugs/pge"
         pwd2 = getConfig "sourcedir" ++ "/src/pge"
@@ -29,6 +32,7 @@ doMatch cs MkRulePGE{ rxRule = re } = do
             `catch` (\e -> return $ ioeGetErrorString e)
     rv  <- tryIO Nothing $ fmap Just (readIO $ decodeUTF8 pge)
     let matchToVal PGE_Fail = VMatch mkMatchFail
+        matchToVal (PGE_String str) = VStr str
         matchToVal (PGE_Array ms) = VList (map matchToVal ms)
         matchToVal (PGE_Match from to pos named) = VMatch $
             mkMatchOk from to substr pos' named'
@@ -48,7 +52,7 @@ doMatch csChars MkRulePCRE{ rxRegex = re } = do
     let ((fromBytes, lenBytes):subs) = Array.elems (fromJust rv)
         substr str from len = take len (drop from str)
         subsMatch = [
-            VMatch $ mkMatchOk
+            VMatch $ if fBytes == -1 then mkMatchFail else mkMatchOk
                 fChars (fChars + lChars)
                 (substr csChars fChars lChars)
                 [] Map.empty
@@ -77,6 +81,16 @@ not_VRule _            = True
 
 -- XXX - need to generalise this
 op2Match :: Val -> Val -> Eval Val
+
+op2Match _ y@(VCode _) = do
+    (arity :: Int) <- fromVal =<< op1CodeArity y
+    res <- fromVal =<< case arity of
+        0 -> evalExp $ App (Val y) Nothing []
+        1 -> do
+             topic <- readVar "$_"
+             evalExp $ App (Val y) Nothing [Val topic]
+        _ -> fail ("Unexpected arity in smart match: " ++ (show arity))
+    return $ VBool $ res
 
 op2Match x (VRef (MkRef (IScalar sv))) | scalar_iType sv == mkType "Scalar::Const" = do
     y' <- scalar_fetch' sv
@@ -112,8 +126,15 @@ op2Match x (VSubst (rx, subst)) | rxGlobal rx = do
         matchSV <- findSymRef "$/" glob
         writeRef matchSV (VMatch match)
         str'    <- fromVal =<< evalExp subst
-        (after', ok') <- doReplace (genericDrop (matchTo match) str) (ok + 1)
-        return (concat [genericTake (matchFrom match) str, str', after'], ok')
+        -- XXX - on zero-width match, advance the cursor and, if can't,
+        --       don't even bother with the recursive call.
+        case (matchTo match, matchFrom match) of
+            (0, 0) -> if null str then return (str' ++ str, ok) else do
+                (after', ok') <- doReplace (tail str) (ok + 1)
+                return (concat [str' ++ (head str:after')], ok')
+            (to, from) -> do
+                (after', ok') <- doReplace (genericDrop to str) (ok + 1)
+                return (concat [genericTake from str, str', after'], ok')
 
 op2Match x (VSubst (rx, subst)) = do
     str     <- fromVal x
@@ -144,16 +165,22 @@ op2Match x (VRule rx) | rxGlobal rx = do
             else return (VList rv)
     where
     hasSubpatterns = case rx of
-        MkRulePGE{}             -> True -- bogus
+        MkRulePGE{}             -> True -- XXX bogus - use <p6rule> to parse itself
         MkRulePCRE{rxNumSubs=n} -> not (n == 0)
     matchOnce :: String -> Eval [Val]
     matchOnce str = do
         match <- str `doMatch` rx
         if not (matchOk match) then return [] else do
-        rest <- matchOnce (genericDrop (matchTo match) str)
-        return $ if hasSubpatterns
-                 then (matchSubPos match) ++ rest
-                 else (VMatch match):rest
+        let ret x = return $ if hasSubpatterns
+                        then (matchSubPos match) ++ x
+                        else (VMatch match):x
+        case (matchTo match, matchFrom match) of
+            (0, 0) -> if null str then ret [] else do
+                rest <- matchOnce (tail str)
+                ret rest
+            (to, _) -> do
+                rest <- matchOnce (genericDrop to str)
+                ret rest
 
 op2Match x (VRule rx) = do
     str     <- fromVal x
@@ -201,7 +228,7 @@ rxSplit rx str = do
     if matchFrom match == matchTo match
         then do
             let (c:cs) = str
-            rest <- rxSplit rx (cs)
+            rest <- rxSplit rx cs
             return (VStr [c]:rest)
         else do
             let before = genericTake (matchFrom match) str

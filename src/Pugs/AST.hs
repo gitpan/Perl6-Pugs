@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -cpp -fglasgow-exts -fno-warn-orphans -funbox-strict-fields #-}
-{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
+{-# OPTIONS_GHC -#include "../UnicodeC.h" #-}
 
 {-|
     Abstract syntax tree.
@@ -15,7 +15,7 @@
 module Pugs.AST (
     evalExp,
     genMultiSym, genSym,
-    strRangeInf, strRange, strInc, charInc,
+    strRangeInf, strRange, strInc,
     mergeStmts, isEmptyParams,
     newPackage,
 
@@ -57,13 +57,15 @@ strRange :: String -> String -> [String]
 strRange s1 s2
     | s1 == s2              = [s2]
     | length s1 > length s2 = []
+    | length s1 < length s2 = (s1:strRange (strInc s1) s2)
+    | s1 >  s2              = []
     | otherwise             = (s1:strRange (strInc s1) s2)
 
 {-|
 Find the successor of a string (i.e. the next string \'after\' it).
 Special rules are used to handle wraparound for strings ending in an
 alphanumeric character; otherwise the last character is simply incremented 
-using 'charInc'.
+using 'succ'.
 -}
 strInc :: String -> String
 strInc []       = "1"
@@ -74,14 +76,10 @@ strInc str
     | x == 'z'  = strInc xs ++ "a"
     | x == 'Z'  = strInc xs ++ "A"
     | x == '9'  = strInc xs ++ "0"
-    | otherwise = xs ++ [charInc x]
+    | otherwise = xs ++ [succ x]
     where
     x   = last str
     xs  = init str
-
--- | Return the code-point-wise successor of a given character.
-charInc :: Char -> Char
-charInc x   = chr $ 1 + ord x
 
 {-|
 Evaluate the given expression, using the currently active evaluator
@@ -99,12 +97,13 @@ of the same name. This is to allow for overloaded (i.e. multi) subs,
 where one sub name actually maps to /all/ the different multi subs.
 (Is this correct?)
 -}
-genMultiSym :: MonadSTM m => String -> VRef -> m (Pad -> Pad)
+genMultiSym :: MonadSTM m => String -> VRef -> m PadMutator
 genMultiSym name ref = do
+    --trace ("installing multi: " ++ name) $ return ()
     tvar    <- liftSTM $ newTVar ref
     fresh   <- liftSTM $ newTVar True
     return $ \(MkPad map) -> MkPad $
-        Map.insertWith (++) name [(fresh, tvar)] map
+        Map.insertWith mergePadEntry name (MkEntryMulti [(fresh, tvar)]) map
 
 {-|
 Create a 'Pad'-transforming transaction that will install a symbol
@@ -112,11 +111,12 @@ mapping from a name to a thing, in the 'Pad' it is applied to.
 Unlike 'genMultiSym', this version just installs a single definition
 (right?), shadowing any earlier or outer definition.
 -}
-genSym :: MonadSTM m => String -> VRef -> m (Pad -> Pad)
+genSym :: MonadSTM m => String -> VRef -> m PadMutator
 genSym name ref = do
+    --trace ("installing: " ++ name) $ return ()
     tvar    <- liftSTM $ newTVar ref
     fresh   <- liftSTM $ newTVar True
-    return $ \(MkPad map) -> MkPad $ Map.insert name [(fresh, tvar)] map
+    return $ \(MkPad map) -> MkPad $ Map.insert name (MkEntry (fresh, tvar)) map
 
 -- Stmt is essentially a cons cell
 -- Stmt (Stmt ...) is illegal
@@ -127,18 +127,18 @@ mergeStmts (Sym scope name x) y = Sym scope name (mergeStmts x y)
 mergeStmts (Pad scope lex x) y = Pad scope lex (mergeStmts x y)
 mergeStmts (Syn "package" [kind, pkg@(Val (VStr _))]) y =
     Syn "namespace" [kind, pkg, y]
-mergeStmts x@(Pos pos (Syn syn _)) y | (syn ==) `any` words "subst match //"  =
-    mergeStmts (Pos pos (App (Var "&infix:~~") Nothing [Var "$_", x])) y
-mergeStmts x y@(Pos pos (Syn syn _)) | (syn ==) `any` words "subst match //"  =
-    mergeStmts x (Pos pos (App (Var "&infix:~~") Nothing [Var "$_", y]))
-mergeStmts (Pos pos (Syn "sub" [Val (VCode sub)])) y
+mergeStmts x@(Ann ann (Syn syn _)) y | (syn ==) `any` words "subst match //"  =
+    mergeStmts (Ann ann (App (Var "&infix:~~") Nothing [Var "$_", x])) y
+mergeStmts x y@(Ann ann (Syn syn _)) | (syn ==) `any` words "subst match //"  =
+    mergeStmts x (Ann ann (App (Var "&infix:~~") Nothing [Var "$_", y]))
+mergeStmts (Ann ann (Syn "sub" [Val (VCode sub)])) y
     | subType sub >= SubBlock, isEmptyParams (subParams sub) =
     -- bare Block in statement level; annul all its parameters and run it!
-    mergeStmts (Pos pos $ App (Val $ VCode sub{ subParams = [] }) Nothing []) y
-mergeStmts x (Pos pos (Syn "sub" [Val (VCode sub)]))
+    mergeStmts (Ann ann $ App (Val $ VCode sub{ subParams = [] }) Nothing []) y
+mergeStmts x (Ann ann (Syn "sub" [Val (VCode sub)]))
     | subType sub >= SubBlock, isEmptyParams (subParams sub) =
     -- bare Block in statement level; annul all its parameters and run it!
-    mergeStmts x (Pos pos $ App (Val $ VCode sub{ subParams = [] }) Nothing [])
+    mergeStmts x (Ann ann $ App (Val $ VCode sub{ subParams = [] }) Nothing [])
 mergeStmts x (Stmts y Noop) = mergeStmts x y
 mergeStmts x (Stmts Noop y) = mergeStmts x y
 mergeStmts x y = Stmts x y
@@ -153,11 +153,11 @@ newPackage cls name traits = Sym SGlobal (':':'*':name) $ Syn ":="
     [ Var (':':'*':name)
     , App (Var "&Object::new")
         (Just $ Val (VType $ mkType cls))
-        [ App (Var "&infix:=>") Nothing
+        [ Syn "named"
             [ Val (VStr "traits")
             , Val (VList $ map VStr traits)
             ]
-        , App (Var "&infix:=>") Nothing
+        , Syn "named"
             [ Val (VStr "name")
             , Val (VStr name)
             ]

@@ -13,7 +13,7 @@ module URI::Escape-0.6 {
     #    ...
     #}
     
-    multi sub uri_escape (Str $string is copy, Str $unsafe, Bool +$negate) returns Str is export(:DEFAULT) {
+    multi sub uri_escape (Str $string is copy, Str $unsafe, Bool :$negate) returns Str is export(:DEFAULT) {
         my $pattern;
         
         $pattern = ($negate) ?? "([^$unsafe])" !! "([$unsafe])";
@@ -43,7 +43,7 @@ module URI::Escape-0.6 {
     }
     
     multi sub uri_unescape ($str is copy) returns Str is export(:DEFAULT) {
-        $str ~~ s:P5:g/%([0-9A-Fa-f]{2})/{ chr(hex($0)) }/;
+        $str ~~ s:P5:g/%([0-9A-Fa-f]{2})/{ chr(:16($0)) }/;
         
         return $str;
     }

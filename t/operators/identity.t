@@ -7,7 +7,7 @@ plan 39;
 
 =pod
 
-=:= is only for containers, not values
+C<=:=> is only for containers, not values
 
 ok(1 =:= 1, "int");
 ok(!(2 =:= 1), "int (neg)");
@@ -116,9 +116,7 @@ ok(!("7" =:= 7), "identify checks type mismatch");
   ok  $test($bar), "binding of implicit @_ subparam retains =:= (3)";
 }
 
-# Temporary workaround: We want PIL2JS to be able to run this test, but, as
-# class declarations do not yet compile to PIL, we've to eval this out, sorry.
-eval 'class TestObj { has $:a }';
+class TestObj { has $!a }
 
 {
   my $foo = ::TestObj.new(:a<3>);

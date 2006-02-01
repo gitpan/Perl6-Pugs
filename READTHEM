@@ -13,6 +13,8 @@ be just programming books, anything goes, really.
 
 = Haskell - Books:
 
+Programming in Haskell                                       - Graham Hutton
+    http://www.cs.nott.ac.uk/~gmh/book.html (preview chapters)
 Algorithms: A Functional Programming Approach  - Fethi A. Rabhi, Guy Lapalme
 The Haskell School of Expression                                - Paul Hudak
 Haskell: The Craft of Functional Programming                - Simon Thompson
@@ -42,6 +44,9 @@ Perl 6 Bible (Perl6::Bible)                                - Various Authors
 
 = Non-Haskell books
 
+Database in Depth: Relational Theory for Practitioners       - Chris J. Date
+    http://www.oreilly.com/catalog/databaseid/
+    (shows what the relational data model *really is*; very easy to read)
 Types and Programming Languages                         - Benjamin C. Pierce
 Advanced Topics in Types and Programming Languages      - Benjamin C. Pierce
 Higher Order Perl                                       - Mark Jason Dominus 

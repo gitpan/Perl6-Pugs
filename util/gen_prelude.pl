@@ -19,8 +19,8 @@ setup_output();
 
 touch() if $Config{touch};
 
-precomp(), exit 0 if $Config{inline};
 null(), exit 0 if $Config{null};
+precomp(), exit 0 if $Config{inline};
 usage();
 exit 1;
 
@@ -51,9 +51,24 @@ sub touch {
 
 sub null {
     print STDERR "Generating null Prelude... " if $Config{verbose};
+
     open NP, "src/Pugs/PreludePC.hs-null" or
         die "Couldn't open null Prelude (src/Pugs/PreludePC.hs-null): $!";
+
+    gen_source($TEMP_PRELUDE);
+    open IN, $TEMP_PRELUDE or
+        die "Couldn't open temp prelude ($TEMP_PRELUDE): $!"; 
+    my $program = do { local $/; <IN> };
+    close IN;
+
     print OUT <NP>;
+
+    strip_comments($program);
+    $program =~ s{(["\\])}{\\$1}g;
+    $program =~ s{\r?\n}{\\n\\\n}g;
+    print OUT qq<preludeStr = "$program"\n>;
+    close OUT;
+
     print STDERR "done.\n" if $Config{verbose};
 }
 
@@ -80,17 +95,29 @@ sub gen_source {
         open my $ifh, $file or die "open: $file: $!";
         
         print $ofh "\n{\n";
+        my $program;
         while (<$ifh>) {
             $module ||= $1 if /^(?:package|module|class) \s+ ([^-;]+)/x;
-            print $ofh $_;
+            $program .= $_;
         }
+
         die "could not guess module name: $file" unless $module;
+
+        strip_comments($program);
+        print $ofh $program;
+
         print STDERR ", $module" if $Config{verbose};
         $module =~ s#::#/#g;
         print $ofh "\n};\n%*INC<${module}.pm> = '<precompiled>';\n\n";
         # (the need for a semicolon in "};" is probably a bug.)
     }
     print STDERR "... " if $Config{verbose};
+}
+
+# Strip comments and docs while preserving the line counts
+sub strip_comments {
+    $_[0] =~ s{^[ \t]*#.*}{}mg;
+    $_[0] =~ s{^=\w(.*?)^=cut$}{"\n" x ($1 =~ y/\n//)}mesg;
 }
 
 sub precomp {
@@ -169,13 +196,13 @@ initPreludePC env = do
 
 sub usage {
     print STDERR <<".";
-usage: $0 --null [options]
+usage: $0 --null src/perl6/Prelude.pm [options]
        $0 --inline src/perl6/Prelude.pm --pugs ./pugs.exe [options]
 
 Creates a PreludePC.hs file (written to stdout), to be included by Run.hs.
 
-In the first build phase, a "null" Prelude with only placeholder functions
-is used. In the second phase, the Standard Prelude is precompiled and
+In the first build phase, a "null" Prelude that only "eval"s the prelude
+module is used. In the second phase, the Standard Prelude is precompiled and
 inlined into the resulting pugs executable.
 
 Additional options:

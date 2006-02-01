@@ -10,10 +10,10 @@ plan 25;
 
 class LValueMutator {
     has Int $.foo;
-    has Int $:bar;
+    has Int $!bar;
 
     method foo returns Int is rw {
-    return $:bar;
+        return $!bar;
     }
     method get_foo returns Int is rw {
         return $.foo;
@@ -79,7 +79,7 @@ if ($parsefail) {
 }
 
 # test interface tentatively not entirely disapproved of by
-# all(@Larry) at http://xrl.us/gnxp
+# all(@Larry) at L<"http://xrl.us/gnxp">
 $parsefail = !eval_ok '
     class MagicSub {
         has Int $.constant;

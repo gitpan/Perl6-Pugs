@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 my $tempfile = "temp-pugs-download";
 
@@ -12,7 +12,7 @@ my @urls = <
 
 plan 2+@urls;
 
-use_ok('LWP::Simple');
+use LWP::Simple; pass "(dummy instead of broken use_ok)";
 
 my $expected = "Hello from Pugs";
 

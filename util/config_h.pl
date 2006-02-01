@@ -20,10 +20,12 @@ This file seems to determine some configuration.
 
 =cut
 
-my ($ghc,$base) = @ARGV;
+my ($ghc_line, $base) = @ARGV or exit;
 
-$ghc ||= $ENV{GHC} || 'ghc';
+$ghc_line ||= $ENV{GHC} || 'ghc';
 $base ||= Cwd::cwd();
+
+my ($ghc, @ghc_args) = split /\s+/, $ghc_line;
 
 open IN, "< $base/lib/Perl6/Pugs.pm" or die $!;
 open OUT, "> $base/src/Pugs/pugs_config.h" or die $!;
@@ -85,39 +87,28 @@ close OUT;
 
 sub try_compile {
     my $code = shift;
-    
-    my $dir = tempdir( CLEANUP => 1 );
-    my $temp = File::Spec->catfile($dir, "compile-test");
+    my $temp = "pugs-tmp-$$";
 
     eval {
-      open TMP, "> $temp.hs"
-        or die "Couldn't create '$temp.hs': $!";
-      print TMP $code
-        or die "Couldn't write to '$temp.hs': $!";
-        
-      close TMP
-        or die "Couldn't close '$temp.hs': $!";
-      
-      my $command = join(" ",
-              $ghc, @_,
-              "--make", "-v0",
-              -o => "$temp.exe",
-              "$temp.hs");
-      system($command) == 0
-        or die "Couldn't run '$command': $!";
-    };
-    if ($@) {
-      warn $@;
-      return;
+        open TMP, "> $temp.hs";
+        print TMP $code;
+        close TMP;
+        system(
+            $ghc, @ghc_args,
+            "--make", "-v0",
+            -o => "$temp.exe",
+            "$temp.hs"
+        );
+
     };
 
-    my $ok = -e "$temp.exe";
-    for ("$temp.exe", "$temp.hs", "$temp.hi",  "$temp.o") {
-      if (-f $_) {
-        unlink $_
-          or warn "Couldn't remove $_: $!";
-      };
-    };
+    my $ok = -s "$temp.exe";
+
+    unlink("$temp.exe");
+    unlink("$temp.hs");
+    unlink("$temp.hi");
+    unlink("$temp.o");
+
     return $ok;
 }
 

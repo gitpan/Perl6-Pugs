@@ -61,7 +61,7 @@ sub build {
         }
     }
 
-    run($^X, qw<util/gen_prelude.pl -v --touch --null --output src/Pugs/PreludePC.hs>);
+    run($^X, qw<util/gen_prelude.pl -v --touch --null -i src/perl6/Prelude.pm --output src/Pugs/PreludePC.hs>);
     build_lib($version, $ghc, @args);
     build_exe($version, $ghc, $ghc_version, @args);
 
@@ -110,7 +110,8 @@ sub build_lib {
         find $wanted, "dist";
 
         if (@candidates > 1) {
-            warn "*** Found more than one '$basename' -- using the first one. \n";
+            # This is harmless -- so we don't do anything.
+            # warn "*** Found more than one '$basename' -- using the first one. \n";
         }
         elsif (@candidates == 0) {
             die "*** Wasn't able to find '$basename', aborting...\n";
@@ -165,6 +166,7 @@ sub build_exe {
     push @pkgs, -package => 'readline' if grep /^-DPUGS_HAVE_READLINE$/, @_;
     push @pkgs, -package => 'plugins', -package => 'haskell-src' if grep /^-DPUGS_HAVE_HSPLUGINS$/, @_;
     my @libs = "-lHSPugs-$version";
+    push @libs, grep /^-threaded/, @_;
     push @libs, grep /^-opt/, @_;
     push @libs, grep /^-[lL]/, @_;
     push @libs, grep /\.(?:a|o(?:bj)?|\Q$Config{so}\E)$/, @_;
@@ -191,6 +193,10 @@ sub write_buildinfo {
         $depends = ', unix -any';
     }
 
+    if (grep /^-DPUGS_HAVE_HSPLUGINS$/, @_) {
+        $depends .= ', plugins -any, haskell-src -any';
+    }
+
     if (grep /^-DPUGS_HAVE_READLINE$/, @_) {
         $depends .= ', readline -any';
     }
@@ -205,8 +211,15 @@ sub write_buildinfo {
         $perl5_c = 'src/perl5/p5embed.c';
     }
 
-    my @include_dirs = map substr($_, 2), grep /^-I/, @_;
-    my @lib_dirs = map substr($_, 2), grep /^-L/, @_;
+    # Remove -Wl flags in Perl5 embedding.
+    @_ = grep { !/^-W/ } @_;
+
+    my @include_dirs = grep { -d $_ }
+            map File::Spec->canonpath(substr($_, 2)),
+            grep /^-I/, @_;
+    my @lib_dirs = grep { -d $_ }
+            map File::Spec->canonpath(substr($_, 2)),
+            grep /^-L/, @_;
     my @libs = map substr($_, 2), grep /^-l/, @_;
     #push @libs, grep /\.(?:a|o(?:bj)?)$/, @_;
 

@@ -35,19 +35,19 @@ my @stuff = ('array', 'elements');
 my %flags = ('hash' => 'elements', 'are' => 'pairs');
 whole(@stuff, %flags);
 
-sub optional ($required, ?$optional) {
+sub optional ($required, $optional?) {
     my $second_arg = $optional // 'Told you it was optional!';
     say $required;
     say $second_arg;
 }
 
-# XXX sub optional ($required, ?$optional = "Default value"), fyi
+# XXX sub optional ($required, $optional = "Default value"), fyi
 # XXX allows for undef to be passed.
 
 optional('this');
 optional('this', 'that');
 
-sub named_params ($first, +$second, +$third) {
+sub named_params ($first, :$second, :$third) {
     say $first, $second, $third;
 }
 

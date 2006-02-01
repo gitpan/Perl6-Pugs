@@ -35,7 +35,6 @@ import Pugs.Help
 import Pugs.Pretty
 import Pugs.CodeGen
 import Pugs.Embed
-import Pugs.Prim.Eval (requireInc)
 import qualified Data.Map as Map
 import Data.IORef
 import System.FilePath
@@ -77,20 +76,19 @@ run ("-v":_)                    = banner
 run ("-c":"-e":prog:_)          = doCheck "-e" prog
 run ("-c":file:_)               = readFile file >>= doCheck file
 
--- -CPerl5 outputs PIL formatted as Perl 5, PIL-Run is not involved.
--- Should we rename -CPerl5, -CJSON etc. to -CPIL.Perl5, -CPIL.JSON etc.?
-run ("-C":backend:args) | map toUpper backend == "JS" = do
+-- -CPIL1.Perl5 outputs PIL formatted as Perl 5.
+run ("-C":backend:args) | map toLower backend == "js" = do
     exec <- getArg0
     doHelperRun "JS" ("--compile-only":("--pugs="++exec):args)
 run ("-C":backend:"-e":prog:_)           = doCompileDump backend "-e" prog
-run ("-C":backend:file:_)                = slurpFile file >>= doCompileDump backend file
+run ("-C":backend:file:_)                = readFile file >>= doCompileDump backend file
 
-run ("-B":backend:_) | (== map toLower backend) `any` ["js","perl5"] = do
+run ("-B":backend:_) | (== map toLower backend) `any` ["js","perl5","js-perl5"] = do
     exec <- getArg0
     args <- getArgs
     doHelperRun backend (("--pugs="++exec):args)
 run ("-B":backend:"-e":prog:_)           = doCompileRun backend "-e" prog
-run ("-B":backend:file:_)                = slurpFile file >>= doCompileRun backend file
+run ("-B":backend:file:_)                = readFile file >>= doCompileRun backend file
 
 run ("--external":mod:"-e":prog:_)    = doExternal mod "-e" prog
 run ("--external":mod:file:_)         = readFile file >>= doExternal mod file
@@ -233,12 +231,14 @@ doHelperRun backend args =
                    then (doExecuteHelper "jspugs.pl"  args)
                    else (doExecuteHelper "runjs.pl"   args)
         "perl5" ->       doExecuteHelper "pugs-p5.pl" args
+        "js-perl5" -> doExecuteHelper "runjs.pl" (jsPerl5Args ++ args)
         _       ->       fail ("unknown backend: " ++ backend)
     where
     args' = f args
+    jsPerl5Args = words "--run=jspm --perl5"
     f [] = []
-    f (bjs:rest)      | map toUpper bjs == "-BJS"       = f rest
-    f ("-B":js:rest)  | map toUpper  js == "JS"         = f rest
+    f (bjs:rest)      | "-BJS" `isPrefixOf` map toUpper bjs = f rest
+    f ("-B":js:rest)  | "JS" `isPrefixOf` map toUpper  js = f rest
     f (pugspath:rest) | "--pugs=" `isPrefixOf` pugspath = f rest
     f (x:xs) = x:f xs
 
@@ -312,6 +312,7 @@ doLoad env fn = do
 doRunSingle :: TVar Env -> RunOptions -> String -> IO ()
 doRunSingle menv opts prog = (`catch` handler) $ do
     exp     <- makeProper =<< parse
+    if exp == Noop then return () else do
     env     <- theEnv
     rv      <- runImperatively env (evaluate exp)
     result  <- case rv of
@@ -326,7 +327,8 @@ doRunSingle menv opts prog = (`catch` handler) $ do
     parse = do
         env <- liftSTM $ readTVar menv
         return $ envBody $ parseProgram env "<interactive>" $
-          (decodeUTF8 prog)
+          (dropTrailingSemi $ decodeUTF8 prog)
+    dropTrailingSemi = reverse . dropWhile (`elem` " \t\r\n;") . reverse
     theEnv = do
         ref <- if runOptSeparately opts
                 then (liftSTM . newTVar) =<< tabulaRasa "<interactive>"
@@ -342,19 +344,28 @@ doRunSingle menv opts prog = (`catch` handler) $ do
             putStrLn $ pretty final
         else print
     makeProper exp = case exp of
-        Val err@(VError _ _) -> fail $ pretty err
+        Val err@(VError (VStr msg) _)
+            | runOptShowPretty opts -> do
+--          , "\nunexpected end of input" `isPrefixOf` msg -> do
+            cont <- readline "....> "
+            case cont of
+                Just line   -> do
+                    doRunSingle menv opts (prog ++ ('\n':line))
+                    return Noop
+                _           -> fail $ pretty err
+        Val err@VError{} -> fail $ pretty err
         _ | runOptSeparately opts -> return exp
         _ -> return $ makeDumpEnv exp
     -- XXX Generalize this into structural folding
-    makeDumpEnv (Stmts x exp)   = Stmts x   $ makeDumpEnv exp
-    makeDumpEnv (Cxt x exp)     = Cxt x     $ makeDumpEnv exp
-    makeDumpEnv (Pad x y exp)   = Pad x y   $ makeDumpEnv exp
-    makeDumpEnv (Sym x y exp)   = Sym x y   $ makeDumpEnv exp
-    makeDumpEnv (Pos x exp)     = Pos x     $ makeDumpEnv exp
+    makeDumpEnv (Stmts x exp)     = Stmts x   $ makeDumpEnv exp
+    makeDumpEnv (Ann ann exp)     = Ann ann   $ makeDumpEnv exp
+    makeDumpEnv (Pad x y exp)     = Pad x y   $ makeDumpEnv exp
+    makeDumpEnv (Sym x y exp)     = Sym x y   $ makeDumpEnv exp
     makeDumpEnv exp = Stmts exp (Syn "env" [])
-    handler err = if not (isUserError err) then ioError err else do
+    handler err | isUserError err = do
         putStrLn "Internal error while running expression:"
         putStrLn $ ioeGetErrorString err
+                | otherwise = ioError err
 
 runImperatively :: TVar Env -> Eval Val -> IO Val
 runImperatively menv eval = do
@@ -418,15 +429,15 @@ runPIR prog = do
     writeFile "a.pir" pir
     evalParrotFile "a.pir"
 
-slurpFile :: FilePath -> IO String
-slurpFile file = do
-    prog <- readFile file
+{-
+withInlinedIncludes :: String -> IO String
+withInlinedIncludes prog = do
     libs <- getLibs
     expandInc libs prog
     where
     expandInc :: [FilePath] -> String -> IO String
-    expandInc incs str = case breakOnGlue "\nuse " str of
-        Nothing -> case breakOnGlue "\nrequire " str of
+    expandInc incs str = case breakOnGlue "\nuse " ('\n':str) of
+        Nothing -> case breakOnGlue "\nrequire " ('\n':str) of
             Nothing -> return str
             Just (pre, post) -> do
                 let (mod, (_:rest)) = span (/= ';') (dropWhile isSpace post)
@@ -437,7 +448,7 @@ slurpFile file = do
             let (mod, (_:rest)) = span isAlphaNum (dropWhile isSpace post)
             mod'    <- includeInc incs mod
             rest'   <- expandInc incs rest
-            return $ pre ++ mod' ++ rest'
+            return $ pre ++ "\n{" ++ mod' ++ "\n}\n" ++ rest'
     includeInc :: [FilePath] -> String -> IO String
     includeInc _ ('v':_) = return []
     includeInc incs name = do
@@ -446,4 +457,4 @@ slurpFile file = do
         pathName    <- requireInc incs name' (errMsg name incs)
         readFile pathName
     errMsg fn incs = "Can't locate " ++ fn ++ " in @*INC (@*INC contains: " ++ unwords incs ++ ")."
-
+-}

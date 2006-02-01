@@ -6,10 +6,19 @@ use v6;
 BEGIN { print $*ERR: "Net::IRC... " }
 use Net::IRC;
 BEGIN { print $*ERR: "File::Spec... " }
-use File::Spec;
+use File::Spec::Unix;
 
 # Parse @*ARGS
-my $nick   = @*ARGS[0] // "evalbot6";
+my $nick;
+
+if @*ARGS[0].substr(0,1) eq '=' {
+    my $nickfile = @*ARGS[0].substr(1);
+    $nick = { slurp $nickfile };
+}
+else {
+    $nick = { @*ARGS[0] // "evalbot6" };
+}
+
 my $server = @*ARGS[1] // "localhost";
 my ($host, $port) = split ":", $server;
 $port //= 6667;
@@ -17,7 +26,7 @@ my $reconn_delay = @*ARGS[2] // 60 * 15;
 my @chans = @*ARGS[3...];
 
 debug "Summary of configuration:";
-debug "  Will connect as...                  $nick";
+debug "  Will connect as...                  $nick()";
 debug "  to...                               $host:$port";
 debug "  and will reconnect after            {$reconn_delay}s after a disconnect";
 debug "To change any of these parameters, restart $*PROGRAM_NAME";
@@ -25,7 +34,7 @@ debug "and supply appropriate arguments:";
 debug "  $*PROGRAM_NAME nick host[:port] reconnect_delay";
 
 # Create new bot "object"
-my $bot = new_bot(nick => $nick, host => $host, port => $port, debug_raw => 0);
+my $bot = new_bot(nick => $nick(), host => $host, port => $port, debug_raw => 0);
 $bot<add_handler>("INVITE",   &on_invite);
 $bot<add_handler>("PRIVMSG",  &on_privmsg);
 
@@ -68,8 +77,9 @@ sub on_privmsg($event) {
     debug "Received a ?-request from $event<from>: $event<rest>"
       if substr($event<rest>, 0, 1) eq "?";
 
+    my $update   = { $bot<nick>($nick()) };
     my $reply_to = substr($event<object>, 0, 1) eq "#" ?? $event<object> !! $event<from_nick>;
-    my $reply    = { $bot<privmsg>(to => $reply_to, text => $^text) };
+    my $reply    = { $update(); $bot<privmsg>(to => $reply_to, text => $^text) };
 
     when rx:P5/^\?help/ {
       $reply("evalbot6 -- ?help | ?quit [reason] | ?raw ... | ?join #chan | ?uptime | ?eval code");
@@ -77,7 +87,7 @@ sub on_privmsg($event) {
 
     when rx:P5/^\?quit\s*(.*)$/ {
       if substr($reply_to, 0, 1) eq "#" {
-        $reply("?quit only available per private message so other bots don't quit as well.");
+        $reply("you should only do ?quit in a private message so other bots don't quit as well.");
       } else {
         # Don't reconnect.
         $reconnect = 0;
@@ -90,7 +100,12 @@ sub on_privmsg($event) {
     }
 
     when rx:P5/^\?join\s+(.+)$/ {
-      $bot<join>($0);
+      if substr($reply_to, 0, 1) eq "#" {
+        $reply("you should only do ?join in a private message so other bots don't accidentally come.");
+      }
+      else {
+        $bot<join>($0);
+      }
     }
 
     when rx:P5/^\?uptime$/ {
@@ -98,7 +113,7 @@ sub on_privmsg($event) {
       $reply("Running for {int(time() - $start_time)} seconds.");
     }
 
-    when rx:P5/^\?eval\s+(.+)$/ {
+    when rx:P5/^\?eval\s*(.+)$/ {
       # Allow ?eval anywhere, as you can make #whateverfoo, invite evalbot
       # to that channel, and abuse the heck out of him.
       $reply(evalhelper $0);
@@ -140,6 +155,7 @@ sub evalhelper(Str $code) {
   # Read the result, but convert all linebreaks into spaces, so we don't flood
   # the channel.
   my $result = join " ", split "\n", slurp $tmpfile;
+  $result = substr $result, 0, 500;  # max len limit
   unlink $tmpfile;
   return bytes($result) ?? $result !! "(no output)";
 }

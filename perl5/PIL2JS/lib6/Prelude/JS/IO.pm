@@ -44,3 +44,33 @@ sub JS::Root::print(Str *@text) is primitive {
   )')(@text.join(""));
   ?1;
 }
+
+sub JS::Root::slurp(Str $filename) is primitive {
+  JS::inline('(
+    function (filename) {
+        if (!Perl5) throw "Perl5 required.";
+        Perl5.perl_use("IO::File");
+        return Perl5.perl_eval("(sub { local $/; my $f = IO::File->new(\'<\'.$_[0]) or die $!; return <$f>})")(filename);
+    }
+  )')($filename)
+}
+
+sub JS::Root::unlink(Str $filename) is primitive {
+  JS::inline('(
+    function (filename) {
+        if (!Perl5) throw "Perl5 required.";
+        return Perl5.perl_eval("(sub { unlink($_[0]) or die $! })")(filename);
+    }
+  )')($filename)
+}
+
+sub JS::Root::system(Str *@command) is primitive {
+  JS::inline('(
+    function (arguments) {
+        if (!Perl5) throw "Perl5 required.";
+        var system = Perl5.perl_eval("sub {system(@_)}");
+        return system.apply(system, arguments);
+    }
+  )')(@command)
+}
+

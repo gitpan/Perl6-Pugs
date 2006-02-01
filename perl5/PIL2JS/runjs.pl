@@ -25,8 +25,9 @@ INIT {
   if($ENV{PIL2JS_RESOURCE_GUARD}) {
     require BSD::Resource;
     import BSD::Resource;
-    setrlimit(RLIMIT_CPU(), 63, 67) or die "Couldn't setrlimit: $!\n";
-    warn "*** Limited CPU resources.\n";
+    setrlimit(RLIMIT_CPU(), 120, 140) or die "Couldn't setrlimit: $!\n";
+    setrlimit(RLIMIT_RSS(), 1048000, 1196000) or die "Couldn't setrlimit: $!\n";
+    warn "*** Limited CPU and memory resources.\n";
   }
 }
 
@@ -57,12 +58,14 @@ my (@runjs_args, @pugs_args);
 
 GetOptions(
   "js=s"          => \$PIL2JS::cfg{js},
+  "run=s"         => \my $run,
   "pugs=s"        => \$PIL2JS::cfg{pugs},
   "pil2js=s"      => \$PIL2JS::cfg{pil2js},
   "p6preludepc=s" => \$PIL2JS::cfg{preludepc},
   "p6prelude=s"   => \$PIL2JS::cfg{prelude},
   "testpc=s"      => \$PIL2JS::cfg{testpc},
   "metamodel-base=s" => \$PIL2JS::cfg{metamodel_base},
+  "perl5"         => \$PIL2JS::cfg{perl5},
   "compile-only"     => \my $compile_only,
   "precompile-only"  => \my $precompile_only,
   "help"             => \&usage,
@@ -70,7 +73,7 @@ GetOptions(
 
 unless(-e $PIL2JS::cfg{preludepc} and -s $PIL2JS::cfg{preludepc}) {
   warn << '.';
-*** Precompiled Prelude doesn't exist yet; precompiling...
+*** Precompiled Prelude for JS doesn't exist yet; precompiling...
     (You can safely ignore the 'useless use of constant' warnings.)
 .
   my $js = precomp_module_to_mini_js "-I", PIL2JS::pwd("lib6"), "-MPrelude::JS";
@@ -79,7 +82,7 @@ unless(-e $PIL2JS::cfg{preludepc} and -s $PIL2JS::cfg{preludepc}) {
 
 unless(-e $PIL2JS::cfg{testpc} and -s $PIL2JS::cfg{testpc}) {
   warn << '.';
-*** Precompiled Test.pm doesn't exist yet; precompiling...
+*** Precompiled Test.pm for JS doesn't exist yet; precompiling...
     (You can safely ignore the 'useless use of constant' warnings.)
 .
   my $js = precomp_module_to_mini_js "-MTest";
@@ -95,8 +98,10 @@ my $js = jsbin_hack(compile_perl6_to_standalone_js(
   @pugs_args
 ));
 print($js), exit if $compile_only;
-run_js($js);
-#run_js_on_jssm($js);
+$run ||= 'js';
+$run = "js_on_$run" if $run ne 'js';
+my $go = main->can("run_$run") or die "unknown run mode";
+$go->($js);
 
 sub write_file {
   my ($contents, $file) = @_;
@@ -112,12 +117,14 @@ Usage: $0 [options] regular_pugs_options
 
 Available options are:
   --js=/path/to/js/interpreter
+  --run=js|jssm|jspm
   --pugs=/path/to/pugs
   --pil2js=/path/to/pil2js.pl              (usually in perl5/PIL2JS/)
   --p6prelude=/path/to/lib6/Prelude/JS.pm  (usually in perl5/PIL2JS/lib6/)
   --metamodel-base=...                     (usually perl5/PIL2JS/libjs/)
   --p6preludepc=/path/to/preludepc.js      (automatically created)
   --testpc=/path/to/test.js                (automatically created)
+  --perl5                                  (use perl5, only available in --run=jspm)
   --compile-only                           (outputs the resulting JS to STDOUT)
   --precompile-only
   --help

@@ -21,6 +21,7 @@ use YAML;
 use Test::Harness;
 use Test::TAP::Model;
 use File::Spec;
+use Benchmark;
 our @ISA = qw(Test::TAP::Model);
 our $SMOKERFILE = ".smoker.yml";
 
@@ -191,10 +192,11 @@ sub get_tests {
 }
 
 sub get_revision {
-    # TODO: generalize to non-svn trees
     my($self) = @_;
-    do { $self->{_revision} = $1 if /Revision: (\d+)$/ } for `svn info`;
+    my $rev_get_cmd = $Config{"pugs-path"}.' -V:pugs_revision';
+    do { $self->{_revision} = $1 if /pugs_revision: (\d+)\r?$/ } for `@{[$rev_get_cmd]}`;
     $self->{_revision} ||= "unknown";
+    print "$rev_get_cmd returns revision '@{[$self->{_revision}]}'\n";
 }
 
 sub run {
@@ -242,7 +244,11 @@ sub gather_results {
 sub run_test {
     my $self = shift;
     my $test = shift;
+    my @rest = @_;
     my $kid  = $self->{_child_num} ? "[$self->{_child_num}] " : "";
     warn "$kid$test\n";
-    $self->SUPER::run_test($test, @_);
+    my $t = timeit( 1, sub {
+        $self->SUPER::run_test($test, @rest);
+    } );
+    warn "    ".timestr($t)."\n";
 }

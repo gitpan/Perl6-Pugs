@@ -6,7 +6,7 @@ use Test;
 plan 2;
 
 # See thread "return() in pointy blocks" by Ingo Blechschmidt on p6l
-# http://www.nntp.perl.org/group/perl.perl6.language/21745
+# L<"http://www.nntp.perl.org/group/perl.perl6.language/21745">
 # We may have to change the expected results of this test if Larry changes his
 # mind (which I don't hope).
 
@@ -28,7 +28,7 @@ sub bar (Code $return) { $return(42) }
 {
   sub foo2 (Code $code) {
     my $return_to_caller = -> $ret {
-      -> $ret_ { return $ret_ }; 
+      (-> $ret_ { return $ret_ })($ret);
     };
 
     $code($return_to_caller); 
@@ -42,7 +42,7 @@ sub bar (Code $return) { $return(42) }
 
 =begin more-discussion-needed
 
-Problem is: How does a plain reference to return know what scope to leave?
+Problem is: How does a plain reference to return know which scope to leave?
 
 # &return
 {

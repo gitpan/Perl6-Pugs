@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 183;
+plan 186;
 
 my $five = abs(-5);
 
@@ -13,21 +13,21 @@ unless ($five == 5) {
     exit();
 }
 
-sub tryok ($ok, ?$todo = '') {
+sub tryok ($ok, $todo = '') {
     if ($todo) {
         &ok.goto($ok,$todo, :todo);
     } else {
         &ok.goto($ok);
     }
 }
-sub tryeq ($lhs, $rhs, ?$todo = '') {
+sub tryeq ($lhs, $rhs, $todo = '') {
     if ($todo) {
         &ok.goto($lhs == $rhs,$todo ~ " " ~ $lhs ~ " != " ~ $rhs, :todo);
     } else {
         &ok.goto($lhs == $rhs);
     }
 }
-sub tryeq_sloppy ($lhs, $rhs, ?$todo1 = '') {
+sub tryeq_sloppy ($lhs, $rhs, $todo1 = '') {
     my $todo = $todo1;  # TODO is rw
     $todo = ' # TODO ' ~ $todo if $todo;
     if ($lhs == $rhs) {
@@ -311,6 +311,7 @@ is Inf*Inf, Inf;
 is Inf/Inf, NaN;
 is Inf*Inf/Inf, NaN;
 is Inf**0, 1;
+is 0**0, 1;
 is 0**Inf, 0;
 
 my $inf1 = 100**Inf;
@@ -319,12 +320,13 @@ my $inf2 = Inf**Inf;
 is $inf2, Inf, "Inf**Inf";
 
 
-# See http://mathworld.wolfram.com/Indeterminate.html
+# See L<"http://mathworld.wolfram.com/Indeterminate.html">
 # for why these three values are defined like they are.
-#tryeq 0.9**Inf, 0, "0.9**Inf converges towards 0";
-#tryeq 1.1**Inf, Inf, "1.1**Inf diverges towards Inf";
-# is 1**Inf, NaN; ## XXX - platform-specific!
-fail("1**Inf is platform-specific -- it's 1 on OSX and NaN elsewhere", :todo);
+is 0.9**Inf, 0,   "0.9**Inf converges towards 0";
+is 1.1**Inf, Inf, "1.1**Inf diverges towards Inf";
+is 1**Inf, 1;
+
+#flunk("1**Inf is platform-specific -- it's 1 on OSX and NaN elsewhere", :todo);
 
 # NaN
 is NaN, NaN;

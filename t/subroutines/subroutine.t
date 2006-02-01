@@ -32,9 +32,10 @@ ok(twice(5) == 10);
 #if (&twice(5 - 3) == 4) { say "ok 4" } else { say "not ok 4" }
 ok(twice(5 - 3) == 4);
 
-my $_;
+# XXX - This should be the default, but here we are testing CALLER, not $_
+env $_;
 
-sub callerunderscore (?$foo = $CALLER::_) {
+sub callerunderscore ($foo = $CALLER::_) {
     return "-" ~ $foo ~ "-"
 }
 
@@ -81,7 +82,7 @@ L<S06/"Unpacking array parameters">
 
 =cut
 
-sub argShifter (@a) {
+sub argShifter (@a is rw) {
     my $first := shift @a;
     return $first;
 }
@@ -100,7 +101,7 @@ L<S06/"Unpacking hash parameters">
 
 =cut
 
-eval 'sub unpack_hash({+$yo, *%other}){ return $yo; }';
+eval 'sub unpack_hash({:$yo, *%other}){ return $yo; }';
 
 my %params = yo => 3, nope => 4;
 is(try { unpack_hash(%params) }, 3, 'unpacking a hash parameter', :todo);

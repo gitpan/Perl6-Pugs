@@ -3,8 +3,6 @@
 use v6;
 use Test;
 
-=kwid
-
 =head1 Binding tests
 
 These tests are derived from the "Binding" section of Synopsis 3
@@ -15,7 +13,7 @@ L<S03/"Binding">
 
 plan 28;
 
-# L<S03/"Binding" /replaces the container itself.  For instance:/>
+# L<S03/"Binding" /replaces the container itself\.  For instance:/>
 # Basic scalar binding tests
 {
   my $x = 'Just Another';
@@ -45,8 +43,8 @@ plan 28;
   }
 
   sub foo {
-    my $a = "foo";
-    my $b := $a;
+    env $a = "foo";
+    env $b := $a;
     return bar(); # && bar2();
   }
 

@@ -6,14 +6,14 @@ use Test;
 =kwid
 
 Tests assigning default values to variables of type code in sub definitions.
-
+L<S06/"Optional parameters" /Default values can be calculated at run-time/>
 =cut
 
 plan 2;
 
 sub doubler($x) { return 2 * $x }
 
-sub value_v(Code +$func = &doubler) {
+sub value_v(Code :$func = &doubler) {
     return $func(5);
 }
 
@@ -25,11 +25,11 @@ use v6;
 
 sub double($x) { return 2 * $x }
 
-sub val_v(Code +$func = &double) is export {
+sub val_v(Code :$func = &double) is export {
     return $func(5);
 }
 
 package main;
 use Test;
 
-ok((val_v), "default sub called in package namespace");
+ok((MyPack::val_v), "default sub called in package namespace");

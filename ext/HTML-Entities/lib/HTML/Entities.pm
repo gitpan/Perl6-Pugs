@@ -285,7 +285,7 @@ multi sub decode_entities($string is rw) is export
     my $result = $string;
     
     $result ~~ s:perl5:g/&\#(\d+);?/{chr($0)}/;
-    $result ~~ s:perl5:g/(&\#[xX]([0-9a-fA-F]+);?)/{my $c = hex($1); $c < 256 ?? chr($c) !! $0}/;
+    $result ~~ s:perl5:g/(&\#[xX]([0-9a-fA-F]+);?)/{my $c = :16($1); $c < 256 ?? chr($c) !! $0}/;
     $result ~~ s:perl5:g/(&(\w+);?)/{%entity_to_char{$1} // $0}/;
     
     $string = $result;
@@ -293,11 +293,16 @@ multi sub decode_entities($string is rw) is export
     return $result;
 }
 
+multi sub decode_entities(@strings is rw) is export
+{
+    decode_entities(*@strings);
+}
+
 multi sub decode_entities(*@strings is rw) is export
 {
     @strings;
     
-    my @results = @strings.map:-> $string is rw { decode_entities($string); };
+    my @results = @strings.map:-> $string is copy { decode_entities($string); };
     
     return @results;
 }
@@ -315,7 +320,7 @@ sub encode_entities_numeric (Str $string) returns Str is export
 }
 
 my %subst;  # compiled encoding regexps
-sub encode_entities (Str $string is rw, ?$unsafe_chars) is export
+sub encode_entities (Str $string is rw, $unsafe_chars?) is export
 {
     my $result = $string;
     if ($string.defined && $unsafe_chars.defined) {

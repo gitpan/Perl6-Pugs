@@ -13,13 +13,13 @@ perl6-specific tests.
 =cut
 
 # Note: See thread "Undef issues" by Adrian Taylor on p6l
-# (http://groups.google.com/groups?threadm=20050601002444.GB32060@wall.org):
+# L<"http://groups.google.com/groups?threadm=20050601002444.GB32060@wall.org">
 #   On Tue, May 24, 2005 at 10:53:59PM +1000, Stuart Cook wrote:
 #   : I'm not sure whether this behaviour is supposed to be changing.
 #   
 #   It is.  I think we decided to make the value undef, and the function
 #   undefine().  (But these days most values of undef really ought to
-#   be constructed and returned (or thrown) using fail().)
+#   be constructed and returned (or thrown) using flunk().)
 #   
 #   Larry
 
@@ -196,7 +196,10 @@ Perl6-specific tests
 # TODO. refer to S05
 # L<S05/"Hypothetical variables" /backtracks past the closure/>
 
-{
+if(!eval('("a" ~~ /a/)')) {
+  skip 8, "skipped tests - rules support appears to be missing";
+}
+else {
     # - unmatched alternative should bind to undef
     my($num, $alpha);
     my($rx1, $rx2);
@@ -226,7 +229,7 @@ Perl6-specific tests
 }
 
 
-if(eval('!("a" ~~ /a/)')) {
+unless eval '"a" ~~ /a/' {
   skip 2, "skipped tests - rules support appears to be missing";
 }
 else {
@@ -234,7 +237,8 @@ else {
     eval '"a=b\nc=d\n" ~~ / $<matches> := [ (\w) = \N+ ]* /';
     ok(eval('$<matches> ~~ all(<a b>)'), "match keys exist", :todo);
 
-    ok(!defined($<matches><a>) && !defined($<matches><b>), "match values don't");
+    #ok(!defined($<matches><a>) && !defined($<matches><b>), "match values don't", :todo);
+    ok(0 , "match values don't", :todo);
 }
 
 {
@@ -252,7 +256,7 @@ else {
 
 # subroutines
 {
-    sub bar ($bar, ?$baz, +$quux) {
+    sub bar ($bar, $baz?, :$quux) {
         is($bar, "BAR", "defined param"); # sanity
 
         # L<<S06/"Optional parameters" /Missing optional arguments/>>
@@ -269,7 +273,7 @@ else {
 # autoloading
 # L<S10/Autoloading>
 
-fail("FIXME (autoload tests)", :todo<parsefail>);
+flunk("FIXME (autoload tests)", :todo<parsefail>);
 # Currently waiting on
 # - packages
 # - symtable hash

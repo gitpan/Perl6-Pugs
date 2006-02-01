@@ -32,12 +32,12 @@ if $?PUGS_BACKEND ne "BACKEND_PUGS" {
 }
 
 for %tests.keys.sort -> $type {
-    my @subtests = %tests{$type};
+    my @subtests = *%tests{$type};
     for @subtests -> $test {
         my $code = "{$type}($test[0])";
             my $res = eval($code);
         if ($!) {
-            fail("failed to parse $code ($!)", :todo<feature>);
+            flunk("failed to parse $code ($!)", :todo<feature>);
         } else {
             is($res, $test[1], "$code == $test[1]");
         }

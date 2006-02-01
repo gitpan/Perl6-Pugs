@@ -4,7 +4,7 @@ use v6;
 use Test;
 
 # See thread "@array = $scalar" on p6l started by Ingo Blechschmidt:
-# http://www.nntp.perl.org/group/perl.perl6.language/22959
+# L<"http://www.nntp.perl.org/group/perl.perl6.language/22959">
 
 plan 18;
 
@@ -20,14 +20,14 @@ plan 18;
   my $arrayref = [<a b c>];
   my @array    = ($arrayref);
 
-  is +@array, 1, '@array = ($arrayref) does not flatten the arrayref', :todo<bug>;
+  is +@array, 1, '@array = ($arrayref) does not flatten the arrayref';
 }
 
 {
   my $arrayref = [<a b c>];
   my @array    = $arrayref;
 
-  is +@array, 1, '@array = $arrayref does not flatten the arrayref', :todo<bug>;
+  is +@array, 1, '@array = $arrayref does not flatten the arrayref';
 }
 
 # %hash = $hashref

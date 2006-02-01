@@ -13,11 +13,12 @@ be valid perl6.
 
 =cut
 
-plan 31;
+plan 18;
 
 if(!eval('("a" ~~ /a/)')) {
   skip_rest "skipped tests - rules support appears to be missing";
-} else {
+  exit;
+}
 
 rule abc {abc}
 
@@ -46,10 +47,14 @@ ok("abcabcabcabcd" ~~ m/<cap>/, 'Cap match');
 ok($/, 'Cap matched');
 is($/, "abc", 'Cap zero matched');
 is($/<cap>, "abc", 'Cap captured');
+
 is($/<cap><abc>, "abc", 'Cap abc captured');
 ok(@$/ == 0, 'Cap no array capture');
 ok(%$/.keys == 1, 'Cap hash capture');
 
+flunk('repetitive capture subrules is not yet supported', :todo<bug>);
+
+=begin END
 
 rule repcap {<abc>**{4}}
 
@@ -57,10 +62,10 @@ ok("abcabcabcabcd" ~~ m/<repcap>/, 'Repcap match');
 ok($/, 'Repcap matched');
 is($/, "abcabcabcabc", 'Repcap matched');
 is($/<repcap>, "abcabcabcabc", 'Repcap captured');
-is(eval('$/<repcap><abc>[0]'), "abc", 'Repcap abc zero captured', :todo<bug>);
-is(eval('$/<repcap><abc>[1]'), "abc", 'Repcap abc one captured', :todo<bug>);
-is(eval('$/<repcap><abc>[2]'), "abc", 'Repcap abc two captured', :todo<bug>);
-is(eval('$/<repcap><abc>[3]'), "abc", 'Repcap abc three captured', :todo<bug>);
+is(eval('$/<repcap><abc>[0]'), "abc", 'Repcap abc zero captured');
+is(eval('$/<repcap><abc>[1]'), "abc", 'Repcap abc one captured');
+is(eval('$/<repcap><abc>[2]'), "abc", 'Repcap abc two captured');
+is(eval('$/<repcap><abc>[3]'), "abc", 'Repcap abc three captured');
 ok(@$/ == 0, 'Repcap no array capture');
 
 
@@ -71,6 +76,3 @@ ok($/, 'Caprep matched');
 is($/, "abcabcabcabc", 'Caprep matched');
 is($/<caprep>, "abcabcabcabc", 'Caprep captured');
 is(eval('$/<caprep>[0]'), "abcabcabcabc", 'Caprep abc one captured');
-
-}
-

@@ -5,7 +5,7 @@ use Test;
 
 plan 22;
 
-# See http://www.nntp.perl.org/group/perl.perl6.language/22858 --
+# See L<"http://www.nntp.perl.org/group/perl.perl6.language/22858"> --
 # previously, "my $a; say $::("a")" died (you had to s/my/our/). Now, it was
 # re-specced to work.
 
@@ -49,7 +49,7 @@ plan 22;
   my $result;
 
   try {
-    my $a_var = 42;
+    env $a_var = 42;
     my $sub   = sub { $::("CALLER")::("a_var") };
     $result = $sub();
   };

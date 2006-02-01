@@ -1,7 +1,7 @@
 #!/usr/bin/pugs
 
 use v6;
-require Test;
+use Test;
 
 plan 21;
 
@@ -11,7 +11,7 @@ Very basic tests for CGI
 
 =cut
 
-use_ok('CGI');
+use CGI; pass "(dummy instead of broken use_ok)";
 
 is(header(),
     "Status: 200 OK

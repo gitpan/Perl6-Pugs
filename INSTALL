@@ -5,7 +5,7 @@ Pugs needs the Glasgow Haskell Compiler (GHC) 6.4 or above.  To install GHC,
 download a binary build from http://haskell.org/ghc/.  Although source code
 for GHC is available, it will take a very long time to build by yourself. 
 
-Pugs needs Parrot 0.3.0 or above to support Perl 6 Rules and PIR evaluation.
+Pugs needs Parrot 0.4.1 or above to support Perl 6 Rules and PIR evaluation.
 To install Parrot, follow the instructions at http://www.parrotcode.org/.
 
 http://www.jwcs.net/~jonathan/perl6/ and http://pxperl.com/ both have 
@@ -24,6 +24,8 @@ To install Pugs on your system, simply type this in the command line:
     make                # or 'nmake' on Win32
     make test
     make install
+
+Both make and make test can take a long time (perhaps hours).
 
 To change the installation location, pass PREFIX=/opt/wherever to 
 Makefile.PL like so:
@@ -53,6 +55,9 @@ PUGS_EMBED variable. For example:
  
     export PUGS_EMBED="perl5 parrot" (bash)
     setenv PUGS_EMBED "perl5 parrot" (csh)
+
+XXX Note!
+Using embedded parrot is currently NOT recommended on win32 and x86_64.
 
 To build with an embedded parrot interpreter, make sure the PUGS_EMBED 
 variable contains "parrot", and set the PARROT_PATH variable to point to 
@@ -140,10 +145,8 @@ Perl5-style regular expressions (eg, rx:perl5/foo/) can be used
 without any parrot at all.  Pugs can be built to use parrot external
 (the default), or embedded.  External is recommended.
 
-Embedding parrot currently requires a parrot version later than 0.3.0.
-Parrot 0.3.0 is unfortunately, as of Oct 10 2005, the latest parrot
-release.  It had a bug which has since been fixed.  More recent but
-unreleased and unstable copies of parrot can be obtained from
+Embedding parrot currently requires a parrot version 0.4.1 or later.
+Recent copies of parrot can be obtained from
 http://www.parrotcode.org/source.html .
 
 CAVEATS FOR Win32 USERS
@@ -155,34 +158,12 @@ is usually built with VC++, they cannot embed one another.
 CAVEATS FOR GCC 4.0 USERS
 -------------------------
 
-Mac OS X 10.4 "Tiger" users may see this error message when compiling Pugs:
+GHC 6.4.1 or later is required.
 
-    ___DISCARD__
-    collect2: ld returned 1 exit status
-
-Until GHC 6.4.1 is released, you need to need to issue this command first:
-
-    sudo gcc_select 3.3
-
-Then recompile Pugs using a clean tree.  Other users of GCC 4.0 systems
-may also need to switch to GCC 3.3 to compile Pugs for now.
-
-Note that objects compiled with GCC 4.0 can't be linked with GCC 3.3 objects.
-This means that if you're embedding a Parrot you've built with GCC 4.0, Pugs
-will fail during linking with errors like:
-
-    ld: Undefined symbols:
-    _fprintf$LDBLStub
-    _sprintf$LDBLStub
-    _vfprintf$LDBLStub
-    _snprintf$LDBLStub
-    _printf$LDBLStub
-
-Try building a new Parrot with gcc 3.3, then compile Pugs again.
+This applies to Mac OS X 10.4 "Tiger", and all other GCC 4.0 systems.
 
 CAVEATS FOR x86_64 MACHINES
 ---------------------------
 
 GHC 6.4.1 or later is required.
 
-There is currently an undiagnosed bug in eval_yaml().

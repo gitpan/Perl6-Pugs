@@ -1,9 +1,9 @@
 {-# OPTIONS_GHC -fglasgow-exts -cpp #-}
-{-# OPTIONS_GHC -#include "UnicodeC.h" #-}
+{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 module Pugs.Eval.Var (
     findVar, findVarRef,
-    findSub, evalExpType,
+    findSub, inferExpType,  inferExpCxt, FindSubFailure(..),
     isQualified, packageOf, qualify,
     toPackage, toQualified,
 ) where
@@ -24,8 +24,9 @@ findVar name = do
     rv <- findVarRef name
     case rv of
         Nothing  -> case name of
-            ('&':_) -> maybeM (findSub name Nothing []) $ \sub -> do
-                return $ codeRef sub
+            ('&':_) -> do
+                sub <- findSub name Nothing []
+                return $ either (const Nothing) (Just . codeRef) sub
             _ -> return Nothing
         Just ref -> fmap Just $ liftSTM (readTVar ref)
 
@@ -36,7 +37,8 @@ findVarRef name
         maybeCaller <- asks envCaller
         case maybeCaller of
             Just env -> local (const env) $ do
-                findVarRef (sig ++ name')
+                rv <- findVarRef (sig ++ name')
+                return rv
             Nothing -> retError "cannot access CALLER:: in top level" name
     | Just (package, name') <- breakOnGlue "::" name
     , Just (sig, "") <- breakOnGlue "OUTER" package = do
@@ -45,6 +47,7 @@ findVarRef name
             Just env -> local (const env) $ do
                 findVarRef (sig ++ name')
             Nothing -> retError "cannot access OUTER:: in top level" name
+    | (sig:'+':name') <- name = findVarRef (sig:("CALLER::"++name'))
     | (_:'?':_) <- name = do
         rv  <- getMagical name
         case rv of
@@ -83,53 +86,91 @@ findVarRef name
             when (isJust globSym) $ foundIt globSym
             return Nothing
 
+
+{-|
+  The findSub dispatch system:
+
+  The Eval.Var findSub dispatch system was written before S12's
+  dispatch order was specced clearly.  Back then there were no clear
+  distinction between single and multiple dispatch, and so both were
+  lumped in a single findSub loop.  So "$x.foo.bar" is no different
+  from bar(foo($x)), rather, bar(foo($x:):).  But MMD dictates that
+  you have to find which of the candidate &bar to be dispatched to
+  before you fully evaluate its argument foo($x:) under its specified
+  context.  But you can't find out which candidates of &bar to
+  dispatch to, unless you know the type of foo($x).  That's a
+  chicken-egg problem.  So I wrote a tiny type inferencer to guess a
+  type of an Exp without actually evaluating its side effects.  The
+  idea is that foo($x) is first inferred, then uses that inferred type
+  to decide which bar() to call, and finally evaluate foo($x) in full.
+  Using the argument type expected by bar().  But the infer engine
+  didn't handle indexed expressions well.  $x[0] etc.  In any case,
+  that tiny inferencer is obsolete under the new (November 2005) S12
+  and docs/notes/multimethods.pod.  Which would be implemented at PIL
+  layer.  The inferencer fix I just committed (r8874) for indexed
+  expressions, just checks if both the indice and indexee are simple
+  expressions (i.e. things that can be evaluated without side
+  effects), and if so, it just evaluates them to find out their actual
+  type.
+
+-}
+
+data FindSubFailure
+    = NoMatchingMulti
+    | NoSuchSub
+    | NoSuchMethod String
+
 findSub :: String     -- ^ Name, with leading @\&@.
         -> Maybe Exp  -- ^ Invocant
         -> [Exp]      -- ^ Other arguments
-        -> Eval (Maybe VCode)
+        -> Eval (Either FindSubFailure VCode)
 findSub name' invs args = do
     let name = possiblyFixOperatorName name'
     case invs of
         Just _ | Just (package, name') <- breakOnGlue "::" name
-                 , Just (sig, "") <- breakOnGlue "SUPER" package -> do
+               , Just (sig, "") <- breakOnGlue "SUPER" package -> do
             typ <- asks envPackage
             findSuperSub (mkType typ) (sig ++ name')
         Just exp | not (':' `elem` drop 2 name) -> do
             typ     <- evalInvType $ unwrap exp
-            if typ == mkType "Scalar::Perl5" then runPerl5Sub name else do
+            if typ == mkType "Scalar::Perl5" then fmap (err $ NoSuchMethod $ show typ) (runPerl5Sub name) else do
             findTypedSub typ name
         _ | [exp] <- args -> do
             typ     <- evalInvType $ unwrap exp
             findTypedSub typ name
-        _ -> findBuiltinSub name
+        _ -> findBuiltinSub NoSuchSub name
     where
-    findSuperSub :: Type -> String -> Eval (Maybe VCode)
+    err :: b -> Maybe a -> Either b a
+    err _ (Just j) = Right j
+    err x Nothing  = Left x
+
+    findSuperSub :: Type -> String -> Eval (Either FindSubFailure VCode)
     findSuperSub typ name = do
         let pkg = showType typ
             qualified = (head name:pkg) ++ "::" ++ tail name
         subs    <- findWithSuper pkg name
-        subs'   <- if isJust subs then return subs else findBuiltinSub name
+        subs'   <- either (flip findBuiltinSub name) (return . Right) subs
         case subs' of
-            Just sub | subName sub == qualified -> return Nothing
+            Right sub | subName sub == qualified -> return (Left $ NoSuchMethod $ show typ)
             _   -> return subs'
-    findTypedSub :: Type -> String -> Eval (Maybe VCode)
+    findTypedSub :: Type -> String -> Eval (Either FindSubFailure VCode)
     findTypedSub typ name = do
         subs    <- findWithPkg (showType typ) name
-        if isJust subs then return subs else findBuiltinSub name
-    findBuiltinSub :: String -> Eval (Maybe VCode)
-    findBuiltinSub name = do
+        either (flip findBuiltinSub name) (return . Right) subs
+    findBuiltinSub :: FindSubFailure -> String -> Eval (Either FindSubFailure VCode)
+    findBuiltinSub failure name = do
         sub <- findSub' name
-        if isNothing sub then possiblyBuildMetaopVCode name else return sub
+        maybe (fmap (err failure) $ possiblyBuildMetaopVCode name) (return . Right) sub
     evalInvType :: Exp -> Eval Type
     evalInvType x@(Var (':':typ)) = do
-        typ' <- evalExpType x
+        typ' <- inferExpType x
         return $ if typ' == mkType "Scalar::Perl5" then typ' else mkType typ
     evalInvType (App (Var "&new") (Just inv) _) = do
         evalInvType $ unwrap inv
     evalInvType x@(App (Var _) (Just inv) _) = do
         typ <- evalInvType $ unwrap inv
-        if typ == mkType "Scalar::Perl5" then return typ else evalExpType x
-    evalInvType x = evalExpType $ unwrap x
+        if typ == mkType "Scalar::Perl5" then return typ else inferExpType x
+    evalInvType x = inferExpType $ unwrap x
     runPerl5Sub :: String -> Eval (Maybe VCode)
     runPerl5Sub name = do
         metaSub <- possiblyBuildMetaopVCode name
@@ -164,16 +205,19 @@ findSub name' invs args = do
         -- We try to find the userdefined sub.
         -- We use the first two elements of invs as invocants, as these are the
         -- types of the op.
-            rv = findSub ("&infix:" ++ op) Nothing (take 2 $ args ++ [Val undef, Val undef])
+            rv = fmap (either (const Nothing) Just) $ findSub ("&infix:" ++ op) Nothing (take 2 $ args ++ [Val undef, Val undef])
         maybeM rv $ \code -> return $ mkPrim
             { subName     = "&prefix:[" ++ op ++ "]"
             , subType     = SubPrim
             , subAssoc    = "spre"
-            , subParams   = makeParams ["List"]
-            , subReturns  = mkType "Str"
+            , subParams   = makeParams $
+                if any isLValue (subParams code)
+                    then ["rw!List"] -- XXX - does not yet work for the [=] case
+                    else ["List"]
+            , subReturns  = anyType
             , subBody     = Prim $ \[vs] -> do
                 list_of_args <- fromVal vs
-                op2Fold (list_of_args) (VCode code)
+                op2Fold list_of_args (VCode code)
             }
         -- Now we construct the sub. Is there a more simple way to do it?
     possiblyBuildMetaopVCode op' | "&prefix:" `isPrefixOf` op', "\171" `isSuffixOf` op' = do 
@@ -181,7 +225,7 @@ findSub name' invs args = do
         possiblyBuildMetaopVCode ("&prefix:" ++ op ++ "<<")
     possiblyBuildMetaopVCode op' | "&prefix:" `isPrefixOf` op', "<<" `isSuffixOf` op' = do 
         let op = drop 8 (init (init op'))
-            rv = findSub ("&prefix:" ++ op) Nothing [head $ args ++ [Val undef]]
+            rv = fmap (either (const Nothing) Just) $ findSub ("&prefix:" ++ op) Nothing [head $ args ++ [Val undef]]
         maybeM rv $ \code -> return $ mkPrim
             { subName     = "&prefix:" ++ op ++ "<<"
             , subType     = SubPrim
@@ -196,7 +240,7 @@ findSub name' invs args = do
         possiblyBuildMetaopVCode ("&postfix:>>" ++ op)
     possiblyBuildMetaopVCode op' | "&postfix:>>" `isPrefixOf` op' = do
         let op = drop 11 op'
-            rv = findSub ("&postfix:" ++ op) Nothing [head $ args ++ [Val undef]]
+            rv = fmap (either (const Nothing) Just) $ findSub ("&postfix:" ++ op) Nothing [head $ args ++ [Val undef]]
         maybeM rv $ \code -> return $ mkPrim
             { subName     = "&postfix:>>" ++ op
             , subType     = SubPrim
@@ -211,7 +255,7 @@ findSub name' invs args = do
         possiblyBuildMetaopVCode ("&infix:>>" ++ op ++ "<<")
     possiblyBuildMetaopVCode op' | "&infix:>>" `isPrefixOf` op', "<<" `isSuffixOf` op' = do 
         let op = drop 9 (init (init op'))
-            rv = findSub ("&infix:" ++ op) Nothing (take 2 (args ++ [Val undef, Val undef]))
+            rv = fmap (either (const Nothing) Just) $ findSub ("&infix:" ++ op) Nothing (take 2 (args ++ [Val undef, Val undef]))
         maybeM rv $ \code -> return $ mkPrim
             { subName     = "&infix:>>" ++ op ++ "<<"
             , subType     = SubPrim
@@ -232,20 +276,19 @@ findSub name' invs args = do
             meta    <- readRef ref
             fetch   <- doHash meta hash_fetchVal
             fromVal =<< fetch "traits"
-    findWithPkg :: String -> String -> Eval (Maybe VCode)
+    findWithPkg :: String -> String -> Eval (Either FindSubFailure VCode)
     findWithPkg pkg name = do
         subs <- findSub' (('&':pkg) ++ "::" ++ tail name)
-        if isJust subs then return subs else do
-        findWithSuper pkg name
-    findWithSuper :: String -> String -> Eval (Maybe VCode)
+        maybe (findWithSuper pkg name) (return . Right) subs
+    findWithSuper :: String -> String -> Eval (Either FindSubFailure VCode)
     findWithSuper pkg name = do
         -- get superclasses
         attrs <- fmap (fmap (filter (/= pkg) . nub)) $ findAttrs pkg
-        if isNothing attrs || null (fromJust attrs) then findSub' name else do
+        if isNothing attrs || null (fromJust attrs) then fmap (err NoMatchingMulti) (findSub' name) else do
         (`fix` (fromJust attrs)) $ \run pkgs -> do
-            if null pkgs then return Nothing else do
+            if null pkgs then return (Left $ NoSuchMethod $ pkg) else do
             subs <- findWithPkg (head pkgs) name
-            if isJust subs then return subs else run (tail pkgs)
+            either (const $ run (tail pkgs)) (return . Right) subs
     findSub' :: String -> Eval (Maybe VCode)
     findSub' name = do
         subSyms     <- findSyms name
@@ -270,7 +313,7 @@ findSub name' invs args = do
             ((_, sub):_)    -> Just sub
             _               -> Nothing
     subs :: Int -> [(String, Val)] -> Eval [((Bool, Bool, Int, Int), VCode)]
-    subs slurpLen subSyms = (liftM catMaybes) $ (`mapM` subSyms) $ \(_, val) -> do
+    subs slurpLen subSyms = fmap catMaybes . forM subSyms $ \(_, val) -> do
         sub@(MkCode{ subReturns = ret, subParams = prms }) <- fromVal val
         let rv = return $ arityMatch sub (length (maybeToList invs ++ args)) slurpLen
         maybeM rv $ \fun -> do
@@ -288,15 +331,17 @@ findSub name' invs args = do
         return $ deltaType cls (typeOfCxt cxt) x
     deltaFromPair (x, y) = do
         cls <- asks envClasses
-        typ <- evalExpType y
+        typ <- inferExpType y
         return $ deltaType cls x typ
 
 {-|
 Take an expression, and attempt to predict what type it will evaluate to
 /without/ actually evaluating it.
 -}
-evalExpType :: Exp -> Eval Type
-evalExpType (Var var) = do
+inferExpType :: Exp -> Eval Type
+inferExpType exp@(Var (_:'.':_)) = fromVal =<< evalExp exp
+inferExpType exp@(Var (_:'!':_:_)) = fromVal =<< evalExp exp
+inferExpType (Var var) = do
     rv  <- findVar var
     case rv of
         Nothing  -> return $ typeOfSigil (head var)
@@ -306,34 +351,79 @@ evalExpType (Var var) = do
             if isaType cls "List" typ
                 then return typ
                 else fromVal =<< readRef ref
-evalExpType (Val val) = fromVal val
-evalExpType (App (Val val) _ _) = do
+inferExpType (Val val) = fromVal val
+inferExpType (App (Val val) _ _) = do
     sub <- fromVal val
     return $ subReturns sub
-evalExpType (App (Var "&new") (Just (Var (':':name))) _) = return $ mkType name
-evalExpType (App (Var name) invs args) = do
+inferExpType (App (Var "&new") (Just (Var (':':name))) _) = return $ mkType name
+inferExpType (App (Var name) invs args) = do
     sub <- findSub name invs args
     case sub of
-        Just sub    -> return $ subReturns sub
-        Nothing     -> return $ mkType "Any"
-evalExpType exp@(Syn syn _) | (syn ==) `any` words "{} []" = do
-    val <- evalExp exp
-    fromVal val
-evalExpType (Cxt cxt _) | typeOfCxt cxt /= (mkType "Any") = return $ typeOfCxt cxt
-evalExpType (Cxt _ exp) = evalExpType exp
-evalExpType (Pos _ exp) = evalExpType exp
-evalExpType (Pad _ _ exp) = evalExpType exp
-evalExpType (Sym _ _ exp) = evalExpType exp
-evalExpType (Stmts _ exp) = evalExpType exp
-evalExpType (Syn "sub" [exp]) = evalExpType exp
-evalExpType (Syn "," _)    = return $ mkType "List"
-evalExpType (Syn "\\[]" _) = return $ mkType "Array"
-evalExpType (Syn "\\{}" _) = return $ mkType "Hash"
-evalExpType (Syn "&{}" _)  = return $ mkType "Code"
-evalExpType (Syn "@{}" _)  = return $ mkType "Array"
-evalExpType (Syn "%{}" _)  = return $ mkType "Hash"
-evalExpType (Syn "=>" _)   = return $ mkType "Pair"
-evalExpType _ = return $ mkType "Any"
+        Right sub    -> return $ subReturns sub
+        Left _       -> return $ mkType "Any"
+inferExpType (Ann (Cxt cxt) _) | typeOfCxt cxt /= (mkType "Any") = return $ typeOfCxt cxt
+inferExpType (Ann (Cxt _) exp) = inferExpType exp
+inferExpType (Ann (Pos _) exp) = inferExpType exp
+inferExpType (Pad _ _ exp) = inferExpType exp
+inferExpType (Sym _ _ exp) = inferExpType exp
+inferExpType (Stmts _ exp) = inferExpType exp
+inferExpType (Syn "," _)    = return $ mkType "List"
+inferExpType (Syn "\\[]" _) = return $ mkType "Array"
+inferExpType (Syn "\\{}" _) = return $ mkType "Hash"
+inferExpType (Syn "&{}" _)  = return $ mkType "Code"
+inferExpType (Syn "@{}" _)  = return $ mkType "Array"
+inferExpType (Syn "%{}" _)  = return $ mkType "Hash"
+inferExpType (Syn "=>" _)   = return $ mkType "Pair"
+inferExpType exp@(Syn "{}" [_, idxExp]) = if isSimpleExp exp
+    then fromVal =<< evalExp exp
+    else fmap typeOfCxt (inferExpCxt idxExp)
+inferExpType exp@(Syn "[]" [_, idxExp]) = if isSimpleExp exp
+    then fromVal =<< evalExp exp
+    else fmap typeOfCxt (inferExpCxt idxExp)
+inferExpType (Syn "sub" [exp]) = inferExpType exp
+inferExpType _ = return anyType
+
+isSimpleExp :: Exp -> Bool
+isSimpleExp Var{}           = True
+isSimpleExp Val{}           = True
+isSimpleExp (Ann _ x)       = isSimpleExp x
+isSimpleExp (Syn _ xs)      = all isSimpleExp xs
+isSimpleExp _               = False
+
+
+{-|
+Return the context that an expression bestows upon a hash or array
+subscript. See 'reduce' for @\{\}@ and @\[\]@.
+-}
+inferExpCxt :: Exp -- ^ Expression to find the context of
+         -> Eval Cxt
+inferExpCxt (Ann (Pos _) exp)            = inferExpCxt exp
+inferExpCxt (Ann (Cxt cxt) _)            = return cxt
+inferExpCxt (Syn "," _)            = return cxtSlurpyAny
+inferExpCxt (Syn "[]" [_, exp])    = inferExpCxt exp
+inferExpCxt (Syn "{}" [_, exp])    = inferExpCxt exp
+inferExpCxt (Syn (sigil:"{}") _) = return $ cxtOfSigil sigil
+inferExpCxt (Val (VList _))        = return cxtSlurpyAny
+inferExpCxt (Val (VRef ref))       = do
+    cls <- asks envClasses
+    let typ = refType ref
+    return $ if isaType cls "List" typ
+        then cxtSlurpyAny
+        else CxtItem typ
+inferExpCxt (Val _)                 = return cxtItemAny
+inferExpCxt (Var (sigil:_))         = return $ cxtOfSigil sigil
+inferExpCxt (App (Var "&list") _ _) = return cxtSlurpyAny
+inferExpCxt (App (Var "&item") _ _) = return cxtSlurpyAny
+inferExpCxt (App (Var name) invs args)   = do
+    -- inspect the return type of the function here
+    env <- ask
+    sub <- findSub name invs args
+    return $ case sub of
+        Right sub
+            | isaType (envClasses env) "Scalar" (subReturns sub)
+            -> CxtItem (subReturns sub)
+        _ -> cxtSlurpyAny
+inferExpCxt _                      = return cxtSlurpyAny
 
 {-|
 Evaluate the \'magical\' variable associated with a given name. Returns 
@@ -441,17 +531,22 @@ qualify name = case isQualified name of
         in sigil ++ "main::" ++ name'
 
 isQualified :: String -> Maybe (String, String)
-isQualified name | Just (post, pre) <- breakOnGlue "::" (reverse name) =
+isQualified name
+    | Just (post, pre) <- breakOnGlue "::" (reverse name) =
     let (sigil, pkg) = span (not . isAlphaNum) preName
         name'       = possiblyFixOperatorName (sigil ++ postName)
         preName     = reverse pre
         postName    = reverse post
-    in Just (pkg, name')
+    in case takeWhile isAlphaNum pkg of
+        "OUTER"     -> Nothing
+        "CALLER"    -> Nothing
+        _           -> Just (pkg, name')
 isQualified _ = Nothing
 
 toQualified :: String -> Eval String
 toQualified name@(_:'*':_) = return name
 toQualified name@(_:'?':_) = return name
+toQualified name@(_:'+':_) = return name
 toQualified name@(_:"!") = return name
 toQualified name@(_:"/") = return name
 toQualified name = do

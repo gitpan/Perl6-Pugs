@@ -60,19 +60,19 @@ class Recurrence-0.01
     has Code $.complement_next;
     has Code $.complement_previous;
     has Recurrence $.universe;   
-    has Int  $:arbitrary_limit;
+    has Int  $!arbitrary_limit;
 
 submethod BUILD (
     $.closure_next, 
     $.closure_previous, 
-    ?$is_universe, 
-    ?$complement_next, 
-    ?$complement_previous, 
-    ?$.universe, 
+    $is_universe?, 
+    $complement_next?, 
+    $complement_previous?, 
+    $.universe?, 
 ) 
 {
-    # TODO - get rid of "$:arbitrary_limit"
-    $:arbitrary_limit = 100;
+    # TODO - get rid of "$!arbitrary_limit"
+    $!arbitrary_limit = 100;
     
     if $is_universe {
         # $.universe = $self --> $self doesn't exist yet
@@ -89,7 +89,7 @@ method get_universe ($self: ) {
 }
 
 method equal ($self: $set ) returns Bool {
-    $self.closure_next =:= $set.closure_next
+    $self.closure_next === $set.closure_next
 }
 
 method stringify ($self: ) returns Str {
@@ -220,7 +220,7 @@ method end ($self: ) {
 # --------- internals -----------
 
 submethod _get_union ( $closure1, $closure2, $direction ) {
-    return $closure1 if $closure1 =:= $closure2;
+    return $closure1 if $closure1 === $closure2;
     return sub ( $x is copy ) {
         my $n1 = &{ $closure1 }( $x );
         my $n2 = &{ $closure2 }( $x );
@@ -229,11 +229,11 @@ submethod _get_union ( $closure1, $closure2, $direction ) {
 }
 
 submethod _get_intersection ( $closure1, $closure2, $closure3, $closure4 ) {
-    return $closure1 if $closure1 =:= $closure3;
+    return $closure1 if $closure1 === $closure3;
     return sub ( $x ) {
         my $n1;
         my $n2 = &{ $closure3 }( $x );
-        for ( 0 .. $:arbitrary_limit )
+        for ( 0 .. $!arbitrary_limit )
         {
             $n1 = &{ $closure1 }( &{ $closure2 }( $n2 ) );
             return $n1 if $n1 == $n2;
@@ -248,7 +248,7 @@ submethod _get_complement_next ($self: ) {
     $self.get_universe;
     return $.complement_next =
         sub ( $x is copy ) {
-            for ( 0 .. $:arbitrary_limit )
+            for ( 0 .. $!arbitrary_limit )
             {
                 $x = &{ $.universe.closure_next }( $x );
                 return $x if $x == Inf || $x == -Inf ||
@@ -263,7 +263,7 @@ submethod _get_complement_previous ($self: ) {
     $self.get_universe;
     return $.complement_previous =
         sub ( $x is copy ) {
-            for ( 0 .. $:arbitrary_limit )
+            for ( 0 .. $!arbitrary_limit )
             {
                 $x = &{ $.universe.closure_previous }( $x );
                 return $x if $x == Inf || $x == -Inf ||
@@ -389,7 +389,7 @@ Returns true if this recurrence intersects (has any element in common) with the 
 
 Returns true if the closures that define the recurrences are exactly the same.
 
-This method tests the closures identities using the '=:=' operation.
+This method tests the closures identities using the '===' operation.
 
 = SCALAR FUNCTIONS
 

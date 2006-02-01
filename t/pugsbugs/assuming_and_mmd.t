@@ -5,8 +5,8 @@ use Test;
 
 plan 6;
 
-multi sub testsub (Str $x, $y) { "Str" }
-multi sub testsub (Int $x, $y) { "Int" }
+multi testsub (Str $x, $y) { "Str" }
+multi testsub (Int $x, $y) { "Int" }
 
 is testsub("a_str", 42), "Str", "basic MMD works (1)";
 is testsub(23,      42), "Int", "basic MMD works (2)";

@@ -80,18 +80,15 @@ sub JS::Root::map(Code $code, *@array is rw) is primitive {
   @res;
 }
 
-method sort(@self: Code ?$cmp = &infix:<cmp>) { sort $cmp, *@self }
-sub JS::Root::sort(Code ?$cmp is copy = &infix:<cmp>, *@array) is primitive {
+# XXX XXX XXX XXX ("luckily", the fully qualified name of a method doesn't
+# matter. XXX XXX evil hack)
+method sort(@self: Code $cmp = &infix:<cmp>) { sort $cmp, @self }
+method PIL2JS::Internals::This::Is::A::Truly::Horrible::Hack::sort(%self: Code $cmp = &infix:<cmp>) { sort $cmp, %self.pairs }
+sub JS::Root::sort(Code $cmp is copy = &infix:<cmp>, *@array) is primitive {
   # Hack
   unless $cmp.isa("Code") {
     unshift @array, @$cmp;
     $cmp := &infix:<cmp>;
-    # Hack: $cmp = &infix:<cmp> should work, too, but doesn't, as $cmp is an
-    # array, *not* an arrayref! (Therefore, that's rewritten as $cmp =
-    # (&infix:<cmp>), causing $cmp to stay an Array and only $cmp[0] to be the
-    # Code object we want. Fixing this would require a more intelligent
-    # parameter binding routine or separate PIL2JS.Box.Scalar,
-    # PIL2JS.Box.Array, etc. (later!)
   }
 
   die "&sort needs a Code as first argument!" unless $cmp.isa("Code");
@@ -131,9 +128,9 @@ sub JS::Root::reduce(Code $code, *@array) is primitive {
   $ret;
 }
 
-method min(@self: Code ?$cmp = &infix:«<=>») { min $cmp, *@self }
-method max(@self: Code ?$cmp = &infix:«<=>») { max $cmp, *@self }
-sub JS::Root::min(Code ?$cmp = &infix:«<=>», *@array) is primitive {
+method min(@self: Code $cmp = &infix:«<=>») { min $cmp, *@self }
+method max(@self: Code $cmp = &infix:«<=>») { max $cmp, *@self }
+sub JS::Root::min(Code $cmp = &infix:«<=>», *@array) is primitive {
   # Hack, see comment at &sort.
   unless $cmp.isa("Code") {
     unshift @array, @$cmp;
@@ -141,7 +138,7 @@ sub JS::Root::min(Code ?$cmp = &infix:«<=>», *@array) is primitive {
   }
   @array.max:{ $cmp($^b, $^a) };
 }
-sub JS::Root::max(Code ?$cmp = &infix:«<=>», *@array) is primitive {
+sub JS::Root::max(Code $cmp = &infix:«<=>», *@array) is primitive {
   # Hack, see comment at &sort.
   unless $cmp.isa("Code") {
     unshift @array, @$cmp;
@@ -172,6 +169,34 @@ sub JS::Root::sum(*@vals) is primitive {
   # We should return undef if we haven't been giving @vals to sum.
 }
 
+method uniq(@self: Code $cmp = &infix:<===>) { uniq $cmp, @self }
+sub JS::Root::uniq(Code $cmp is copy = &infix:<cmp>, *@array) is primitive {
+  # Hack
+  unless $cmp.isa("Code") {
+    unshift @array, @$cmp;
+    $cmp := &infix:<===>;
+  }
+
+  # XXX O(n²) implementation, needing .id or === hashes for a better
+  # implementation
+  my @res;
+  for @array -> $elem {
+    unless $cmp($elem, any(@res)) {
+      push @res, $elem;
+    }
+  }
+
+  @res;
+}
+
+sub JS::Root::zip(Array *@arrays) is primitive is rw {
+  my $maxlen = max map { +$_ } @arrays;  # XXX wanting hyperops
+  map {
+    my $i := $_;
+    map { @arrays[$_][$i] } 0..@arrays.end;
+  } 0..$maxlen-1;
+}
+
 method reverse(*@things is copy:) {
   # Hack, should of course use context info, but that's not here yet.
   if @things == 1 {
@@ -185,14 +210,15 @@ method reverse(*@things is copy:) {
   }
 }
 
-sub infix:<..>(Num $from is copy, Num $to) is primitive {
-  my @array = ($from,);
+sub infix:<..>(Num $from, Num $to) is primitive {
+  my $i;
+  my @res;
 
-  while(($from += 1) <= $to) {
-    push @array: $from;
+  loop $i = $from; $i <= $to; $i++ {
+    push @res, $i;
   }
 
-  @array;
+  @res;
 }
 sub infix:<^..>  (Num $from, Num $to) is primitive { ($from + 1)..$to }
 sub infix:<..^>  (Num $from, Num $to) is primitive { $from..($to - 1) }
@@ -292,9 +318,15 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
     var cc    = args.pop();
     var array = args[0].FETCH();
     var idxs  = args[1].toNative();
+
+    var orig_value = [];
     for(var i = 0; i < idxs.length; i++) {
       idxs[i] = Number(idxs[i]);
-      idxs[i] = idxs[i] < 0 ? array.length + idxs[i] : idxs[i];
+      if(idxs[i] < 0) {
+        var orig = Number(idxs[i]);
+        idxs[i] = array.length + idxs[i];
+        orig_value[idxs[i]] = orig;
+      }
     }
 
     if(idxs.length == 0) PIL2JS.die("No indices given to &postcircumfix:<[ ]>!");
@@ -307,6 +339,9 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
           return ret == undefined ? undefined : ret.FETCH();
         },
         function (n) {
+          if(idx < 0)
+            PIL2JS.die("Modification of non-creatable array value attempted, subscript " + orig_value[idx]);
+
           // Support (in a slightly hacky manner) ($a, undef, $b) = (3,4,5).
           if(
             array[idx] == undefined || (
@@ -323,9 +358,11 @@ method postcircumfix:<[]>(@self: Int *@idxs) is rw {
 
       ret.uid = array[idx] == undefined ? undefined : array[idx].uid;
 
-      // .BINDTO is special: @a[$idx] := $foo should work, but @a[1000], with +@a
-      // < 1000, should not.
+      // @a[$idx] := $foo should autovivify @a[$idx] if necessary.
       ret.BINDTO = function (other) {
+        if(idx < 0)
+          PIL2JS.die("Modification of non-creatable array value attempted, subscript " + orig_value[idx]);
+
         if(array[idx] == undefined)
           array[idx] = new PIL2JS.Box(undefined);
 
@@ -406,7 +443,7 @@ sub PIL2JS::Internals::Hacks::init_undef_array_postcircumfix_method () is primit
 }
 
 # Code from Prelude::PIR
-sub splice (@a is rw, ?$offset=0, ?$length, *@list) is primitive {
+sub splice (@a is rw, $offset=0, $length?, *@list) is primitive {
     my $off = +$offset;
     my $len = $length;
     my $size = +@a;
@@ -441,6 +478,9 @@ sub splice (@a is rw, ?$offset=0, ?$length, *@list) is primitive {
         my $i = $size + $size_change -1;
         my $final = $off + $size_change;
         while $i >= $final {
+            # The .delete here is necessary to destroy all possible bindings
+            # user code has to @a[$i], see t/operators/binding/arrays.t.
+            @a.delete($i);
             @a[$i] = @a[$i-$size_change];
             $i--;
         }
@@ -448,6 +488,9 @@ sub splice (@a is rw, ?$offset=0, ?$length, *@list) is primitive {
         my $i = $off;
         my $final = $size + $size_change -1;
         while $i <= $final {
+            # The .delete here is necessary to destroy all possible bindings
+            # user code has to @a[$i], see t/operators/binding/arrays.t.
+            @a.delete($i);
             @a[$i] = @a[$i-$size_change];
             $i++;
         }
@@ -462,6 +505,9 @@ sub splice (@a is rw, ?$offset=0, ?$length, *@list) is primitive {
     if $listlen > 0 {
         my $i = 0;
         while $i < $listlen {
+            # The .delete here is necessary to destroy all possible bindings
+            # user code has to @a[$off+$i], see t/operators/binding/arrays.t.
+            @a.delete($off+$i);
             @a[$off+$i] = @list[$i];
             $i++;
         }
