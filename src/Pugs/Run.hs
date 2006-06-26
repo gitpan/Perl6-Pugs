@@ -1,4 +1,5 @@
-{-# OPTIONS_GHC -fglasgow-exts -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-full-laziness -fno-cse -cpp #-}
+
 
 {-|
     Runtime engine.
@@ -25,14 +26,18 @@ import Pugs.AST
 import Pugs.Types
 import Pugs.Eval
 import Pugs.Prim
+import Pugs.Prim.Eval
 import Pugs.Embed
+import Pugs.Prelude 
 import Data.IORef
-import System.FilePath
 import qualified Data.Map as Map
+import qualified Data.ByteString as Str
+import DrIFT.YAML
+import Data.Yaml.Syck
+--import Data.Generics.Schemes
+import System.IO
+import System.FilePath (joinFileName)
 
-#ifndef HADDOCK
-#include "PreludePC.hs"
-#endif
 
 {-|
 Run 'Main.run' with command line args. 
@@ -48,6 +53,7 @@ runEvalMain :: Env -> Eval Val -> IO Val
 runEvalMain env eval = withSocketsDo $ do
     val     <- runEvalIO env eval
     -- freePerl5 my_perl
+    liftIO performGC
     return val
 
 runEnv :: Env -> IO Val
@@ -106,7 +112,7 @@ prepareEnv name args = do
     errSV   <- newScalar (VStr "")
     defSV   <- newScalar undef
     autoSV  <- newScalar undef
-    classes <- initClassObjects [] initTree
+    classes <- initClassObjects (-1) [] initTree
 #if defined(PUGS_HAVE_HSPLUGINS)
     hspluginsSV <- newScalar (VInt 1)
 #else
@@ -171,16 +177,20 @@ prepareEnv name args = do
     where
     hideInSafemode x = if safeMode then MkRef $ constScalar undef else x
 
-initClassObjects :: [Type] -> ClassTree -> IO [STM PadMutator]
-initClassObjects parent (Node typ children) = do
-    obj     <- createObject (mkType "Class") $
+initClassObjects :: ObjectId -> [Type] -> ClassTree -> IO [STM PadMutator]
+initClassObjects uniq parent (Node typ children) = do
+    obj     <- createObjectRaw uniq Nothing (mkType "Class")
         [ ("name",   castV $ showType typ)
         , ("traits", castV $ map showType parent)
         ]
     objSV   <- newScalar (VObject obj)
-    rest    <- mapM (initClassObjects [typ]) children
-    let sym = genSym (':':'*':showType typ) $ MkRef objSV
-    return (sym:concat rest)
+    rest    <- mapM (initClassObjects (pred uniq) [typ]) children
+    let metaSym  = genSym (':':'*':name) $ MkRef objSV
+        codeSym  = genMultiSym ('&':'*':name) $ codeRef typeCode
+        name     = showType typ
+        typeBody = Val . VType . mkType $ name
+        Syn "sub" [Val (VCode typeCode)] = typeMacro name typeBody
+    return (metaSym:codeSym:concat rest)
 
 {-|
 Combine @%*ENV\<PERL6LIB\>@, -I, 'Pugs.Config.config' values and \".\" into the
@@ -209,3 +219,56 @@ getLibs = do
                  , foldl1 joinFileName [getConfig "sitelib", "auto", "pugs", "perl6", "lib"]
                  ]
               ++ [ "." ]
+
+{-# NOINLINE _BypassPreludePC #-}
+_BypassPreludePC :: IORef Bool
+_BypassPreludePC = unsafePerformIO $ newIORef False
+
+initPreludePC :: Env -> IO Env
+initPreludePC env = do
+    bypass <- readIORef _BypassPreludePC
+    if bypass then return env else do
+        let dispProgress = (posName . envPos $ env) == "<interactive>"
+        when dispProgress $ putStr "Loading Prelude... "
+        catch loadPreludePC $ \e -> do
+            when (isUserError e && not (null (ioeGetErrorString e))) $ do
+                hPrint stderr e
+            when dispProgress $ do
+                hPutStr stderr "Reloading Prelude from source..."
+            evalPrelude
+        when dispProgress $ putStrLn "done."
+        return env
+    where
+    style = MkEvalStyle
+        { evalResult = EvalResultModule
+        , evalError  = EvalErrorFatal
+        }
+    evalPrelude = runEvalIO env{ envDebug = Nothing } $ opEval style "<prelude>" preludeStr
+    loadPreludePC = do  -- XXX: this so wants to reuse stuff from op1EvalP6Y
+        -- print "Parsing yaml..."
+        incs <- liftIO $ fmap ("blib6/lib":) getLibs
+        yml  <- liftIO $ getYaml incs "Prelude.pm.yml" Str.readFile
+        when (nodeElem yml == YamlNil) $ fail ""
+        -- FIXME: this detects an error if a bad version number was found,
+        -- but not if no number was found at all. Then again, if that
+        -- happens surely the fromYAML below will fail?
+        case yml of
+            MkYamlNode{ nodeElem=YamlSeq (v:_) }
+                | MkYamlNode{ nodeElem=YamlStr vnum } <- v
+                , vnum /= (packBuf $ show compUnitVersion) -> do
+                    fail "incompatible version number for compilation unit"
+            _ -> return ()
+        -- print "Parsing done!"
+        -- print "Loading yaml..."
+        --(glob, ast) <- fromYAML yml
+        MkCompUnit _ glob ast <- liftIO $ fromYAML yml
+        -- print "Loading done!"
+        liftSTM $ modifyTVar (envGlobal env) (`unionPads` glob)
+        runEnv env{ envBody = ast, envDebug = Nothing }
+        --     Right Nothing -> fail ""
+        --     x  -> fail $ "Error loading precompiled Prelude: " ++ show x
+    getYaml incs fileName loader = do
+        pathName <- liftIO $ requireInc incs fileName ""
+        parseYamlBytes =<< loader pathName
+        
+

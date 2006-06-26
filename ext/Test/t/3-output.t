@@ -19,7 +19,7 @@ sub nonce () { return (".$*PID." ~ int rand 1000) }
 my $out_fn = "temp-ex-output" ~ nonce;
 my $redir_pre = "2>&1 >";
 my $redir_post = "2>&1";
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
     $redir_pre = ">";
     $redir_post = "";
 };
@@ -27,7 +27,7 @@ if($*OS eq any<MSWin32 mingw msys cygwin>) {
 my $file = $?FILE;
 $file ~~ s:P5/output.t/script.pl/;
 my $cmd = "$*EXECUTABLE_NAME $file $redir_pre $out_fn $redir_post";
-%ENV<TEST_ALWAYS_CALLER> = 0;
+%*ENV<TEST_ALWAYS_CALLER> = 0;
 
 diag($cmd);
 system($cmd);

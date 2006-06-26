@@ -35,26 +35,12 @@ bindNames :: [Exp] -- ^ List of argument expressions to be bound
 bindNames exps prms = (bound, exps', prms')
     where
     prms' = prms \\ (map fst bound)
-    (bound, exps') = foldr doBind ([], []) (map unwrapNamedArg exps)
-    doBind (name, exp) (bound, exps) 
-        | Just prm <- find ((matchNamedAttribute name) . paramName) prms
-        = ( ((prm, exp) : bound), exps )
-        | otherwise
-        = ( bound, (Syn "=>" [Val (VStr name), exp]:exps) )
-
-
-{-|
-Return @True@ if the given argument-pair-key matches the given parameter name.
-Sigils and the twigils '@.@' and '@:@' are discarded from the parameter name
-for the purposes of the match.
--}
-matchNamedAttribute :: String -- ^ Named argument's key
-                    -> String -- ^ Parameter name to match against
-                    -> Bool
-matchNamedAttribute arg (_:'.':param) = param == arg
-matchNamedAttribute arg (_:':':param) = param == arg
-matchNamedAttribute arg     (_:param) = param == arg
-matchNamedAttribute   _             _ = False
+    (bound, exps') = foldr doBindNamed ([], []) (map unwrapNamedArg exps)
+    doBindNamed (name, exp) (bound, exps) = case foundParam of
+        Just prm -> ( ((prm, exp) : bound), exps )
+        _        -> ( bound, (Syn "=>" [Val (VStr name), exp]:exps) )
+        where
+        foundParam = find ((== name) . dropWhile (not . isAlpha) . paramName) prms
 
 emptyHashExp :: Exp
 emptyHashExp  = Val $ VList [] -- VHash $ vCast $ VList []
@@ -197,12 +183,15 @@ finalizeBindings sub = do
 
     -- Check that we have enough invocants bound
     when (not . null $ invocants) $ do
-        let cnt = length invocants
-            act = length boundInvs
-        fail $ "Wrong number of invocant parameters: "
-            ++ (show $ act) ++ " actual, "
-            ++ (show $ act + cnt) ++ " expected in "
-            ++ (show $ subName sub)
+        let missing  = show (length invocants)
+            supplied = show (length boundInvs)
+        fail $ concat
+            [ "Missing invocant parameters in '"
+            , subName sub
+            , "': "
+            , supplied, " received, "
+            , missing,  " missing"
+            ]
             
     let (boundOpt, boundReq) = partition (isOptional . fst) bindings -- bound params which are required
         (optPrms, reqPrms)   = partition isOptional params -- all params which are required, and all params which are opt
@@ -260,8 +249,16 @@ bindSomeParams sub invExp argsExp = do
     (boundArray, newSlurpLimit) <- bindArray posForSlurp slurpPos slurpLimit
     boundScalar <- return $ defaultScalar `zip` (givenInvs ++ givenArgs) -- put, uh, something in $_
 
-    let newBindings = concat [bindings, boundInv, boundNamed, boundPos, boundHash, boundArray, boundScalar]
     let newParams = params \\ (map fst newBindings);
+        newBindings = concat
+            [ bindings      -- Existing bindings
+            , boundInv      -- Newly bound invocants
+            , boundNamed    -- ...nameds
+            , boundPos      -- ...positional
+            , boundHash     -- ...*%hash
+            , boundArray    -- ...*@array
+            , boundScalar   -- ...*$scalar
+            ]
     
     return sub
         { subBindings   = newBindings

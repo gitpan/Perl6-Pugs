@@ -1,8 +1,7 @@
 {-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
-{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 module Pugs.Prim.Yaml (
-  evalYaml, dumpYaml
+  evalYaml, dumpYaml, addressOf,
 ) where
 import Pugs.Internals
 import Pugs.AST
@@ -10,26 +9,26 @@ import Pugs.Pretty
 import Pugs.Types
 import Data.Yaml.Syck
 import qualified Data.Map as Map
+import qualified Data.IntSet as IntSet
 import qualified Data.IntMap as IntMap
+import qualified Data.ByteString as Str
+import DrIFT.YAML
 
 evalYaml :: Val -> Eval Val
 evalYaml cv = do
     str     <- fromVal cv
-    rv      <- liftIO (parseYaml $ encodeUTF8 str)
-    case rv of
-        Left err            -> fail $ "YAML Parse Error: " ++ err
-        Right Nothing       -> return undef
-        Right (Just node)   -> fromYaml node
+    node    <- guardIO (parseYaml $ encodeUTF8 str)
+    fromYaml node
 
 fromYaml :: YamlNode -> Eval Val
-fromYaml MkYamlNode{el=YamlNil}       = return VUndef
-fromYaml MkYamlNode{el=YamlStr str}   = return $ VStr (decodeUTF8 str)
-fromYaml MkYamlNode{el=YamlSeq nodes} = do
+fromYaml MkYamlNode{nodeElem=YamlNil}       = return VUndef
+fromYaml MkYamlNode{nodeElem=YamlStr str}   = return $ VStr $ decodeUTF8 $ unpackBuf str
+fromYaml MkYamlNode{nodeElem=YamlSeq nodes} = do
     vals    <- mapM fromYaml nodes
     av      <- liftSTM $ newTVar $
         IntMap.fromAscList ([0..] `zip` map lazyScalar vals)
     return $ VRef (arrayRef av)
-fromYaml MkYamlNode{el=YamlMap nodes,tag=tag} = do
+fromYaml MkYamlNode{nodeElem=YamlMap nodes, nodeTag=tag} = do
     case tag of
         Nothing  -> do
             vals    <- forM nodes $ \(keyNode, valNode) -> do
@@ -38,13 +37,15 @@ fromYaml MkYamlNode{el=YamlMap nodes,tag=tag} = do
                 return (key, val)
             hv      <- liftSTM $ (newTVar (Map.fromList vals) :: STM IHash)
             return $ VRef (hashRef hv)
-        Just ('p':'u':'g':'s':'/':'o':'b':'j':'e':'c':'t':':':typ) -> do
+        Just s | (pre, post) <- Str.splitAt 16 s   -- 16 == length "tag:pugs:Object:"
+               , pre == packBuf "tag:pugs:Object:" -> do
+            let typ = unpackBuf post
             vals    <- forM nodes $ \(keyNode, valNode) -> do
                 key <- fromVal =<< fromYaml keyNode
                 val <- fromYaml valNode
                 return (key, val)
             return . VObject =<< createObject (mkType typ) vals
-        Just "pugs/Rule" -> do
+        Just s | s == packBuf "tag:pugs:Rule" -> do
             vals    <- forM nodes $ \(keyNode, valNode) -> do
                 key <- fromVal =<< fromYaml keyNode
                 val <- fromYaml valNode
@@ -58,44 +59,53 @@ fromYaml MkYamlNode{el=YamlMap nodes,tag=tag} = do
             stringify <- fromVal =<< Map.lookup "stringify" spec
             adverbs <- Map.lookup "adverbs" spec
             return $ VRule MkRulePGE{rxRule=rule, rxGlobal=global, rxStringify=stringify, rxAdverbs=adverbs}
-        Just x   -> error ("can't deserialize: " ++ x)
+        Just x   -> error ("can't deserialize: " ++ unpackBuf x)
 
-dumpYaml :: Int -> Val -> Eval Val
-dumpYaml limit v = let ?d = limit in do
-    obj  <- toYaml v
-    rv   <- liftIO (emitYaml obj)
-    either (fail . ("YAML Emit Error: "++))
-           (return . VStr . decodeUTF8) rv
+dumpYaml :: Val -> Eval Val
+dumpYaml v = do
+    let ?seen = IntSet.empty
+    obj     <- toYaml v
+    rv      <- guardIO . emitYaml $ obj
+    (return . VStr . decodeUTF8) rv
 
 strNode :: String -> YamlNode
-strNode = mkNode . YamlStr
+strNode = mkNode . YamlStr . packBuf
 
-toYaml :: (?d :: Int) => Val -> Eval YamlNode
-toYaml _ | ?d == 0  = return $ strNode "<deep recursion>" -- fail? make this configurable?
+{-
+addressOf :: a -> IO Int
+addressOf x = do
+    ptr <- newStablePtr x
+    return (castStablePtrToPtr ptr `minusPtr` (nullPtr :: Ptr ()))
+-}
+
+toYaml :: (?seen :: IntSet.IntSet) => Val -> Eval YamlNode
 toYaml VUndef       = return $ mkNode YamlNil
 toYaml (VBool x)    = return $ boolToYaml x
 toYaml (VStr str)   = return $ strNode (encodeUTF8 str)
-toYaml v@(VRef r)   = let ?d = pred ?d in do
-    t  <- evalValType v
-    ifValTypeIsa v "Hash" (hashToYaml r) $ do
-        v'      <- readRef r
-        nodes   <- toYaml v'
-        ifValTypeIsa v "Array" (return nodes) . return $ case v' of
-            VObject _   -> nodes
-            _           -> mkNode $ YamlMap [(strNode "<ref>", nodes)]
-toYaml (VList nodes) = let ?d = pred ?d in do
+toYaml v@(VRef r)   = do
+    ptr <- liftIO $ addressOf r
+    if IntSet.member ptr ?seen then return nilNode{ nodeAnchor = MkYamlReference ptr } else do
+        let ?seen = IntSet.insert ptr ?seen
+        node <- ifValTypeIsa v "Hash" (hashToYaml r) $ do
+            v'      <- readRef r
+            nodes   <- toYaml v'
+            ifValTypeIsa v "Array" (return nodes) $ case v' of
+                VObject _   -> return nodes
+                _           -> liftIO $ toYamlNode r
+        return node{ nodeAnchor = MkYamlAnchor ptr }
+toYaml (VList nodes) = do
     n <- mapM toYaml nodes
     return $ mkNode (YamlSeq n)
     -- fmap YamlSeq$ mapM toYaml nodes
-toYaml v@(VObject obj) = let ?d = pred ?d in do
+toYaml v@(VObject obj) = do
     -- ... dump the objAttrs
     -- XXX this needs fixing WRT demagicalized pairs:
     -- currently, this'll return Foo.new((attr => "value)), with the inner
     -- parens, which is, of course, wrong.
     hash    <- fromVal v :: Eval VHash
     attrs   <- toYaml $ VRef (hashRef hash)
-    return $ tagNode (Just $ "tag:pugs:object:" ++ showType (objType obj)) attrs
-toYaml (VRule MkRulePGE{rxRule=rule, rxGlobal=global, rxStringify=stringify, rxAdverbs=adverbs}) = let ?d = pred ?d in do
+    return $ tagNode (Just $ packBuf $ "tag:pugs:Object:" ++ showType (objType obj)) attrs
+toYaml (VRule MkRulePGE{rxRule=rule, rxGlobal=global, rxStringify=stringify, rxAdverbs=adverbs}) = do
     adverbs' <- toYaml adverbs
     return . mkTagNode "tag:pugs:Rule" $ YamlMap
         [ (strNode "rule", strNode rule)
@@ -105,7 +115,7 @@ toYaml (VRule MkRulePGE{rxRule=rule, rxGlobal=global, rxStringify=stringify, rxA
         ]
 toYaml v = return $ strNode $ (encodeUTF8 . pretty) v
 
-hashToYaml :: (?d :: Int) => VRef -> Eval YamlNode
+hashToYaml :: (?seen :: IntSet.IntSet) => VRef -> Eval YamlNode
 hashToYaml (MkRef (IHash hv)) = do
     h <- hash_fetch hv
     let assocs = Map.toList h

@@ -44,7 +44,8 @@ following values in C<< %?CONFIG >>:
 =cut
 
 my @config = <
-    archlib archname
+    archlib
+    archname
     bin
     exe_ext
     file_sep
@@ -78,7 +79,7 @@ plan @config+2;
 diag "Running under $*OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
     $pugs = 'pugs.exe';
 };
 
@@ -86,5 +87,5 @@ ok( defined %?CONFIG, '%?CONFIG is defined' );
 ok( %?CONFIG.keys() > 0, '%?CONFIG contains keys and values' );
 for @config -> $entry {
     # diag $entry;
-    ok( defined %?CONFIG<<$entry>>, '%?CONFIG{'~$entry~'} exists' ,:todo<UNSPECCED>);
+    ok( defined %?CONFIG<<$entry>>, '%?CONFIG{'~$entry~'} exists');
 };

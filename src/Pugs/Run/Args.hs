@@ -30,7 +30,7 @@ import Pugs.Internals
   'Pugs.Run.runWithArgs'.  The switch ordering is defined
   by compareArgs and is currently:
 
-  > (-h -v -V) (-I) (-d) (-w) (-c) (-C) (--external) (-M) (-n -p) (-l -0 -e other)
+  > (-h -v -V) (-I) (-d) (-w) (-c) (-C) (--external) (-M) (-n -p) (-0 -e other)
 
   Args -M, -n and -p are converted to -e scripts by desugarDashE.
 -}
@@ -70,7 +70,7 @@ unpackOptions opts@("--":_)     = opts
 unpackOptions (('-':opt):arg:rest)
     | takesArg opt              = unpackOption opt ++ (arg:unpackOptions rest)
 unpackOptions (('-':opt):rest)  = unpackOption opt ++ unpackOptions rest
-unpackOptions opts@[filename]   = opts
+unpackOptions opts@[_]          = opts
 unpackOptions (filename:rest)   = filename : "--" : rest
 
 takesArg :: String -> Bool
@@ -110,7 +110,7 @@ findArg arg prefix = do
 {-
   Enforce a canonical order of command line switches.  Currently this is:
 
-  > (-h -v -V) (-I) (-d) (-w) (-c) (-C) (--external) (-M) (-n -p) (-l -0 -e other)
+  > (-h -v -V) (-I) (-d) (-w) (-c) (-C) (--external) (-M) (-n -p) (-0 -e other)
 
   This makes pattern matching more convenient
 
@@ -146,8 +146,6 @@ argRank _                    = 100  -- filename or @ARGS or whatever
 
 gatherArgs :: [String] -> [Arg]
 gatherArgs [] = []
--- XXX implement BEGIN block later
-gatherArgs ("-l":rest)             = gatherArgs("-e":"# BEGIN { ... } # to be done":rest)
 gatherArgs ("-e":frag:rest)        = [Opt "-e" frag] ++ gatherArgs(rest)
 gatherArgs ("--external":mod:rest) = [Opt "--external" mod] ++ gatherArgs(rest)
 gatherArgs ("-I":dir:rest)         = [Opt "-I" dir] ++ gatherArgs(rest)
@@ -167,15 +165,26 @@ gatherArgs (x:xs)                  = [File x] ++ gatherArgs(xs)
 desugarDashE :: [Arg] -> [Arg]
 desugarDashE [] = []
 desugarDashE ((Switch 'p'):args) = desugarDashE $
-    (Opt "-e" "env $_; while ($_ = =<>) { $_ = chomp($_);" : args) ++ [Opt "-e" "; say $_; }"]
+    (Opt "-e" "env $_; while (defined($_ = =<>)) { " : args) ++ [Opt "-e" "; say $_; }"]
 desugarDashE ((Switch 'n'):args) = desugarDashE $
-    (Opt "-e" "env $_; while ($_ = =<>) { $_ = chomp($_);" : args) ++ [Opt "-e" "}"]
+    (Opt "-e" "env $_; while (defined($_ = =<>)) { " : args) ++ [Opt "-e" "}"]
 
 -- -E is like -e, but not accessible as a normal parameter and used only
 -- internally:
 --   "-e foo bar.p6" executes "foo" with @*ARGS[0] eq "bar.p6",
 --   "-E foo bar.p6" executes "foo" and then bar.p6.
-desugarDashE ((Opt "-M" mod):args) = desugarDashE ((Opt "-E" (";use " ++ mod ++ ";\n")):args)
+desugarDashE ((Opt "-M" mod):args)
+    | (mod', (_:args)) <- break (== '=') mod
+    = useWith $ mod' ++ " '" ++ escape args ++ "'.split(',')"
+    | otherwise
+    = useWith mod
+    where
+    useWith mod = desugarDashE ((Opt "-E" (";use " ++ mod ++ ";\n")):args)
+    escape [] = []
+    escape ('\'':xs) = '\\':'\'':escape xs
+    escape ('\\':xs) = '\\':'\\':escape xs
+    escape (x:xs) = x:escape xs
+
 
 -- Preserve the curious Perl5 behaviour:
 --   perl -e 'print CGI->VERSION' -MCGI     # works

@@ -1,30 +1,31 @@
-{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 module Pugs.Parser.Number (
     parseNatOrRat,
     naturalOrRat,
+    signedNaturalOrRat,
 ) where
 import Pugs.Internals
 import Pugs.Rule
+import Text.ParserCombinators.Parsec.Char
 
 parseNatOrRat :: String -> Either ParseError (Either Integer (Ratio Integer))
-parseNatOrRat s = runParser naturalOrRat () "" s
+parseNatOrRat s = runParser signedNaturalOrRat () "" s
+
+signedNaturalOrRat :: GenParser Char st (Either Integer (Ratio Integer))
+signedNaturalOrRat = do
+    sig <- sign
+    if sig then naturalOrRat else do
+        num <- naturalOrRat
+        return $ case num of
+            Left i  -> Left (-i)
+            Right d -> Right (-d)
 
 naturalOrRat :: GenParser Char st (Either Integer (Ratio Integer))
-naturalOrRat  = (<?> "number") $ do
-    sig <- sign
-    num <- natRat
-    return $ if sig
-        then num
-        else case num of
-            Left i  -> Left $ -i
-            Right d -> Right $ -d
+naturalOrRat = (<?> "number") $ do
+        try (char '0' >> zeroNumRat)
+    <|> decimalRat
+    <|> fractRatOnly
     where
-    natRat = do
-            try (char '0' >> zeroNumRat)
-        <|> decimalRat
-        <|> fractRatOnly
-
     zeroNumRat = do
             n <- hexadecimal <|> decimal <|> octalBad <|> octal <|> binary
             return (Left n)
@@ -37,12 +38,12 @@ naturalOrRat  = (<?> "number") $ do
         option (Left n) (try $ fractRat n)
 
     fractRatOnly = do
-        fract <- try $ fraction many1
+        fract <- try fraction
         expo  <- option (1%1) expo
         return (Right $ fract * expo) -- Right is Rat
 
     fractRat n = do
-            fract <- try $ fraction many
+            fract <- try fraction
             expo  <- option (1%1) expo
             return (Right $ ((n % 1) + fract) * expo) -- Right is Rat
         <|> do
@@ -51,15 +52,11 @@ naturalOrRat  = (<?> "number") $ do
                 then return (Right $ (n % 1) * expo)
                 else return (Right $ (n % 1) * expo)
 
-    fraction count = do
+    fraction = do
             char '.'
-            notFollowedBy . satisfy $ \x -> case x of
-                '_' -> True
-                '.' -> True
-                '=' -> True
-                _   -> isAlpha x
-            digits <- count (satisfy isWordDigit) <?> "fraction"
-            return (digitsToRat $ filter (/= '_') digits)
+            digit  <- satisfy isDigit
+            digits <- many (satisfy isWordDigit) <?> "fraction"
+            return (digitsToRat $ filter (/= '_') (digit:digits))
         <?> "fraction"
         where
         digitsToRat d = digitsNum d % (10 ^ length d)
@@ -76,10 +73,6 @@ naturalOrRat  = (<?> "number") $ do
         where
         power e | e < 0      = 1 % (10^abs(e))
                 | otherwise  = (10^e) % 1
-
-    sign            =   (char '-' >> return False)
-                    <|> (char '+' >> return True)
-                    <|> return True
 
     decimalLiteral         = number 10
     hexadecimal     = do{ char 'x'; number 16  }
@@ -102,10 +95,17 @@ naturalOrRat  = (<?> "number") $ do
             | b >  10 && b <= 36    = oneOf $ ['0'..'9'] 
                                     ++ take (b - 10) ['a'..'z'] 
                                     ++ take (b - 10) ['A'..'Z']
+            | otherwise             = error "baseDigitInt: base too large"
         b36DigitToInteger           = toInteger . b36DigitToInt
         b36DigitToInt c
             | isDigit c             = fromEnum c - fromEnum '0'
             | c >= 'a' && c <= 'z'  = fromEnum c - fromEnum 'a' + 10
             | c >= 'A' && c <= 'Z'  = fromEnum c - fromEnum 'A' + 10
             | otherwise             = error "b36DigitToInt: not a base 36 digit"
+
+sign :: GenParser Char st Bool
+sign = (char '-' >> return False)
+   <|> (char '+' >> return True)
+   <|> return True
+
 

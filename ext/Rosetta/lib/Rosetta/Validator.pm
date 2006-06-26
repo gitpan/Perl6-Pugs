@@ -3,7 +3,7 @@ use v6;
 
 # External packages used by packages in this file, that don't export symbols:
 use Locale::KeyedText-(1.72.0...);
-use Rosetta-0.720.0;
+use Rosetta-0.724.0;
 
 ###########################################################################
 ###########################################################################
@@ -14,7 +14,7 @@ use Rosetta-0.720.0;
 ###########################################################################
 ###########################################################################
 
-module Rosetta::Validator-0.720.0 {
+module Rosetta::Validator-0.724.0 {
 
     # External packages used by the Rosetta::Validator module, that do export symbols:
     # (None Yet)
@@ -44,7 +44,7 @@ A common comprehensive test suite to run against all Engines
 
 =head1 VERSION
 
-This document describes Rosetta::Validator version 0.720.0.
+This document describes Rosetta::Validator version 0.724.0.
 
 =head1 SYNOPSIS
 
@@ -74,7 +74,7 @@ It also requires these Perl 6 classes that are on CPAN:
 L<Locale::KeyedText-(1.72.0...)|Locale::KeyedText> (for error messages).
 
 It also requires these Perl 6 classes that are in the current distribution:
-L<Rosetta-0.720.0|Rosetta>.
+L<Rosetta-0.724.0|Rosetta>.
 
 =head1 INCOMPATIBILITIES
 
@@ -82,9 +82,8 @@ None reported.
 
 =head1 SEE ALSO
 
-These Perl 6 packages implement Rosetta Engine classes and their test
-suites are the initial main dependents of Rosetta::Validator:
-L<Rosetta::Engine::Native>, L<Rosetta::Engine::Generic>.
+Go to L<Rosetta> for the majority of distribution-internal references, and
+L<Rosetta::SeeAlso> for the majority of distribution-external references.
 
 =head1 BUGS AND LIMITATIONS
 
@@ -96,7 +95,7 @@ Darren R. Duncan (C<perl@DarrenDuncan.net>)
 
 =head1 LICENCE AND COPYRIGHT
 
-This file is part of the Rosetta database portability library.
+This file is part of the Rosetta DBMS framework.
 
 Rosetta is Copyright (c) 2002-2006, Darren R. Duncan.
 

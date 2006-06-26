@@ -3,7 +3,7 @@ use v6;
 
 # External packages used by packages in this file, that don't export symbols:
 use Locale::KeyedText-(1.72.0...);
-use Rosetta::Model-(0.720.0...);
+use Rosetta::Model-(0.724.0);
 
 ###########################################################################
 ###########################################################################
@@ -14,47 +14,113 @@ use Rosetta::Model-(0.720.0...);
 ###########################################################################
 ###########################################################################
 
-package Rosetta-0.720.0 {
+package Rosetta-0.724.0 {
     # Note: This given version applies to all of this file's packages.
 } # package Rosetta
 
 ###########################################################################
 ###########################################################################
 
-class Rosetta::Interface {
+class Rosetta::Interface::DBMS {
 
-    # External packages used by the Rosetta::Interface class, that do export symbols:
+    # External packages used by the Rosetta::Interface::DBMS class, that do export symbols:
     # (None Yet)
 
-    # Attributes of every Rosetta::Interface object:
-    # (None Yet)
-
-###########################################################################
-
-
-
-###########################################################################
-
-} # class Rosetta::Interface
-
-###########################################################################
-###########################################################################
-
-class Rosetta::Engine {
-
-    # External packages used by the Rosetta::Engine class, that do export symbols:
-    # (None Yet)
-
-    # Attributes of every Rosetta::Engine object:
+    # Attributes of every Rosetta::Interface::DBMS object:
     # (None Yet)
 
 ###########################################################################
 
+submethod BUILD (Str :$engine_name!) {
+
+    # This is a quick hack that just tests if the Engine module loads or not.
+    # It WILL be replaced.
+    eval "require $engine_name;";
+    die $!
+        if $!;
+
+    return;
+}
+
+###########################################################################
+
+} # class Rosetta::Interface::DBMS
+
+###########################################################################
+###########################################################################
+
+class Rosetta::Interface::Exception {
+
+    # External packages used by the Rosetta::Interface::Exception class, that do export symbols:
+    # (None Yet)
+
+    # Attributes of every Rosetta::Interface::Exception object:
+    # (None Yet)
+
+###########################################################################
+
 
 
 ###########################################################################
 
-} # class Rosetta::Engine
+} # class Rosetta::Interface::Exception
+
+###########################################################################
+###########################################################################
+
+class Rosetta::Interface::Command {
+
+    # External packages used by the Rosetta::Interface::Command class, that do export symbols:
+    # (None Yet)
+
+    # Attributes of every Rosetta::Interface::Command object:
+    # (None Yet)
+
+###########################################################################
+
+
+
+###########################################################################
+
+} # class Rosetta::Interface::Command
+
+###########################################################################
+###########################################################################
+
+class Rosetta::Interface::Value {
+
+    # External packages used by the Rosetta::Interface::Value class, that do export symbols:
+    # (None Yet)
+
+    # Attributes of every Rosetta::Interface::Value object:
+    # (None Yet)
+
+###########################################################################
+
+
+
+###########################################################################
+
+} # class Rosetta::Interface::Value
+
+###########################################################################
+###########################################################################
+
+class Rosetta::Interface::Variable {
+
+    # External packages used by the Rosetta::Interface::Variable class, that do export symbols:
+    # (None Yet)
+
+    # Attributes of every Rosetta::Interface::Variable object:
+    # (None Yet)
+
+###########################################################################
+
+
+
+###########################################################################
+
+} # class Rosetta::Interface::Variable
 
 ###########################################################################
 ###########################################################################
@@ -70,10 +136,12 @@ Rigorous database portability
 
 =head1 VERSION
 
-This document describes Rosetta version 0.720.0.
+This document describes Rosetta version 0.724.0.
 
-It also describes the same-number versions of Rosetta::Interface
-("Interface"), and Rosetta::Engine ("Engine").
+It also describes the same-number versions of Rosetta::Interface::DBMS
+("DBMS"), Rosetta::Interface::Exception ("Exception"),
+Rosetta::Interface::Command ("Command"), Rosetta::Interface::Value
+("Value"), and Rosetta::Interface::Variable ("Variable").
 
 I<Note that the "Rosetta" package serves only as the name-sake
 representative for this whole file, which can be referenced as a unit by
@@ -83,13 +151,23 @@ code; instead refer to other above-named packages in this file.>
 
 =head1 SYNOPSIS
 
+    use Rosetta; # also loads Rosetta::Model and Locale::KeyedText
+
+    # Instantiate a Rosetta DBMS / virtual machine.
+    my Rosetta::Interface::DBMS $dbms .= new(
+        engine_name => 'Rosetta::Engine::Example' );
+
+    # TODO: Create or connect to a repository and work with it.
+
+=head1 OLD SYNOPSIS TO REWRITE
+
     ### DURING INIT PHASE ###
 
     use Rosetta; # also loads Rosetta::Model and Locale::KeyedText
 
     # Define how to talk to our database and where it is.
     my %DB_CONFIG = (
-        'engine_name' => 'Rosetta::Engine::Native',
+        'engine_name' => 'Rosetta::Engine::Example',
         'depot_identity' => {
             'file_name' => 'My Data',
         },
@@ -297,7 +375,7 @@ code; instead refer to other above-named packages in this file.>
         # Prompt user for details of 3 people and add them to the database.
         $prh_add_person.prepare();
         for 1..3 {
-            my Rosetta::Interface::Row $new_person .= new( 'payload' => {
+            my Rosetta::Interface::Row $new_person .= new( payload => {
                 'id' => ask_user_for_id(),
                 'name' => ask_user_for_name(),
                 'sex' => ask_user_for_sex(),
@@ -318,7 +396,7 @@ code; instead refer to other above-named packages in this file.>
         $fnh_get_person.prepare();
         for 1..3 {
             my Rosetta::Interface::Scalar $person_id
-                .= new( 'payload' => ask_user_for_id() );
+                .= new( payload => ask_user_for_id() );
             $fnh_get_person.bind_arg( 'person_id', $person_id );
             my Rosetta::Interface::Row $fetched_person = try {
                 $fnh_get_person.execute();
@@ -338,48 +416,121 @@ code; instead refer to other above-named packages in this file.>
 
 =head1 DESCRIPTION
 
-Rosetta is a powerful but elegant virtual machine that implements a
-relational model of data, and provides a rigorous API by which applications
-can interact with it.  This relational model is like the one that E. F.
-Codd proposed in his 1970 publication titled "A Relational Model of Data
-for Large Shared Data Banks", but with additions either created for Rosetta
-or drawn from multiple sources, mainly Christopher J. Date's and Hugh
-Darwen's Tutorial D language and the ANSI/ISO SQL:2003 standard, and
-various third party relational database managers.
+The "Rosetta" DBMS framework is a powerful but elegant system, which makes
+it easy to create and use relational databases in a very reliable,
+portable, and efficient way.  This "Rosetta" file is the core of the
+Rosetta framework and defines a common programmatic interface (API), called
+the Rosetta Native Interface (RNI), which applications invoke and which
+multiple interchangeable "Engine" back-ends (usually provided by third
+parties) implement.  This interface is rigorously defined, such that there
+should be no ambiguity when trying to invoke or implement it, and so an
+application written to it should behave identically no matter which
+conforming "Engine" is in use.
 
-Rosetta is highly modular, this being one of its fundamental features, with
-the core 'Rosetta' file defining a common API which multiple interchangable
-back-ends implement (each of which is usually made by a third party); the
-former is called the RNI (Rosetta Native Interface), and the latter are
-called Rosetta Engines.  Usually, each Engine implements a persistent data
-store for long term use, but some can be RAM-based for use as a short-term
-cache.  L<Rosetta::Engine::Native> is the reference implementation of an
-Engine and provides both kinds of storage; it is distributed separately
-from 'Rosetta' since it isn't needed if you use an alternate Engine.
+Rosetta incorporates a complete and uncompromising implementation of "The
+Third Manifesto" (TTM), a formal proposal by Christopher J. Date and Hugh
+Darwen for a solid foundation for data and database management systems
+(DBMSs); like Edgar F. Codd's original papers, TTM can be seen as an
+abstract blueprint for the design of a DBMS and the language interface to
+such a DBMS.  The main web site for TTM is
+L<http://www.thethirdmanifesto.com/>, and its authors have also written
+several books and papers and taught classes on the subject over the last
+35+ years, along with Codd himself (some are listed in the
+L<Rosetta::SeeAlso> documentation file).  Note that the Rosetta
+documentation will be focusing mainly on how Rosetta itself works, and will
+not spend much time in providing rationales; you can read TTM itself and
+various other external documentation for much of that.
 
-The RNI is defined collectively by both 'Rosetta' itself and
-L<Rosetta::Model>; Rosetta::Model defines IRL (Intermediate Relational
-Language), a language loosely resembling both Tutorial D and SQL, in which
-applications write instructions for the virtual machine to execute,
-including to create the data models, query them, and manipulate them;
-'Rosetta' provides the handles on the virtual machine by which the
-applications give it input and take its output.
+The Rosetta Native Interface is defined mainly in terms of a new high-level
+programming language named "Rosetta D", which is computationally complete
+(and industrial strength) and has fully integrated database functionality;
+this language, which satisfies TTM's definition of a "D" language, is
+described fully in the L<Rosetta::Language> documentation file that comes
+with this "Rosetta" distribution.
 
-Given that most Rosetta Engine implementations simply map Rosetta's
-rigorously defined API onto a pre-existing relational database manager
-(such as Genezzo, SQLite, PostgreSQL, MySQL, Firebird, Oracle, Sybase, SQL
-Server, Informix, DB2, etc), Rosetta's most prominant feature is that it
-provides a common API for access to those databases.  An application
-written to it should easily port to alternative relational database engines
-with minimal effort.
+While it is possible that one could write a self-contained application in
+Rosetta D and compile that into its own executable, in practice one would
+normally just write some components of their application in Rosetta D (as
+either named modules or anonymous routines) and write the rest of the
+application in their other language(s) of choice.  Assuming the main
+application is written in Perl, it is this "Rosetta" file which provides
+the glue between your Perl code and your Rosetta D code; "Rosetta"
+implements a virtual machine that is embedded in your Perl application and
+in which the Rosetta D code runs (it is analagous to the Perl interpreter
+itself, which provides a virtual machine in which Perl code runs).
+
+The classes and methods of this "Rosetta" file, together with those of
+L<Rosetta::Model>, define the balance of the Rosetta Native Interface.  A
+Rosetta::Interface::DBMS object represents a single active Rosetta virtual
+machine; it has a spartan DBI-inspired set of methods which you use to
+compile/prepare and/or invoke/execute Rosetta D statements and routines
+within the virtual machine, input data to it, and output data from it.
+
+You can create more than one DBMS object at a time, and they are
+essentially all isolated from each other, even if more than one uses the
+same Engine class to implement it; that is, multiple DBMS objects will not
+have references to each other at a level visible in the Rosetta Native
+Interface, if at all.  To account for situations where multiple DBMS
+objects want to use the same external resources, such as a repository file
+on disk, it is expected that the Engines will employ appropriate measures
+such as system-managed locks so that resource corruption or application
+failure is prevented.  I<Also, Rosetta should be thread safe and/or saavy
+in the future, but for now it officially is not and you should not share
+Rosetta objects between multiple threads, nor have objects in separate
+threads try to access the same external resources.>
+
+Rosetta does not use any dialect of SQL in its native API (unlike many
+other DBMS products) because SQL is more ambiguous and error-prone to use,
+and it is less expressive.  While Rosetta D is very different from SQL, it
+is fully capable of modelling anything in the real world accurately, and it
+can support a complete SQL emulation layer on top of it, so that your
+legacy applications can be migrated to use the Rosetta DBMS with little
+trouble.  Likewise, emulation layers for any other programming language can
+be supported, such as Tutorial D or XQuery or FoxPro or dBase.
+
+One distinctive feature of a Rosetta DBMS (compared to a typical other
+vendor's DBMS) is that data definition statements are structured as
+standard data manipulation statements but that the target relation
+variables are system catalog relation variables rather than user-defined
+relation variables.  In SQL terms, you create or alter tables by adding or
+updating their "information schema" records, which in SQL are read-only,
+not by using special 'create' or 'alter' statements.
+
+Each Rosetta Engine has the complete freedom to implement the Rosetta DBMS
+and Rosetta D however it likes; all Rosetta cares about is that the user
+interface and behaviour conform to its preconceptions.
+
+L<Rosetta::Engine::Example> is the self-contained and pure-Perl reference
+implementation of an Engine and is included in the "Rosetta" core
+distribution to allow the core to be completely testable on its own.  It is
+coded intentionally in a simple fashion so that it is easy to maintain and
+and easy for developers to study.  As a result, while it performs correctly
+and reliably, it also performs quite slowly; you should only use Example
+for testing, development, and study; you should not use it in production.
+
+For production use, there should be a wide variety of third party Engine
+modules that become available over time.  One plan which I favor is that
+the new (under development) enterprise-strength and Perl implemented
+database server named L<Genezzo> (see also L<http://www.genezzo.com/>) will
+evolve to implement the Rosetta DBMS natively, and be I<the> back-end which
+I recommend above all others for production use.
+
+Most of the other (near term) third party Engines will likely just map
+Rosetta's rigorously defined API onto a pre-existing (pseudo) relational
+database manager (such as SQLite, PostgreSQL, MySQL, Firebird, Teradata,
+Oracle, Sybase, SQL Server, Informix, DB2, OpenBase, FrontBase, etc).
+Given this fact, Rosetta's most prominant feature is that it provides a
+common API for access to those databases, each of which takes a different
+SQL or pseudo-SQL dialect.  An application written to it should easily port
+to alternative relational database engines with minimal effort.
 
 This might seem strange to somebody who has not tried to port between
 databases before, especially given that the Perl DBI purports to provide
 "Database Independence".  However, the level of DBI's provided independence
 is I<Database Driver Independence>, and not I<Database Language
 Independence>.  To further demonstrate the difference, it is useful to
-compare the DBI and Rosetta.  See the file docs/Overview.pod in this
-distribution for that comparison.
+compare the DBI and Rosetta.  See the file L<Rosetta::Overview>
+documentation in this distribution for that comparison.
 
 =head1 INTERFACE
 
@@ -394,11 +545,23 @@ most often this is due to invalid input.  If an invoked routine simply
 returns, you can assume that it has succeeded, even if the return value is
 undefined.
 
-=head2 The Rosetta::Interface Class
+=head2 The Rosetta::Interface::DBMS Class
 
 I<This documentation is pending.>
 
-=head2 The Rosetta::Engine Class
+=head2 The Rosetta::Interface::Exception Class
+
+I<This documentation is pending.>
+
+=head2 The Rosetta::Interface::Command Class
+
+I<This documentation is pending.>
+
+=head2 The Rosetta::Interface::Value Class
+
+I<This documentation is pending.>
+
+=head2 The Rosetta::Interface::Variable Class
 
 I<This documentation is pending.>
 
@@ -418,7 +581,7 @@ It also requires these Perl 6 classes that are on CPAN:
 L<Locale::KeyedText-(1.72.0...)|Locale::KeyedText> (for error messages).
 
 It also requires these Perl 6 classes that are in the current distribution:
-L<Rosetta::Model-(0.720.0...)|Rosetta::Model>.
+L<Rosetta::Model-(0.724.0)|Rosetta::Model>.
 
 =head1 INCOMPATIBILITIES
 
@@ -432,11 +595,13 @@ L<Rosetta::Language>, L<Rosetta::Migration>.
 The Perl 6 module L<Rosetta::Validator> is bundled with Rosetta and can be
 used to test Rosetta Engine classes.
 
-These Perl 6 packages implement Rosetta Engine classes:
-L<Rosetta::Engine::Native>, L<Rosetta::Engine::Generic>.
+The Perl 6 package L<Rosetta::Engine::Example> is bundled with Rosetta and
+implements a reference implementation of a Rosetta Engine.
 
-These Perl 6 packages are the initial main dependents of Rosetta:
-L<Rosetta::Emulator::DBI>.
+The Perl 6 module L<Rosetta::Shell> is bundled with Rosetta and implements
+a command shell for the Rosetta DBMS.
+
+Go to the L<Rosetta::SeeAlso> file for the majority of external references.
 
 =head1 BUGS AND LIMITATIONS
 
@@ -448,7 +613,7 @@ Darren R. Duncan (C<perl@DarrenDuncan.net>)
 
 =head1 LICENCE AND COPYRIGHT
 
-This file is part of the Rosetta database portability library.
+This file is part of the Rosetta DBMS framework.
 
 Rosetta is Copyright (c) 2002-2006, Darren R. Duncan.  All rights reserved.
 Address comments, suggestions, and bug reports to C<perl@DarrenDuncan.net>,

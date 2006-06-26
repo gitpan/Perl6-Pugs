@@ -14,7 +14,7 @@ my $allowed_bad_guesses   = 6;  # number of allowed bad guesses
 ## do our functions
 
 sub cls returns Void {
-    system(($?OS eq any<MSWin32 mingw cygwin>) ?? 'cls' !! 'clear');
+    system(($?OS eq any <MSWin32 mingw cygwin>) ?? 'cls' !! 'clear');
 }
 
 sub get_committer_list (Str $dict_file) returns List {
@@ -103,8 +103,8 @@ $msg";
 }
 
 ## main loop
-unshift @*INC, 'ext/File-Spec/lib', '../ext/File-Spec/lib', '../../ext/File-Spec/lib';
-require File::Spec;
+use lib 'ext/File-Spec/lib', '../ext/File-Spec/lib', '../../ext/File-Spec/lib';
+use File::Spec;
 
 my $progdir    = splitpath($*PROGRAM_NAME)[1] || ".";
 my $dict       = canonpath("$progdir/../../AUTHORS");
@@ -117,7 +117,7 @@ my $current_committer = pick_committer(@committers);
 cls;
 print draw_hangman("guess a letter? ");
 my $letter;
-while ($letter = chomp(=$*IN)) {
+while ($letter = =$*IN) {
     cls;
 
     if (guess($letter)) {

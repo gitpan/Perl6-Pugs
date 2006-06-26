@@ -2,9 +2,11 @@
 
 use strict;
 use warnings;
+use Cwd qw(cwd);
 use File::Copy qw(copy);
 use File::Path qw(mkpath rmtree);
 use File::Find qw(find);
+use File::Basename qw(dirname);
 
 our %BuildPrefs;
 use Config;
@@ -45,33 +47,62 @@ sub build {
     print "Build configuration:\n" . PugsBuild::Config->pretty_print;
 
     my ($version, $ghc, $ghc_version, $setup, @args) = @{$opts->{GHC}};
-    write_buildinfo($version, $ghc_version, @args);
-    $run_setup = sub { system($setup, @_) };
-    $run_setup->('configure', grep !/^--.*=$/, @{$opts->{SETUP}});
+    write_buildinfo($version, $ghc, $ghc_version, @args);
 
-    # if Prelude.pm wasn't changed, don't bother to recompile Run.hs.
-    if (PugsBuild::Config->lookup('precompile_prelude')) {
-        my $pm = "src/perl6/Prelude.pm";
-        my $ppc_hs = "src/Pugs/PreludePC.hs";
-        my $ppc_null = "src/Pugs/PreludePC.hs-null";
-        if (-e $ppc_hs and -s $ppc_hs > -s $ppc_null and -M $ppc_hs < -M $pm) {
-            build_lib($version, $ghc, @args);
-            build_exe($version, $ghc, $ghc_version, @args);
-            return;
-        }
+    my $pwd = cwd();
+
+    print "*** Building dependencies.  Please wait...\n\n";
+
+    # XXX - instead of --user, use our own package-conf storage position
+
+    foreach my $module (qw< fps HsSyck >) {
+        chdir "third-party/$module";
+        system("../../Setup$Config{_exe}", 'configure', '--user', '--prefix', "$pwd/dist");
+        system("../../Setup$Config{_exe}", 'unregister', '--user');
+
+        print "*** Building the '$module' dependency.  Please wait...\n\n";
+
+        system("../../Setup$Config{_exe}", 'build');
+        system("../../Setup$Config{_exe}", 'install', '--user');
+        chdir $pwd;
     }
+    print "*** Finished building dependencies.\n\n";
 
-    run($^X, qw<util/gen_prelude.pl -v --touch --null -i src/perl6/Prelude.pm --output src/Pugs/PreludePC.hs>);
+    $run_setup = sub { system($setup, @_) };
+    $run_setup->('configure', '--user', grep !/^--.*=$/, @{$opts->{SETUP}});
+
+    my $pm = "src/perl6/Prelude.pm";
+    my $ppc_hs = "src/Pugs/Prelude.hs";
+    my $ppc_yml = "blib6/lib/Prelude.pm.yml";
+
     build_lib($version, $ghc, @args);
     build_exe($version, $ghc, $ghc_version, @args);
 
-    if (PugsBuild::Config->lookup('precompile_prelude')) {
+    if ((!-s $ppc_yml) or -M $ppc_yml > -M $ppc_hs) {
+        # can't assume blib6/lib exists: the user may be running
+        # `make unoptimzed` which doesn't create it.
+        mkpath(dirname($ppc_yml));
+        
         run($^X, qw<util/gen_prelude.pl -v -i src/perl6/Prelude.pm>,
                 (map { ('-i' => $_) } @{ PugsBuild::Config->lookup('precompile_modules') }),
-                '-p', $thispugs, qw<--touch --output src/Pugs/PreludePC.hs>);
-        build_lib($version, $ghc, @args);
-        build_exe($version, $ghc, $ghc_version, @args);
+                '-p', $thispugs, '--output', $ppc_yml);
     }
+}
+
+sub gzip_file {
+    my ($in, $out) = @_;
+    require Compress::Zlib;
+    open my $ifh, "<", $in  or die "open: $in: $!";
+    open my $ofh, ">", $out or die "open: $out: $!";
+    binmode $ofh;
+    my $gz = Compress::Zlib::gzopen($ofh, "wb") or
+            die "gzopen: $Compress::Zlib::gzerrno";
+    while (<$ifh>) {
+        $gz->gzwrite($_)    or die "gzwrite: $Compress::Zlib::gzerrno";
+    }
+    $gz->gzclose;
+    unlink $in;
+    1;
 }
 
 sub build_lib {
@@ -80,6 +111,9 @@ sub build_lib {
 
     my $ar = $Config{full_ar};
     my $a_file = File::Spec->rel2abs("dist/build/libHSPugs-$version.a");
+
+    # Add GHC to PATH
+    local $ENV{PATH} = dirname($ghc) . $Config{path_sep} . $ENV{PATH};
 
     unlink $a_file;
     $run_setup->('build');
@@ -102,7 +136,9 @@ sub build_lib {
         # we have to locate "Syck_stub.o" and copy it into
         # dist/build/src/Data/Yaml/.
         my @candidates;
-        my $target = File::Spec->canonpath("dist/build/src/$pathname");
+        my $target = File::Spec->canonpath(
+            File::Spec->catfile(qw< dist build src >, $pathname)
+        );
         my $wanted = sub {
             return unless $_ eq $basename;
             push @candidates, $File::Find::name;
@@ -117,14 +153,15 @@ sub build_lib {
             die "*** Wasn't able to find '$basename', aborting...\n";
         }
 
-	unless( File::Spec->canonpath($candidates[0]) eq $target ) {
-	    copy($candidates[0] => $target);
-	}
+        unless( File::Spec->canonpath($candidates[0]) eq $target ) {
+            mkpath(($target =~ m!(.*[/\\])!)[0]); # create dir for target
+            copy($candidates[0] => $target)
+                or die "Copy '$candidates[0]' => '$target' failed: $!";
+        }
 
-        system($ar, r => $a_file, "dist/build/src/$pathname");
+        system($ar, r => $a_file, $target);
     };
 
-    $fixup->('Data.Yaml.Syck');
     $fixup->('Pugs.Embed.Perl5') if grep /^-DPUGS_HAVE_PERL5$/, @_;
     $fixup->('Pugs.Embed.Parrot') if grep /^-DPUGS_HAVE_PARROT$/, @_;
 
@@ -156,7 +193,7 @@ sub build_exe {
     #my @o = qw( src/pcre/pcre.o src/syck/bytecode.o src/syck/emitter.o src/syck/gram.o src/syck/handler.o src/syck/implicit.o src/syck/node.o src/syck/syck.o src/syck/syck_st.o src/syck/token.o src/syck/yaml2byte.o src/cbits/fpstring.o );
     #push @o, 'src/UnicodeC.o' if grep /WITH_UNICODEC/, @_;
     #system $ghc, '--make', @_, @o, '-o' => 'pugs', 'src/Main.hs';
-    my @pkgs = qw(-package stm -package network -package mtl -package template-haskell -package base);
+    my @pkgs = qw(-hide-all-packages -package stm -package network -package mtl -package template-haskell -package base -package pugs-fps -package pugs-HsSyck );
     if ($^O =~ /(?:MSWin32|mingw|msys|cygwin)/) {
         push @pkgs, -package => 'Win32' unless $ghc_version =~ /^6.4(?:.0)?$/;
     }
@@ -170,6 +207,8 @@ sub build_exe {
     push @libs, grep /^-opt/, @_;
     push @libs, grep /^-[lL]/, @_;
     push @libs, grep /\.(?:a|o(?:bj)?|\Q$Config{so}\E)$/, @_;
+    push @libs, grep /^-auto/, @_;
+    push @libs, grep /^-prof/, @_;
 
     @_ = (@pkgs, qw(-idist/build -Ldist/build -idist/build/src -Ldist/build/src -o pugs src/Main.hs), @libs);
     print "*** Building: ", join(' ', $ghc, @_), $/;
@@ -180,6 +219,7 @@ sub build_exe {
 
 sub write_buildinfo { 
     my $version = shift;
+    my $ghc = shift;
     my $ghc_version = shift;
 
     open IN, "< Pugs.cabal.in" or die $!;
@@ -223,7 +263,18 @@ sub write_buildinfo {
     my @libs = map substr($_, 2), grep /^-l/, @_;
     #push @libs, grep /\.(?:a|o(?:bj)?)$/, @_;
 
+    my $ghc_pkg = $ghc;
+    $ghc_pkg =~ s/(.*ghc)/$1-pkg/;
+    my $has_new_cabal = (`$ghc_pkg describe Cabal` =~ /version: 1\.[1-9]/i);
+
     while (<IN>) {
+        # Adjust the dependency line based on Cabal version
+        if ($has_new_cabal) {
+            s/hs-source-dir/hs-source-dirs/;
+        }
+        else {
+            s/pugs-fps -any, pugs-HsSyck -any, //;
+        }
         s/__OPTIONS__/@_/;
         s/__VERSION__/$version/;
         s/__DEPENDS__/$depends/;

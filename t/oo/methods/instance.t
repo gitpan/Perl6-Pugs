@@ -24,7 +24,7 @@ my $foo = Foo.new();
 is($foo.doit(1,2,3), 6, "dot method invocation");
 
 my $val;
-lives_ok{
+lives_ok {
     $val = doit $foo: 1,2,3;
 }, '... indirect method invocation works';
 is($val, 6, '... got the right value for indirect method invocation');
@@ -47,7 +47,7 @@ is($foo.noargs(), 42, "... parentheses after method");
         #eval '$val = $foo.noargs.()';
         #die $! if $!;
         die 'cannot parse "val = $foo.noargs.()"'
-    }, "... '.' + parentheses after method", :todo<hardfail>;
+    }, "... '.' + parentheses after method", :todo<bug>;
     is($val, 42, '... we got the value correctly', :todo<feature>);
 }
 
@@ -57,7 +57,7 @@ is($foo.noargs(), 42, "... parentheses after method");
         #eval '$val = $foo.noargs .()';
         #die $! if $!;
         die 'cannot parse "$foo.noargs .()"'
-    }, "... <space> + '.' + parentheses after method", :todo<hardfail>;
+    }, "... <space> + '.' + parentheses after method", :todo<bug>;
     is($val, 42, '... we got the value correctly', :todo<feature>);
 }
 

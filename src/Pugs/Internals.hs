@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fno-full-laziness -fno-cse #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fno-full-laziness -fno-cse -fno-warn-deprecations #-}
 
 {-|
     Internal utilities and library imports.
@@ -14,47 +14,45 @@
 -}
 
 module Pugs.Internals (
-    module UTF8,
-    module Unicode,
+    module Control.Concurrent,
+    module Control.Concurrent.STM,
+    module Control.Exception,
+    module Control.Monad.Error,
+    module Control.Monad.RWS,
+    module Data.Array,
+    module Data.Bits,
+    module Data.Char,
+    module Data.Complex,
+    module Data.Dynamic,
+    module Data.Either,
+    module Data.FunctorM,
+    module Data.IntMap,
+    module Data.List,
+    module Data.Map,
+    module Data.Maybe,
+    module Data.Ratio,
+    module Data.Set,
+    module Data.Tree,
+    module Data.Unique,
+    module Data.Word,
+    module Debug.Trace,
+    module Network,
     module Pugs.Compat,
     module RRegex,
     module RRegex.Syntax,
-    module Pugs.Rule.Pos,
-    module Data.Dynamic,
-    module Data.Unique,
-    module Data.FunctorM,
-    module Control.Exception,
-    module System.Environment,
-    module System.Random,
-    module System.IO,
-    module System.IO.Unsafe,
-    module System.IO.Error,
-    module System.Exit,
-    module System.Time,
-    module System.Directory,
     module System.Cmd,
-    module System.Process,
+    module System.Directory,
+    module System.Environment,
+    module System.Exit,
+    module System.IO,
+    module System.IO.Error,
+    module System.IO.Unsafe,
     module System.Mem,
     module System.Mem.Weak,
-    module Control.Monad.RWS,
-    module Control.Monad.Error,
-    module Control.Concurrent,
-    module Control.Concurrent.STM,
-    module Data.Array,
-    module Data.Bits,
-    module Data.List,
-    module Data.Either,
-    module Data.Word,
-    module Data.Ratio,
-    module Data.Char,
-    module Data.Tree,
-    module Data.Maybe,
-    module Data.Complex,
-    module Data.Set,
-    module Data.Map,
-    module Data.IntMap,
-    module Debug.Trace,
-    module Network,
+    module System.Process,
+    module System.Random,
+    module System.Time,
+    module UTF8,
     internalError,
     split,
     split_n,
@@ -66,6 +64,8 @@ module Pugs.Internals (
     forM_,
     combine,
     modifyTVar,
+    inlinePerformIO,
+    inlinePerformSTM,
     unsafePerformSTM,
     possiblyFixOperatorName,
     maybeM,
@@ -73,13 +73,14 @@ module Pugs.Internals (
     warn,
     die,
     _GlobalFinalizer,
+    unsafeIOToSTM,
 ) where
 
 import UTF8
-import Unicode
 import Pugs.Compat
 import RRegex
 import RRegex.Syntax
+import Data.Char
 import Data.IORef
 import Data.Dynamic
 import Data.Array (elems)
@@ -98,9 +99,9 @@ import System.IO (
     )
 import System.IO.Unsafe
 import System.IO.Error (ioeGetErrorString, isUserError)
-import System.Directory
 import System.Mem
 import System.Mem.Weak
+import System.Directory (Permissions(..), getPermissions, getTemporaryDirectory, createDirectory, removeDirectory, removeFile, getDirectoryContents)
 import Control.Exception (catchJust, errorCalls)
 import Control.Monad.RWS
 import Control.Monad.Error (MonadError(..))
@@ -118,15 +119,15 @@ import Data.List (
 import Data.Unique
 import Data.Ratio
 import Data.Word
-import Data.Char (chr, ord, digitToInt)
 import Data.Complex
 import Data.Tree
 import Data.Set (Set)
 import Data.Map (Map)
 import Data.IntMap (IntMap)
 import Debug.Trace
-import Pugs.Rule.Pos
--- import GHC.Conc (unsafeIOToSTM)
+import GHC.Base (realWorld#)
+import GHC.IOBase (IO(..))
+import GHC.Conc (unsafeIOToSTM)
 
 -- Instances.
 instance Show Unique where
@@ -236,9 +237,17 @@ combine :: [a -> a] -- ^ List of transformer functions
         -> (a -> a) -- ^ The final combined transformer
 combine = foldr (.) id
 
+{-# INLINE inlinePerformIO #-}
+inlinePerformIO :: IO a -> a
+inlinePerformIO (IO m) = case m realWorld# of (# _, r #) -> r
+
+{-# INLINE inlinePerformSTM #-}
+inlinePerformSTM :: STM a -> a
+inlinePerformSTM m = inlinePerformIO (atomically m)
+
 {-# NOINLINE unsafePerformSTM #-}
 unsafePerformSTM :: STM a -> a
-unsafePerformSTM = unsafePerformIO . atomically
+unsafePerformSTM m = unsafePerformIO (atomically m)
 
 {-|
 Read an STM variable, apply some transformation function to it, and write the
@@ -307,9 +316,8 @@ possiblyFixOperatorName name
 Returns @True@ if the environment variable @PUGS_SAFEMODE@ is set to a
 true value. Most IO primitives are disabled under safe mode.
 -}
-{-# NOINLINE safeMode #-}
 safeMode :: Bool
-safeMode = case (unsafePerformIO $ getEnv "PUGS_SAFEMODE") of
+safeMode = case (inlinePerformIO $ getEnv "PUGS_SAFEMODE") of
     Nothing     -> False
     Just ""     -> False
     Just "0"    -> False

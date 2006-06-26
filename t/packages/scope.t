@@ -28,7 +28,7 @@ is($?PACKAGE, "main", 'no declarations broke main $?PACKAGE');
 # block level
 is(Test1::ns, "Test1", "block-level package declarations");
 is(Test1::pkg, "Test1", 'block-level $?PACKAGE var');
-ok((Test1::pkg() === ::Test1), '$?PACKAGE is a type object', :todo<bug>);
+ok((Test1::pkg() === ::Test1), '$?PACKAGE is a type object');
 dies_ok { test1_export() }, "export was not imported implicitly";
 
 # declared packages
@@ -37,12 +37,11 @@ is(Test2::pkg, "Test2", 'declared package $?PACKAGE');
 
 # string eval'ed packages
 is(Test3::pkg, "Test3", 'eval\'ed package $?PACKAGE');
-ok(Test3::pkg() === ::Test3, 'eval\'ed package type object', :todo<bug>);
+ok(Test3::pkg() === ::Test3, 'eval\'ed package type object');
 
 # this one came from t/packages/Test.pm
 is(t::packages::Test::ns, "t::packages::Test", "loaded package");
-ok(t::packages::Test::pkg() === ::t::packages::Test, 'loaded package $?PACKAGE object',
-   :todo<bug>);
+ok(t::packages::Test::pkg() === ::t::packages::Test, 'loaded package $?PACKAGE object');
 my $x;
 lives_ok { $x = test_export() }, "export was imported successfully";
 is($x, "party island", "exported OK");
@@ -56,9 +55,9 @@ dies_ok  { $pkg = Our::Package::pkg },
     "Can't see `our' packages out of scope", :todo<feature>;
 lives_ok { $pkg = t::packages::Test::get_our_pkg },
     "Package in scope can see `our' package declarations";
-is($pkg, "Our::Package", 'correct $?PACKAGE');
+is($pkg, Our::Package, 'correct $?PACKAGE');
 ok(!($pkg === ::Our::Package),
-   'not the same as global type object');
+   'not the same as global type object', :todo<feature>);
 
 # oh no, how do we get to that object, then?
 # perhaps %t::packages::Test::<Our::Package> ?
@@ -67,5 +66,5 @@ dies_ok { $pkg = t::packages::Test::cant_see_pkg() },
     "can't see package declared out of scope", :todo<feature>;
 lives_ok { $pkg = t::packages::Test::my_pkg() },
     "can see package declared in same scope";
-is($pkg, "My::Package", 'correct $?PACKAGE');
-ok(!($pkg === ::My::Package), 'not the same as global type object');
+is($pkg, ::My::Package, 'correct $?PACKAGE');
+ok(!($pkg === ::*My::Package), 'not the same as global type object');

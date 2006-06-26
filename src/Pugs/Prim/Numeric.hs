@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
-{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 module Pugs.Prim.Numeric (
     op2Numeric, op1Floating, op1Round, op1Numeric,
@@ -16,6 +15,8 @@ op2Numeric :: (forall a. (Num a) => a -> a -> a) -> Val -> Val -> Eval Val
 op2Numeric f x y
     | VUndef <- x = op2Numeric f (VInt 0) y
     | VUndef <- y = op2Numeric f x (VInt 0)
+    | VType{} <- x = op2Numeric f (VInt 0) y
+    | VType{} <- y = op2Numeric f x (VInt 0)
     | (VInt x', VInt y') <- (x, y)  = return $ VInt $ f x' y'
     | (VRat x', VInt y') <- (x, y)  = return $ VRat $ f x' (y' % 1)
     | (VInt x', VRat y') <- (x, y)  = return $ VRat $ f (x' % 1) y'
@@ -46,6 +47,7 @@ op1Round f v = do
 
 op1Numeric :: (forall a. (Num a) => a -> a) -> Val -> Eval Val
 op1Numeric f VUndef     = return . VInt $ f 0
+op1Numeric f VType{}    = return . VInt $ f 0
 op1Numeric f (VInt x)   = return . VInt $ f x
 op1Numeric f l@(VList _)= fmap (VInt . f) (fromVal l)
 op1Numeric f (VRat x)   = return . VRat $ f x
@@ -67,8 +69,6 @@ op2Exp x y = do
                 then op2Rat ((^^) :: VRat -> VInt -> VRat) x y
                 else op2Num ((**) :: VNum -> VNum -> VNum) x y
         _ -> op2Num ((**) :: VNum -> VNum -> VNum) x y
-    where
-    _NaN = 0/0
 
 op2Divide :: Val -> Val -> Eval Val
 op2Divide x y
@@ -90,20 +90,15 @@ op2Modulus x y
     | VInt x' <- x, VInt y' <- y
     = if y' == 0 then err else return . VInt $ x' `mod` y'
     | VInt x' <- x, VRat y' <- y
-    = if y' == 0 then err else return . VInt $ x' `mod` (truncate y')
+    = if y' == 0 then err else return . VRat $ (x' % 1) `fmod` y'
     | VRat x' <- x, VInt y' <- y
-    = if y' == 0 then err else return . VInt $ (truncate x') `mod` y'
+    = if y' == 0 then err else return . VRat $ x' `fmod` (y' % 1)
     | VRat x' <- x, VRat y' <- y
-    = if y' == 0 then err else return . VInt $ (truncate x') `mod` (truncate y')
-    | VRef ref <- x
-    = do
-        x' <- readRef ref
-        op2Modulus x' y
-    | VRef ref <- y
-    = do
-        y' <- readRef ref
-        op2Modulus x y'
+    = if y' == 0 then err else return . VRat $ x' `fmod` y'
     | otherwise      -- pray for the best
-    = op2Int mod x y -- typeErr
+    = op2Num fmod x y
     where
     err = fail "Illegal modulus zero"
+    fmod :: RealFrac a => a -> a -> a
+    fmod x y = let mod = x - (fromIntegral (truncate (x/y) :: Integer) * y) in
+        if signum y * signum mod < 0 then mod + y else mod

@@ -11,59 +11,94 @@
 |                                                                   |
 =====================================================================
 
-Pugs is Copyright 2005, 2006 by Audrey Tang.  All Rights Reserved.
+Pugs is Copyright 2005-2006, The Pugs Contributors.
 
-The "PGE" subsystem is derived from PGE by Patrick Michaud,
-under the Perl license.  See src/pge/README.
+Pugs is a joint work of authorship by the Pugs Contributors.
 
-The "PCRE" subsystem is derived from PCRE 5.0 by Philip Hazel,
-under a BSD-style license.  See src/pcre/LICENCE.
-
-The "FilePath" subsystem is derived from FilePath 0.1.0 by Isaac Jones,
-under a BSD-style license.  See src/System/LICENSE.
-
-The "Syck" subsystem is derived from Syck 0.55 by "why the lucky stiff",
-under a BSD-style license.  See src/syck/COPYING.
-
-The "Rule" subsystem is derived from Parsec 2.0 by Daan Leijen,
-under a BSD-style license.  See src/Pugs/Rule/LICENSE.
-
-The "RRegex" subsystem is derived from hsregex 0.2 by John Meacham,
-under a BSD-style license.  See src/RRegex/LICENSE.
-
-The "UTF8" subsystem is derived from Sven Moritz Hallberg's work,
-under a BSD-style license.  See src/UTF8.lhs.
-
-The "FastPackedString" subsystem is derived from Don Stewart et all's work,
-under a BSD-style license.  See src/Data/FastPackedString.hs.
-
-The "Unicode" subsystem is derived from Dimitry Golubovsky's work,
-under the same license as GHC.  See LICENSES/GHC.
-
-The "PArrows" subsystem is derived from Einar Karttunen's work,
-under a BSD-style license.  See src/Text/Parser/PArrows.cabal.
-
-LICENSE INFORMATION
--------------------
-
-This code is free software; you can redistribute it and/or modify it under
+Pugs is free software; you can redistribute it and/or modify it under
 the terms of either:
 
     a) the GNU General Public License, version 2, or
     b) the Artistic License, version 2.0beta5.
 
-Please see the "GPL-2" and "Artistic-2" files under the "LICENSE" directory
-for the full license text.
+In addition, you can redistribute and/or modify contributions under the
+src/ directory, as well as the "pugs" executable program produced by
+compilation, under the terms of the MIT license.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See either
-the GNU General Public License or the Artistic License for more details.
+Please see the "GPL-2", "Artistic-2.0b5", and "MIT" files under the
+"LICENSE" directory for the full license text.
+
 
 INSTALLATION
 ------------
 
 See the INSTALL file for instructions on building and installing Pugs. 
+
+
+COPYRIGHTED WORKS FROM THIRD-PARTY PROJECTS
+-------------------------------------------
+
+The following works are owned by third-party projects and are not
+subject to joint ownership.  Eventually, these packages should all
+be moved to the third-party/ directory.
+
+The "ByteString" subsystem is derived from Don Stewart et all's work,
+under a BSD-style license.  See third-party/fps/LICENSE.
+
+The "FilePath" subsystem is derived from FilePath 0.1.0 by Isaac Jones,
+under a BSD-style license.  See src/System/LICENSE.
+
+The "HsJudy" subsystem is derived from Caio Marcelo de Oliveira Filho's
+work, under a BSD-style license.  See third-party/HsJudy/HsJudy.cabal.
+
+The "HsSyck" subsystem is derived from "why the lucky stiff", Gaal Yahas
+and Audrey Tang's work, under a BSD-style license.
+See third-party/HsSyck/LICENSE.
+
+The "Judy" subsystem is derived from Doug Baskins's work, under the LGPL
+license, version 2.1. See third-party/judy/COPYING.
+
+The "PArrows" subsystem is derived from Einar Karttunen's work,
+under a BSD-style license.  See src/Text/Parser/PArrows.cabal.
+
+The "PCRE" subsystem is derived from PCRE 5.0 by Philip Hazel,
+under a BSD-style license.  See src/pcre/LICENCE.
+
+The "PGE" subsystem is derived from PGE by Patrick Michaud,
+under the same license as Parrot.  See src/pge/README.
+
+The "RRegex" subsystem is derived from hsregex 0.2 by John Meacham,
+under a BSD-style license.  See src/RRegex/LICENSE.
+
+The "Rule" subsystem is derived from Parsec 2.0 by Daan Leijen,
+under a BSD-style license.  See src/Pugs/Rule/LICENSE.
+
+The "TextRegexLazy" subsystem is derived from Christopher Kuklewic's
+work, under a BSD-style license, except for Text.Regex.Lazy.DFAEngine,
+which is under LGPL.  See third-party/TextRegexLazy/Text/Regex/Lazy/LICENSE.
+
+The "UTF8" subsystem is derived from Sven Moritz Hallberg's work,
+under a BSD-style license.  See src/UTF8.lhs.
+
+
+COPYRIGHTED PERL 6 LIBRARY EXTENSIONS
+-------------------------------------
+
+Except as listed below, all works under the ext/ directory can be
+redistributed and/or modified under the same license as Pugs itself.
+
+The "Locale-KeyedText" library is released by Darren R. Duncan under
+the GNU Lesser General Public License (LGPL), version 2.1 or later.
+See LICENSE/LGPL-2.1.
+
+The "Rosetta" library is released by Darren R. Duncan under the GNU General
+Public License (GPL), version 2 or later, but with a special exception that
+gives you permission to link Rosetta with other free software such that the
+other software can retain its original licenses.  See LICENSE/GPL-2.
+
+The "WTemplate" library is released by Andras Barthazi under any
+version of the GNU General Public License (GPL).  See LICENSE/GPL-2.
+
 
 MAILING LISTS
 -------------
@@ -89,6 +124,6 @@ For Perl 6 related information, please see:
     http://dev.perl.org/perl6/
 
 Enjoy,
-Audrey
+The Pugs Contributors
 
 P.S. "Perl" stands for "Polymorphic Existential Recursive Lambdas", too!

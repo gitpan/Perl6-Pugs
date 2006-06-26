@@ -91,7 +91,7 @@ method remove_header (Str *@fields) {
   my @values;
 
   for @fields -> $field is copy {
-    $field ~~ tr/_/-/ if not $field ~~ /^\:/ and $TRANSLATE_UNDERSCORE;
+    $field.trans(('_' => '-')) if not $field ~~ /^\:/ and $TRANSLATE_UNDERSCORE;
     my $v = %!headers.delete($field.lc);
     push @values, $v ~~ Array ?? @$v !! $v if defined $v;
   }
@@ -166,7 +166,7 @@ method scan ($self: Code $sub) {
   }
 }
 
-multi sub *coerce:<as> (::?CLASS $self, Str ::to) { $self.as_string("\n") }
+multi sub *infix:<as> (::?CLASS $self, Str ::to) { $self.as_string("\n") }
 
 method as_string ($self: Str $ending = "\n") {
   my @result;

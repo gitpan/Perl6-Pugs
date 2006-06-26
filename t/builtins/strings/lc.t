@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 7;
+plan 8;
 
 # L<S29/"Perl6::Str" /lc/>
 
@@ -13,7 +13,7 @@ is(lc("ÅÄÖ"), "åäö", "some finnish non-ascii chars");
 is(lc("ÓÒÚÙ"), "óòúù", "accented chars");
 
 $_ = "Hello World"; 
-my $x = lc;
+my $x = .lc;
 is($x, "hello world", 'lc uses $_ as default');
 
 { # test invocant syntax for lc
@@ -21,3 +21,5 @@ is($x, "hello world", 'lc uses $_ as default');
     is($x.lc, "hello world", '$x.lc works');
     is("Hello World".lc, "hello world", '"Hello World".lc works');
 }
+
+is("ÁÉÍÖÜÓŰŐÚ".lc, "áéíöüóűőú", ".lc on Hungarian vowels");

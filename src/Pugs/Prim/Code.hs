@@ -25,7 +25,7 @@ op1CodeArity v = do
 
 op1CodeBody :: Val -> Eval Val
 op1CodeBody v = do
-    code <- fromVal v
+    (code :: VCode) <- fromVal v
     expToEvalVal $ subBody code
 
 op1CodePos :: Val -> Eval Val

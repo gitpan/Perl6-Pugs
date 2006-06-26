@@ -85,7 +85,8 @@ plan 12;
 # L<"http://groups.google.de/group/perl.perl6.language/msg/07aefb88f5fc8429">
 {
     # XXX -- currently this is parsed as \&state()
-    my $gen = { try { \state } };
+    my $gen = eval '{ try { \state } }';
+    $gen //= sub { \(my $x) };
 
     my $svar_ref = $gen();               # $svar == 0
     try { $$svar_ref++; $$svar_ref++ };  # $svar == 2
@@ -108,7 +109,7 @@ plan 12;
         $a(); $a();         # $svar == 44
         $b = $gen()();      # $svar == 42
     ';
-    is $b, 42, "state() and parens", :todo<feature>; # svar == 43
+    is $b, 42, "state() and parens"; # svar == 43
 }
 
 # state() inside regular expressions

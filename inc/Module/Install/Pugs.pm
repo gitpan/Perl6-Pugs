@@ -115,20 +115,24 @@ sub pugs_fix_makefile {
 
     if ($Config{osname} eq q{cygwin}) {
 
-		# The world's ugliest cygwin variable gives us a hint to the
-		# cygwin root.  There is probably a better way to find this.
-		# (registry lookup?)
+        # The world's ugliest cygwin variable gives us a hint to the
+        # cygwin root.  There is probably a better way to find this.
+        # (registry lookup?)
 
-		my $cygroot = $ENV{'!C:'};
+        my $cygroot = $ENV{'!C:'};
 
-		$cygroot =~ s{\\bin$}{};
+        $cygroot =~ s{\\bin$}{};
 
         $full_blib .= join(q{}, q{:}, $cygroot, $full_blib)
     }
 
-    $makefile =~ s/\b(runtests \@ARGV|test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = q{$full_pugs}; \@ARGV = map glob, \@ARGV; ENV->{PERL6LIB} = q{$full_blib}; $1/;
+    $makefile =~ s/\b(runtests \@ARGV|test_harness\(\$\(TEST_VERBOSE\), )/ENV->{HARNESS_PERL} = q{$full_pugs}; \@ARGV = sort map glob, \@ARGV; ENV->{PERL6LIB} = q{$full_blib}; $1/;
     $makefile =~ s!("-MExtUtils::Command::MM")!"-I../../inc" "-I../inc" "-Iinc" $1!g;
     $makefile =~ s/\$\(UNINST\)/0/g;
+
+    my $canonical_base = File::Spec->catdir(split(/[\\\/]/, $base));
+
+    $makefile =~ s/^(\t+)cd \.\.$/$1cd $canonical_base/mg;
     close MAKEFILE;
     open MAKEFILE, '> Makefile' or die $!;
     print MAKEFILE $makefile;
@@ -140,6 +144,10 @@ sub get_pugs_config {
     my $base = $self->is_extension_build
     ? '../..'
     : $self->{_top}{base};
+
+    # Escape ' and \ in $base pathname 
+    $base =~ s{(['\\])}{\\$1}g;
+
     eval "use lib '$base/util'; 1" or die $@;
     eval "use PugsConfig; 1" or die $@;
     PugsConfig->get_config;
@@ -172,7 +180,7 @@ sub assert_ghc {
     # This local subroutine returns the version of ghc passed to it.
 
     my $test_ghc_ver = sub { 
-        (`$_[0] --version` =~ /Glasgow.*\bversion\s*(\S+)/s)[0]; 
+        (`$_[0] --version` =~ /\bversion\s*(\S+)/s)[0]; 
     };
 
     my ($ghc_version) = $test_ghc_ver->($ghc);
@@ -185,7 +193,9 @@ sub assert_ghc {
         # Looks like we're on a Windows-ish system, without GHC
         # in our path.   Let's hunt around for it.
 
-        my $ghc_root = "$ENV{SYSTEMDRIVE}/ghc";
+        my $slash = ( $Config{osname} eq "cygwin" ) ? '/' : '\\';
+
+        my $ghc_root = "$ENV{SYSTEMDRIVE}${slash}ghc";
 
         warn "*** ghc not found in path.  Looking in $ghc_root\n";
 
@@ -195,11 +205,11 @@ sub assert_ghc {
 
             my @ghc_choices = sort {
                 _normalize_version($b) cmp _normalize_version($a)
-            } glob(qq{$ghc_root/ghc-*});
+            } glob(qq/$ghc_root${slash}ghc-*/);
 
             GHC_TEST:
             for my $ghc_dir (@ghc_choices) {
-                my $ghc_candidate = qq{$ghc_dir/bin/ghc.exe};
+                my $ghc_candidate = qq/${ghc_dir}${slash}bin${slash}ghc.exe/;
                 if ($ghc_version = $test_ghc_ver->($ghc_candidate)) {
                     $ghc = $ghc_candidate;
                     warn "*** Found $ghc\n";
@@ -210,17 +220,20 @@ sub assert_ghc {
 
     $ghc_version or die << '.';
 *** Cannot find a runnable 'ghc' from path.
-*** Please install GHC from http://haskell.org/ghc/.
+*** Please install GHC (6.4.1 or above) from http://haskell.org/ghc/.
 .
 
-    unless ($ghc_version =~ /^(\d)\.(\d+)/ and $1 >= 6 and $2 >= 4) {
+    my $ghc_lt_640 = !($ghc_version =~ /^(\d)\.(\d+)/ and $1 >= 6 and $2 >= 4);
+
+    if ($ghc_lt_640 or ($ghc_version =~ /^6.4(?:.0)?$/)) {
         die << ".";
-*** Cannot find GHC 6.4 or above from path (we have $ghc_version).
+*** Cannot find GHC 6.4.1 or above from path (we have $ghc_version).
 *** Please install a newer version from http://haskell.org/ghc/.
 .
     }
+
     my $ghc_flags = "-H0 ";
-    $ghc_flags .= " -i. -isrc -isrc/pcre -isrc/syck -isrc/cbits -I. -Isrc -Isrc/pcre -Isrc/syck -Isrc/cbits -static ";
+    $ghc_flags .= " -i. -isrc -isrc/pcre -I. -Isrc -Isrc/pcre -static ";
     $ghc_flags .= " -Wall " #  -package-name Pugs -odir dist/build/src -hidir dist/build/src "
       unless $self->is_extension_build;
     $ghc_flags .= " -fno-warn-name-shadowing ";

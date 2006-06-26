@@ -13,7 +13,7 @@ my Str $EMPTY_STR is readonly = q{};
 ###########################################################################
 ###########################################################################
 
-package Rosetta::Model-0.720.0 {
+package Rosetta::Model-0.724.0 {
     # Note: This given version applies to all of this file's packages.
 } # package Rosetta::Model
 
@@ -45,7 +45,7 @@ submethod BUILD (Hash :@root_nodes? = []) {
     @!all_nodes  = [];
     @!root_nodes = [];
     for @root_nodes -> $root_node {
-        Rosetta::Model::Node.new( 'document' => $?SELF, *%{$root_node} );
+        Rosetta::Model::Node.new( document => $?SELF, *%{$root_node} );
     }
 
     return;
@@ -60,6 +60,12 @@ method export_as_hash () returns Hash {
 }
 
 ###########################################################################
+
+my method _die_with_msg (Str $msg_key!, Any %msg_vars? is ref = {}) {
+    %msg_vars{'CLASS'} = 'Rosetta::Model::Document';
+    die Locale::KeyedText::Message.new(
+        msg_key => $msg_key, msg_vars => %msg_vars );
+}
 
 my method _assert_arg_rt_nd_aoh (Str $meth!, Str $arg!, Str @val!) {
     $?SELF!_die_with_msg( 'LKT_ARG_UNDEF',
@@ -143,8 +149,8 @@ submethod BUILD (
     @!child_nodes = [];
     for @child_nodes -> $child_node {
         $?CLASS.new(
-            'document'    => $document,
-            'parent_node' => $?SELF,
+            document    => $document,
+            parent_node => $?SELF,
             *%{$child_node},
         );
     }
@@ -167,7 +173,7 @@ method export_as_hash () returns Hash {
 my method _die_with_msg (Str $msg_key!, Any %msg_vars? is ref = {}) {
     %msg_vars{'CLASS'} = 'Rosetta::Model::Node';
     die Locale::KeyedText::Message.new(
-        'msg_key' => $msg_key, 'msg_vars' => %msg_vars );
+        msg_key => $msg_key, msg_vars => %msg_vars );
 }
 
 my method _assert_arg_str (Str $meth!, Str $arg!, Str $val!) {
@@ -239,11 +245,11 @@ my method _assert_arg_ch_nd_aoh (Str $meth!, Str $arg!, Str @val!) {
 =head1 NAME
 
 Rosetta::Model -
-Intermediate Relational Language
+Abstract syntax tree for the Rosetta D language
 
 =head1 VERSION
 
-This document describes Rosetta::Model version 0.720.0.
+This document describes Rosetta::Model version 0.724.0.
 
 It also describes the same-number versions of Rosetta::Model::Document
 ("Document") and Rosetta::Model::Node ("Node").
@@ -260,35 +266,7 @@ I<This documentation is pending.>
 
 =head1 DESCRIPTION
 
-Rosetta::Model provides an effective language for defining relational data
-models, both the means to create them and the means to interact with them.
-The language is IRL (Intermediate Relational Language), and it loosely
-resembles both Christopher J. Date's and Hugh Darwen's Tutorial D language
-and the ANSI/ISO SQL:2003 standard in purpose and structure, but its
-details are different.  This is partly so that it can more elegantly
-support the specific relational model that E. F. Codd proposed in his 1970
-publication titled "A Relational Model of Data for Large Shared Data
-Banks", but that SQL diverged from in some ways.  Regardless, it should be
-easy to translate database definitions and queries between IRL and both
-Tutorial D and SQL.
-
-Please see the pod-only file L<Rosetta::Language> ("Language"), which is
-the human readable authoritative design document for IRL; the file
-Rosetta::Model itself is a machine readable language specification that is
-derived from the human readable version, and in the case of a conflict,
-Language takes precedence.
-
-Rosetta::Model is implemented as abstract syntax trees, and you use it by
-creating, manipulating, and reading nodes in these trees.  Each tree node
-is atomic, so you can just build the trees by copying scalar values from a
-data dictionary; no stitching or parsing more complicated command strings
-is necessary like with Tutorial D and SQL.
-
-L<Rosetta> (in the current distribution) is a relational database access
-solution that uses Rosetta::Model objects as its native instruction set
-rather than SQL strings.  But Rosetta::Model can also be used independently
-of Rosetta, such as when translating SQL from one dialect to another, or
-between Tutorial D and SQL.
+I<This documentation is pending.>
 
 =head1 INTERFACE
 
@@ -367,7 +345,7 @@ Some sample usage:
     my Rosetta::Model::Document $document .= new();
 
     my Rosetta::Model::Document $document2 .= new(
-        'root_nodes' => [
+        root_nodes => [
             {
                 'node_type'  => 'data_sub_type',
                 'attributes' => { 'predef_base_type' => 'BOOLEAN' },
@@ -483,8 +461,8 @@ Some sample usage:
 
     # Declare a unsigned 32-bit integer data type.
     my Rosetta::Model::Node $dt_uint32 .= new(
-        'node_type'  => 'data_sub_type',
-        'attributes' => {
+        node_type  => 'data_sub_type',
+        attributes => {
             'predef_base_type' => 'NUMERIC',
             'num_precision'    => 2**32,
             'num_scale'        => 1,
@@ -494,13 +472,13 @@ Some sample usage:
 
     # Declare an enumerated ('F','M') character value data type.
     my Rosetta::Model::Node $dt_sex .= new(
-        'node_type'   => 'data_sub_type',
-        'attributes'  => {
+        node_type   => 'data_sub_type',
+        attributes  => {
             'predef_base_type' => 'CHAR_STR',
             'char_max_length'  => 1,
             'char_repertoire'  => 'UNICODE',
         },
-        'child_nodes' => [
+        child_nodes => [
             {
                 'node_type'  => 'data_sub_type_value',
                 'attributes' => { 'value' => 'F' },
@@ -534,7 +512,7 @@ parameters of Node.new(); you need to supply its $document and optional
 $parent_node though; you can produce a direct clone like this:
 
     my $cloned_node = Rosetta::Model::Document.new(
-        'document' => $document, *%{$original_node.export_as_hash()} );
+        document => $document, *%{$original_node.export_as_hash()} );
 
 Or, to demonstrate the use of a persistence solution:
 
@@ -545,7 +523,7 @@ Or, to demonstrate the use of a persistence solution:
     # When restoring.
     my $hash_was_saved = MyPersist.get();
     my $cloned_node = Rosetta::Model::Document.new(
-        'document' => $document, *%{$hash_was_saved} );
+        document => $document, *%{$hash_was_saved} );
 
 =back
 
@@ -570,11 +548,8 @@ None reported.
 
 =head1 SEE ALSO
 
-The Perl 6 package L<Rosetta> is bundled with Rosetta::Model and is its
-primary dependent.
-
-These Perl 6 packages are also early dependents of Rosetta::Model:
-L<Rosetta::Utility::SQLBuilder>, L<Rosetta::Utility::SQLParser>.
+Go to L<Rosetta> for the majority of distribution-internal references, and
+L<Rosetta::SeeAlso> for the majority of distribution-external references.
 
 =head1 BUGS AND LIMITATIONS
 
@@ -586,7 +561,7 @@ Darren R. Duncan (C<perl@DarrenDuncan.net>)
 
 =head1 LICENCE AND COPYRIGHT
 
-This file is part of the Rosetta database portability library.
+This file is part of the Rosetta DBMS framework.
 
 Rosetta is Copyright (c) 2002-2006, Darren R. Duncan.
 

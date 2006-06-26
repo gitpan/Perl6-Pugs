@@ -9,7 +9,7 @@ use Test;
 
 Test that C< $*PID > in this process is different from
 C< $*PID > in the child process.
-
+L<A05/"RFC 332: Regex: Make /\$/ equivalent to /\z/ under the '/s' modifier" /The current process id is now C<\$\*PID>/>
 =cut
 
 plan 1;
@@ -25,7 +25,7 @@ my ($pugs,$redir,$squo) = ("./pugs", ">", "'");
 $pugs = './runjs.pl --run=jspm --perl5'
     if $?PUGS_BACKEND eq 'BACKEND_JAVASCRIPT';
 
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
     $pugs = 'pugs.exe';
 };
 

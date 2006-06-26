@@ -10,7 +10,7 @@ use Test::Builder::TestPlan;
 
 my $ok;
 my $Test = Test::Builder.new();
-is( $Test.ref, 'Test::Builder', 'new() should return a Test::Builder object' );
+is( $Test.ref, ::Test::Builder, 'new() should return a Test::Builder object' );
 
 {
     my $Test2 = Test::Builder.new();
@@ -52,7 +52,7 @@ $out.close;
 
 my ($pugs,$redir) = ( '../../pugs', '>' );
 
-if($?OS eq any<MSWin32 mingw cygwin>)
+if($?OS eq any <MSWin32 mingw cygwin>)
 {
     $pugs = '..\\..\\pugs.exe';
     $pugs = 'pugs.exe' if -e 'pugs.exe';
@@ -64,7 +64,7 @@ else
 
 sub run_pugs (Str $filename)
 {
-    my $libs     = join(' ', map { "-I$_" } @*INC );
+    my $libs     = join(' ', map { "-I$_" }, @*INC );
     my $tempfile = "temp-ex-output" ~ ".$*PID." ~ int rand 1000;
     my $command  = "$pugs $libs $filename $redir $tempfile";
     diag $command;

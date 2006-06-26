@@ -18,7 +18,7 @@ sub splitdir (Str $directories) returns Array is export {
     if (($directories ~~ rx:perl5{[\\/]\Z(?!\n)})) {
         @dirs[@dirs - 1] = '';
     }
-    @dirs = map {~$_ } @dirs;
+    @dirs = map {~$_ }, @dirs;
     return @dirs;
 }
 
@@ -131,8 +131,8 @@ sub canonpath (Str $_path) returns Str is export {
     # for each .. in @path_dirs pop one item from
     # @base_dirs
     my $dir;
-    while ($dir = shift(@path_dirs)){
-        unless ($dir eq updir()){
+    while ($dir = shift(@path_dirs)) {
+        unless ($dir eq updir()) {
             unshift(@path_dirs, $dir);
             last();
         }

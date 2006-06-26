@@ -11,8 +11,8 @@ works.
 =cut
 
 my @tests = any(< -v --version >);
-@tests = map -> Junction $_ { $_.values }
-         map -> Junction $_ { $_, "-w $_", "$_ -w", "-w $_ -w" }
+@tests = map -> Junction $_ { $_.values },
+         map -> Junction $_ { $_, "-w $_", "$_ -w", "-w $_ -w" },
          @tests;
 
 plan +@tests;
@@ -25,7 +25,7 @@ diag "Running under $*OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 

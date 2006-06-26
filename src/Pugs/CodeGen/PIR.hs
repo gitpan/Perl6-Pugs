@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fglasgow-exts -fallow-undecidable-instances -fno-warn-orphans -funbox-strict-fields -cpp #-}
-{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 {-|
     This module provides 'genPIR', a function which compiles the current
@@ -19,6 +18,7 @@ import Pugs.AST
 import Pugs.Types
 import Pugs.Eval.Var
 import Pugs.PIL1
+import Emit.PIR.Instances ()
 import Emit.PIR
 import Pugs.Pretty
 import Text.PrettyPrint
@@ -64,6 +64,7 @@ instance Translate PIL_Stmts [Stmt] where
 instance Translate PIL_Stmt Stmt where
     trans PNoop = return (StmtComment "")
     trans (PStmt (PLit (PVal VUndef))) = return $ StmtComment ""
+    trans (PStmt (PLit (PVal VType{}))) = return $ StmtComment ""
     trans (PStmt exp) = do
         expC    <- trans exp
         return $ StmtIns $ InsExp expC
@@ -80,6 +81,9 @@ instance Translate PIL_Expr Expression where
     trans (PLit (PVal VUndef)) = do
         pmc     <- genScalar "undef"
         return $ ExpLV pmc
+    trans (PLit (PVal VType{})) = do
+        pmc     <- genScalar "undef"
+        return $ ExpLV pmc
     trans (PLit lit) = do
         -- generate fresh supply and things...
         litC    <- trans lit
@@ -87,7 +91,7 @@ instance Translate PIL_Expr Expression where
         tellIns $ pmc <== litC
         return $ ExpLV pmc
     trans (PThunk exp) = do
-        [begL, initL]  <- genLabel ["thunk", "thunkInit"]
+        [begL, _]  <- genLabel ["thunk", "thunkInit"]
         this    <- genPMC "thunk"
         let begP = begL ++ "_C"
         tellIns $ InsConst (VAR begP) Sub (lit begL)
@@ -148,6 +152,10 @@ instance Translate PIL_Literal Expression where
     trans (PVal (VNum num)) = return $ ExpLit (LitNum num)
     trans (PVal (VRat rat)) = return $ ExpLit (LitNum (ratToNum rat))
     -- trans (PVal (VList [])) = return $ LitInt 0 -- XXX Wrong
+    trans (PVal (VCode code))
+        | MkCode{ subBody = Syn "block" [ Ann _ exp ] } <- code
+        , App (Var var) Nothing [] <- exp
+        = fmap ExpLV (trans (PVar var))
     trans (PVal (VList vs)) = do
         pmc <- genArray "vlist"
         forM vs $ \val -> do
@@ -170,6 +178,11 @@ instance Translate PIL_LValue LValue where
         tellLabel globL
         tell [StmtRaw (text "errorson .PARROT_ERRORS_GLOBALS_FLAG")]
         return pmc
+    -- XXX - hack to erase OUTER before we have proper pad uplevel support
+    trans (PVar name)
+        | Just (package, name') <- breakOnGlue "::" name
+        , Just (sig, "") <- breakOnGlue "OUTER" package
+        = trans $ PVar (sig ++ name')
     trans (PVar name) = do
         pmc     <- genScalar "lex"
         tellIns $ pmc <-- "find_name" $ [lit $ possiblyFixOperatorName name]
@@ -310,8 +323,8 @@ genScalar = genWith (`InsNew` PerlScalar)
 genArray :: (RegClass a) => String -> CodeGen a
 genArray = genWith (`InsNew` PerlArray)
 
-genHash :: (RegClass a) => String -> CodeGen a
-genHash = genWith (`InsNew` PerlHash)
+-- genHash :: (RegClass a) => String -> CodeGen a
+-- genHash = genWith (`InsNew` PerlHash)
 
 genLabel :: [String] -> CodeGen [LabelName]
 genLabel names = do
@@ -389,21 +402,10 @@ genPIR = genPIRWith $ \globPIR mainPIR penv -> do
             , StmtIns $ "set_args" .- sigList [MkSig [] lit0]
             , StmtIns $ "invokecc" .- [tempPMC]
             ]
-        , DeclSub "main" [SubANON] (concatMap vivifySub globPIR ++ mainPIR) ]
+        , DeclSub "main" [SubANON] mainPIR ]
         , emit globPIR ] ]
 
--- XXX - This is TOTALLY UNNECCESSARY for Parrot 0.4.2 and later.
-vivifySub :: Decl -> [Stmt]
-vivifySub (DeclNS "main" decls) = concatMap vivifySub decls
-vivifySub (DeclSub name@('&':c:_') [SubOUTER "main"] _)
-    | c /= '*'
-    = map StmtIns
-        [ tempPMC <-- "find_name" $ [lit name]
-        , tempPMC <-- "newclosure" $ [tempPMC]
-        , "store_global" .- [lit "main", lit name, tempPMC]
-        ]
-vivifySub _ = []
-
+genPIRWith :: ([Decl] -> [Stmt] -> PIL_Environment -> Eval a) -> Eval a
 genPIRWith f = do
     tenv        <- initTEnv
     -- Load the PIR Prelude.

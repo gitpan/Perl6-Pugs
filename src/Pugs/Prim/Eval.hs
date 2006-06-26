@@ -1,6 +1,7 @@
+{-# OPTIONS_GHC -fglasgow-exts #-}
 module Pugs.Prim.Eval (
     -- used by Pugs.Prim
-    op1EvalHaskell,
+    op1EvalHaskell, op1EvalP6Y,
     opEval, opEvalFile,
     opRequire, requireInc,
     EvalError(..), EvalResult(..), EvalStyle(..),
@@ -13,7 +14,10 @@ import Pugs.Embed
 import Pugs.Monads
 import Pugs.Internals
 import Pugs.Pretty
+import Pugs.Config
 import Pugs.Prim.Keyed
+import DrIFT.YAML
+import Data.Yaml.Syck
 
 data EvalError = EvalErrorFatal
                | EvalErrorUndef
@@ -27,14 +31,19 @@ data EvalStyle = MkEvalStyle
                , evalResult :: EvalResult
                }
 
+
+specialPackageNames :: [String]
+specialPackageNames = ["MY", "OUR", "GLOBAL", "OUTER", "CALLER", "ENV", "SUPER", "COMPILING"]
+
 opRequire :: Bool -> Val -> Eval Val
 opRequire dumpEnv v = do
     mod         <- fromVal v
+    if elem mod specialPackageNames then return (VBool True) else do
     incs        <- fromVal =<< readVar "@*INC"
     glob        <- askGlobal
     seen        <- findSymRef "%*INC" glob
     loaded      <- existsFromRef seen v
-    let file    = (concat $ intersperse "/" $ split "::" mod) ++ ".pm"
+    let file    = (concat $ intersperse (getConfig "file_sep") $ split "::" mod) ++ ".pm"
     pathName    <- requireInc incs file (errMsg file incs)
     if loaded then opEval style pathName "" else do
         -- %*INC{mod} = { relname => file, pathname => pathName }
@@ -46,9 +55,22 @@ opRequire dumpEnv v = do
                               , mkStrPair "relpath"  (decodeUTF8 file) ]
                     ]
             ]
-        str      <- liftIO $ readFile pathName
-        opEval style pathName (decodeUTF8 str)
+        tryFastEval (pathName ++ ".yml") $
+            slowEval pathName
     where
+    tryFastEval pathName' fallback = do
+        ok <- liftIO $ doesFileExist pathName'
+        if not ok then fallback else do
+        rv <- resetT $ fastEval (pathName')
+        case rv of
+            VError _ [MkPos{posName=""}] -> fallback
+            _                            -> opEval style pathName' ""
+        
+        
+    fastEval = op1EvalP6Y . VStr
+    slowEval pathName' = do 
+        str      <- liftIO $ readFile pathName'
+        opEval style pathName' (decodeUTF8 str)
     style = MkEvalStyle
         { evalError  = EvalErrorFatal
         , evalResult = (if dumpEnv == True then EvalResultEnv
@@ -57,10 +79,10 @@ opRequire dumpEnv v = do
     mkStrPair :: String -> String -> Exp
     mkStrPair key val = App (Var "&infix:=>") Nothing (map (Val . VStr) [key, val])
 
-requireInc :: (MonadIO m) => [FilePath] -> FilePath -> String -> m String 
+requireInc :: (MonadIO m) => [FilePath] -> FilePath -> String -> m String
 requireInc [] _ msg = fail msg
 requireInc (p:ps) file msg = do
-    let pathName = p ++ "/" ++ file
+    let pathName  = p ++ (getConfig "file_sep") ++ file
     ok <- liftIO $ doesFileExist pathName
     if (not ok)
         then requireInc ps file msg
@@ -86,6 +108,31 @@ op1EvalHaskell cv = do
     where
     style = MkEvalStyle{ evalError=EvalErrorUndef
                        , evalResult=EvalResultLastValue}
+
+op1EvalP6Y :: Val -> Eval Val
+op1EvalP6Y fileName = do
+    fileName' <- fromVal fileName
+    yml  <- liftIO $ (`catch` (return . Left . show)) $
+        fmap Right (parseYamlFile fileName')
+    case yml of
+        Right MkYamlNode{ nodeElem=YamlSeq (v:_) }
+            | MkYamlNode{ nodeElem=YamlStr vnum } <- v
+            , vnum /= (packBuf $ show compUnitVersion) -> do
+                err "incompatible version number for compilation unit"
+        Right yml' -> do
+            globTVar    <- asks envGlobal
+            MkCompUnit _ glob ast <- liftIO $ fromYAML yml'
+            resetT $ do
+                -- Inject the global bindings
+                liftSTM $ do
+                    glob' <- readTVar globTVar
+                    writeTVar globTVar (glob `unionPads` glob')
+                evl <- asks envEval
+                evl ast
+        x -> err x
+    where
+    err x = local (\e -> e{ envPos = (envPos e){ posName="" } }) $
+        fail $ "failed loading Yaml: " ++ show x
 
 opEval :: EvalStyle -> FilePath -> String -> Eval Val
 opEval style path str = enterCaller $ do

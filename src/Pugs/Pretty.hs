@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
-{-# OPTIONS_GHC -#include "../UnicodeC.h" #-}
 
 {-|
     Pretty printing for various data structures.
@@ -18,6 +17,7 @@ module Pugs.Pretty (
 import Pugs.Internals
 import Pugs.Types
 import Pugs.AST
+import Pugs.Rule (SourcePos)
 import Text.PrettyPrint
 import qualified Data.Set as Set
 import qualified Data.Map as Map
@@ -96,7 +96,7 @@ instance Pretty VMatch where
         form (s, f) = hang (text s <+> text "=>") defaultIndent (format $ f m)
 
 instance Pretty Bool where
-    format x = text $ if x then "bool::true" else "bool::false"
+    format x = text $ if x then "Bool::True" else "Bool::False"
 
 instance Pretty Int where
     format i = int i
@@ -149,7 +149,14 @@ instance Pretty Val where
 -}
     format (VRef x) = format x
     format (VList x) = format x
-    format (VCode _) = text "sub {...}"
+    format (VCode x) = text . (++ "{...}") $ case subType x of
+        SubMacro        -> "macro "
+        SubRoutine      -> "sub "
+        SubMethod       -> "method "
+        SubCoroutine    -> "coro "
+        SubPointy       -> "->"
+        SubBlock        -> ""
+        SubPrim         -> ""
     format (VBlock _) = text "{...}"
     format (VError x posList)
         -- Is this correct? Does this work on win32, too?
@@ -166,10 +173,10 @@ instance Pretty Val where
     format (VHandle x) = text $ show x
     format (VThread t) = text $ takeWhile isDigit $ dropWhile (not . isDigit) $ show t
     format (VSocket x) = text $ show x
-    -- format (MVal v) = text $ unsafePerformIO $ do
+    -- format (MVal v) = text $ inlinePerformSTM $ do
     --     val <- readTVar v
     --     return $ pretty val
-    format (VRule _) = text $ "{rule}"
+    format (VRule _) = text $ "{regex}"
     format (VSubst _) = text $ "{subst}"
     format (VType t) = text $ "::" ++ showType t
     format (VObject o) = text $ "{obj:" ++ showType (objType o) ++ "}"

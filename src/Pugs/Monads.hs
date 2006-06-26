@@ -13,6 +13,7 @@
 -}
 
 module Pugs.Monads (
+    enterLValue, enterRValue,
     enterLex, enterContext, enterEvalContext, enterPackage, enterCaller,
     enterGiven, enterWhen, enterWhile, genSymPrim, genSymCC,
     enterBlock, enterSub, envEnterCaller,
@@ -46,6 +47,16 @@ instance (Monad m) => MonadPlus (MaybeT m) where
         mb <- b
         return $ ma `mplus` mb
 
+{-|
+Perform the given evaluation in an /LValue/ context.
+-}
+enterLValue :: Eval a -> Eval a
+enterLValue = local (\e -> e{ envLValue = True })
+{-|
+Perform the given evaluation in an /RValue/ (i.e. non-/LValue/) context.
+-}
+enterRValue :: Eval a -> Eval a
+enterRValue = local (\e -> e{ envLValue = False })
 
 {-|
 Create a new lexical scope by applying the list of 'Pad'-transformers
@@ -259,8 +270,8 @@ enterSub sub action
                 }
         | otherwise = do
             subRec <- sequence
-                [ genSym "&?SUB" (codeRef (orig sub))
-                , genSym "$?SUBNAME" (scalarRef $ VStr $ subName sub)]
+                [ genSym "&?ROUTINE" (codeRef (orig sub))
+                ]
             -- retRec    <- genSubs env "&return" retSub
             callerRec <- genSubs env "&?CALLER_CONTINUATION" (ccSub cc)
             return $ \e -> e
@@ -268,7 +279,7 @@ enterSub sub action
                 , envPackage = maybe (envPackage e) envPackage (subEnv sub)
                 , envOuter   = maybe Nothing envOuter (subEnv sub)
                 , envImplicit= envImplicit e `Map.union` Map.fromList
-                    [ ("&?SUB", ()), ("$?SUBNAME", ()), ("&?CALLER_CONTINUATION", ()) ]
+                    [ ("&?ROUTINE", ()), ("&?CALLER_CONTINUATION", ()) ]
                 }
     ccSub :: (Val -> Eval Val) -> Env -> VCode
     ccSub cc env = mkPrim

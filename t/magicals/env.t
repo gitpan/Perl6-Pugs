@@ -5,7 +5,7 @@
 use v6;
 use Test;
 # L<S02/"Names" /environment variables passed to program/>
-plan 11;
+plan 14;
 
 if $*OS eq "browser" {
   skip_rest "Programs running in browsers don't have access to regular IO.";
@@ -46,7 +46,7 @@ ok !defined(%*ENV<PUGS_ROCKS>), "there's still no env variable 'PUGS_ROCKS'";
 
 my ($pugs,$redir,$squo) = ("./pugs", ">", "'");
 
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
     $pugs = 'pugs.exe';
 };
 
@@ -69,7 +69,7 @@ unlink $tempfile;
 my $err = 0;
 for %*ENV.kv -> $k,$v {
   # Ignore env vars which bash and maybe other shells set automatically.
-  next if $k eq any<SHLVL _ OLDPWD PS1>;
+  next if $k eq any <SHLVL _ OLDPWD PS1>;
   if (%child_env{$k} !~ $v) {
     if (! $err) {
       flunk("Environment gets propagated to child.");
@@ -101,7 +101,7 @@ is(%child_env<PUGS_ROCKS>,undef,'The child did not see %*ENV<PUGS_ROCKS>');
 my $err = 0;
 for %*ENV.kv -> $k,$v {
   # Ignore env vars which bash and maybe other shells set automatically.
-  next if $k eq any<SHLVL _ OLDPWD PS1>;
+  next if $k eq any <SHLVL _ OLDPWD PS1>;
   if (%child_env{$k} !~ $v) {
     if (! $err) {
       flunk("Environment gets propagated to child.");
@@ -118,3 +118,18 @@ if (! $err) {
 };
 
 ok !%*ENV.exists("does_not_exist"), "exists() returns false on a not defined env var";
+
+# %ENV must not be imported by default
+my $x = eval "%ENV";
+ok $! ~~ m:P5/Undeclared/, '%ENV not visible by default', :todo<bug>;
+
+# following doesn't parse yet
+{
+    # It must be importable
+    use GLOBAL <%ENV>;
+    ok +%ENV.keys, 'imported %ENV has keys';
+}
+# Importation must be lexical
+$x = eval "%ENV";
+ok $! ~~ m:P5/Undeclared/, '%ENV not visible by after lexical import scope', :todo<bug>;
+1;

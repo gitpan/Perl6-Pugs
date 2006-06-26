@@ -1,5 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fallow-undecidable-instances -fno-warn-orphans -funbox-strict-fields -cpp #-}
-{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
+{-# OPTIONS_GHC -fglasgow-exts -fallow-undecidable-instances -fno-warn-orphans -funbox-strict-fields -cpp -fno-warn-deprecations #-}
 
 module Pugs.Compile.PIL2 (
     PIL_Stmts(..), PIL_Stmt(..), PIL_Expr(..), PIL_Decl(..), PIL_Literal(..), PIL_LValue(..),
@@ -13,8 +12,6 @@ module Pugs.Compile.PIL2 (
 import Pugs.AST
 import Pugs.Internals
 import Pugs.Types
-import Pugs.Eval
-import Pugs.Eval.Var
 import Pugs.Monads
 import Pugs.PIL2
 import Emit.PIR
@@ -111,11 +108,13 @@ instance Compile (SubName, [PIL_Decl]) [PIL_Decl] where
         return (PSub name SubPrim [] False False (combine bodyC PNil):decls)
 
 instance Compile (SubName, VCode) [PIL_Decl] where
+{-
     compile (name, vsub) | packageOf name /= packageOf (subName vsub) = do
         let storeC  = PBind [PVar $ qualify name] (PExp . PVar . qualify $ subName vsub)
             bodyC   = PStmts (PStmt . PExp $ storeC) PNil
             exportL = "__export_" ++ (render $ varText name)
         return [PSub exportL SubPrim [] False False bodyC]
+-}
     compile (name, vsub) = do
         bodyC   <- enter cxtItemAny . compile $ case subBody vsub of
             Syn "block" [body]  -> body
@@ -124,18 +123,28 @@ instance Compile (SubName, VCode) [PIL_Decl] where
         return [PSub name (subType vsub) paramsC (subLValue vsub) (isMulti vsub) bodyC]
 
 instance Compile (String, [(TVar Bool, TVar VRef)]) PIL_Expr where
+    compile (name, ((_, ref):_)) = do
+        rv <- readRef =<< liftSTM (readTVar ref)
+        case rv of
+            VCode sub   -> return $ PRawName (subName sub)
+            _           -> return $ PRawName name
     compile (name, _) = return $ PRawName name
 
 instance Compile Exp PIL_Stmts where
-    compile (Ann (Pos _) rest) = compile rest -- fmap (PPos pos rest) $ compile rest
-    compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
     -- XXX: pragmas?
+    compile (Ann Pos{} rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann Prag{} rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
+    compile (Ann _ rest) = compile rest
+    compile (Sym _ "" rest) = compile rest
     compile (Stmts (Pad SOur _ exp) rest) = do
         compile $ mergeStmts exp rest
     compile (Stmts (Pad scope pad exp) rest) = do
-        expC    <- compile $ mergeStmts exp rest
         padC    <- compile $ padToList pad
-        return $ PPad scope ((map fst $ padToList pad) `zip` padC) expC
+        let symC = (map fst $ padToList pad) `zip` padC
+            exps = [ Syn ":=" [Var name, Var from] | (name, PRawName from) <- symC, name /= from ]
+        expC    <- compile $ mergeStmts (foldl1 mergeStmts (exps ++ [exp])) rest
+        return $ PPad scope symC expC
     compile exp = compileStmts exp
 
 class EnterClass m a where
@@ -186,6 +195,9 @@ instance Compile Exp PIL_Stmt where
     compile (Ann (Pos pos) rest) = fmap (PPos pos rest) $ compile rest
     compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
     -- XXX: pragmas?
+    compile (Ann Prag{} rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann _ rest) = compile rest
+    compile (Sym _ "" rest) = compile rest
     compile Noop = return PNoop
     compile (Val val) = do
         cxt     <- asks envContext
@@ -200,8 +212,8 @@ instance Compile Exp PIL_Stmt where
         compile (Syn "loop" $ [emptyExp, Val (VBool True), emptyExp, exp])
     compile (Syn "loop" [pre, cond, post, (Syn "block" [body])]) = do
         preC    <- compile pre
-        -- loop ...; ; ... {...} ->
-        -- loop ...; bool::true; ... {...}
+        -- loop (...; ; ...) {...} ->
+        -- loop (...; True; ...) {...}
         let cond' | unwrap cond == Noop
                   = return $ PStmts (PStmt . PLit . PVal $ VBool True) PNil
                   | otherwise
@@ -258,8 +270,12 @@ instance (Compile a b, Compile a c, Compile a d) => Compile [a] (b, c, d) where
     compile x = compError x
 
 instance Compile Exp PIL_LValue where
-    compile (Ann (Pos _) rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann Pos{} rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann Prag{} rest) = compile rest
     compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
+    compile (Ann _ rest) = compile rest
+    compile (Sym _ "" rest) = compile rest
+    -- XXX: pragmas?
     compile (Var name) = return $ PVar name
     compile (Syn (sigil:"::()") exps) = do
         compile $ App (Var "&Pugs::Internals::symbolic_deref") Nothing $
@@ -353,8 +369,12 @@ compConditional exp = compError exp
 
 {-| Compiles various 'Exp's to 'PIL_Expr's. -}
 instance Compile Exp PIL_Expr where
-    compile (Ann (Pos _) rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann Pos{} rest) = compile rest -- fmap (PPos pos rest) $ compile rest
+    compile (Ann Prag{} rest) = compile rest
     compile (Ann (Cxt cxt) rest) = enter cxt $ compile rest
+    compile (Ann _ rest) = compile rest
+    compile (Sym _ "" rest) = compile rest
+    -- XXX: pragmas?
     compile (Var name) = return . PExp $ PVar name
     compile exp@(Val (VCode _)) = compile $ Syn "sub" [exp]
     compile (Val val) = fmap PLit $ compile val
@@ -384,6 +404,11 @@ compError = die $ "Compile error -- invalid "
 
 {-| Compiles a 'Val' to a 'PIL_Literal'. -}
 instance Compile Val PIL_Literal where
+    compile (VList vs) = return $ PVal (VList (filter isSimple vs))
+        where
+        isSimple (VRef _) = False
+        isSimple _        = True
+    compile (VRef _) = return $ PVal VUndef
     compile val = return $ PVal val
 
 -- utility functions

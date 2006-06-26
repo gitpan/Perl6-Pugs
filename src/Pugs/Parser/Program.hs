@@ -7,13 +7,23 @@ import Pugs.AST
 
 import Pugs.Parser
 import Pugs.Rule
-import Pugs.Rule.Error
+import Text.ParserCombinators.Parsec.Error (showErrorMessages, errorMessages)
+import qualified Data.Map as Map
 
 parseProgram :: Env -> FilePath -> String -> Env
 parseProgram = flip runRule ruleProgram
 
 makeState :: Env -> RuleState
-makeState env = MkRuleState env MkDynParsersEmpty
+makeState env = MkRuleState
+    { ruleEnv           = env
+    , ruleParseProgram  = parseProgram
+    , ruleDynParsers    = MkDynParsersEmpty
+    , ruleBracketLevel  = StatementBracket
+    , ruleChar          = ' '
+    , ruleName          = ""
+    , rulePos           = 0
+    , ruleBlockPads     = Map.empty
+    }
 
 runRule :: Env -> RuleParser Env -> FilePath -> String -> Env
 runRule env p name str =

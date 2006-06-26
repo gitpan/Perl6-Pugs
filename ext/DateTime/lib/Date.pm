@@ -24,11 +24,9 @@ my @PreviousMonthDoLY =
 
 # probably this should be done as "multi submethod BUILD", but that
 # makes pugs barf last I checked
-multi submethod BUILD () returns Date {
-    return $_.today();
-}
+multi submethod BUILD (Int|Num :$epoch) returns Date {
+    return Date.today() unless $epoch.defined;
 
-multi submethod BUILD (Int|Real :$epoch) returns Date {
     $epoch = int $epoch;
 
     # waiting for localtime in Pugs
@@ -36,10 +34,10 @@ multi submethod BUILD (Int|Real :$epoch) returns Date {
     $y += 1900;
     $m++;
 
-    return $_.SUPER::new( year  => $y,
-                          month => $m,
-                          day   => $d,
-                        );
+    return Date.SUPER::new( year  => $y,
+                            month => $m,
+                            day   => $d,
+                          );
 }
 
 multi submethod BUILD (Str $string) returns Date {
@@ -48,7 +46,7 @@ multi submethod BUILD (Str $string) returns Date {
 #                     tomorrow    { $meth = 'tomorrow' }
 #                     yesterday   { $meth = 'yesterday' }
 #                    / ) {
-#        return $_.$meth();
+#        return $?SELF.$meth();
 #    }
 #    else {
 #        # load a heavier weight parser - hand waving ensues
@@ -69,31 +67,31 @@ multi submethod BUILD (Int :$year, Int :$month = 1, Int|Str :$day is copy = 1) r
 }
 
 method today () returns Date {
-    return $_.new( epoch => time );
+    return Date.new( epoch => time );
 }
 
 our &Date::now ::= &Date::today;
 
 method tomorrow () returns Date {
-    return $_.new( epoch => time ).add( days => 1 );
+    return Date.new( epoch => time ).add( days => 1 );
 }
 
 method yesterday () returns Date {
-    return $_.new( epoch => time ).subtract( days => 1 );
+    return Date.new( epoch => time ).subtract( days => 1 );
 }
 
 sub _is_leap_year (Int $year) returns bool {
     if $year % 400 == 0 {
-        return bool::true;
+        return Bool::True;
     }
     elsif $year % 100 == 0 {
-        return bool::false;
+        return Bool::False;
     }
     elsif $year % 4 == 0 {
-        return bool::true;
+        return Bool::True;
     }
 
-    return bool::false;
+    return Bool::False;
 }
 
 method quarter () returns Int {
@@ -101,11 +99,11 @@ method quarter () returns Int {
 }
 
 method day_of_quarter () returns Int {
-    my $doy = $_.day_of_year();
+    my $doy = $?SELF.day_of_year();
 
     my @doy := _is_leap_year($.year) ?? @PreviousMonthDoLY !! @PreviousMonthDoY;
 
-    return $doy - @doy[ ( 3 * $_.quarter() ) - 3 ];
+    return $doy - @doy[ ( 3 * $?SELF.quarter() ) - 3 ];
 }
 
 method day_of_year () returns Int {

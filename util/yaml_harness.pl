@@ -39,7 +39,7 @@ $Config{"recurse"} = 1 if not defined $Config{"recurse"};
 $Config{"pugs-path"} = $ENV{HARNESS_PERL};
 push @{$Config{"exclude"}}, 'Disabled' if not $Config{"exclude"} or not @{$Config{"exclude"}};
 if(!@ARGV) {
-    @ARGV = glob "t/ ext/*/t/";
+    @ARGV = sort map glob, "t/*/*.t", "t/*/*/*.t", "ext/*/t/*.t"
 }
 
 _build_ext_re();
@@ -208,9 +208,15 @@ sub run {
 
 sub run_children {
     my ($self, $child_count, $all_tests) = @_;
-    my $chunk_size = POSIX::ceil(@$all_tests / $child_count);
+    my $chunk_size = POSIX::ceil(@$all_tests / ($child_count * 3 - 1));
     for my $child (1 .. $child_count) {
-        my @own_tests = splice @$all_tests, 0, $chunk_size;
+        my $this_size = $chunk_size * 3;
+
+        # Heuristic: Most of the first tests (ext/) are slow,
+        # so we arbitrarily lower the first chunk by 1/3.
+        $this_size -= $chunk_size if $child == 1;
+
+        my @own_tests = splice @$all_tests, 0, $this_size;
         defined(my $pid = fork) or die "Can't fork: $!";
         if ($pid) {
             push @{ $self->{_children} }, $pid;

@@ -9,7 +9,6 @@ sub load_db returns Void {
     my $db = open("words.db.p6") err die "Cannot open the words.db.p6 file: $!";
     for (=$db) -> $_line {
         my $line = $_line;
-        $line .= chomp;
         my ($key, $value) = split("\t", $line);
         %words{"$key"} = $value;
     }
@@ -80,11 +79,11 @@ sub classify (%words_in_file) returns Void {
 
 load_db();
 
-if (@ARGS[0] eq 'add' && +@ARGS == 3) {
-    add_words(@ARGS[1], parse_file(@ARGS[2]));
+if (@*ARGS[0] eq 'add' && +@*ARGS == 3) {
+    add_words(@*ARGS[1], parse_file(@*ARGS[2]));
 }
-elsif (@ARGS[0] eq 'classify' && +@ARGS == 2) {
-    classify(parse_file(@ARGS[1]));
+elsif (@*ARGS[0] eq 'classify' && +@*ARGS == 2) {
+    classify(parse_file(@*ARGS[1]));
 }
 else {
     say("USAGE:

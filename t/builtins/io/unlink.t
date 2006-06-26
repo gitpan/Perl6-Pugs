@@ -14,7 +14,7 @@ if $*OS eq "browser" {
 
 my $fn = "unlink-test-file" ~ nonce;
 
-my $iswin32 = ?($*OS eq any<MSWin32 mingw msys cygwin>) ?? "Timely closing of file handles does not yet work" !! undef;
+my $iswin32 = ?($*OS eq any <MSWin32 mingw msys cygwin>) ?? "Timely closing of file handles does not yet work" !! undef;
 
 # open, explicit close, unlink, test
 {
@@ -23,7 +23,7 @@ my $iswin32 = ?($*OS eq any<MSWin32 mingw msys cygwin>) ?? "Timely closing of fi
 
   ok -e $fn,      "open() created a tempfile";
   is(unlink($fn), 1, "unlink() returned true");
-  ok !-e $fn,     "unlink() actually deleted the tempfile";
+  ok !(-e $fn),     "unlink() actually deleted the tempfile";
 }
 
 # open, implicit close because of scope exit, unlink, test
@@ -32,5 +32,5 @@ my $iswin32 = ?($*OS eq any<MSWin32 mingw msys cygwin>) ?? "Timely closing of fi
 
   ok -e $fn,      "open() created a tempfile";
   is(unlink($fn), 1, "unlink() returned true", todo => $iswin32);
-  ok !-e $fn,     "unlink() actually deleted the tempfile", todo => $iswin32;
+  ok !(-e $fn),     "unlink() actually deleted the tempfile", todo => $iswin32;
 }

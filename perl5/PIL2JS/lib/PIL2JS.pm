@@ -109,6 +109,11 @@ sub compile_perl6_to_pil {
 
 sub run_pugs {
   my @args = @_;
+  local $_;
+
+  # -CPIL1 doesn't load the Prelude, though, so we have to kludge around this.
+  @args = map { /^-M(.+)$/ ? ('-e', "use $1;") : ($_) } @args;
+
   diag "$cfg{pugs} @args";
 
   $ENV{PERL5LIB} = join $Config{path_sep}, pwd('lib'), ($ENV{PERL5LIB} || "");

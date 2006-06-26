@@ -1,7 +1,7 @@
 module Log::Selective-0.01-BRENTDAX;
 
 my $active;
-for split ' ', %ENV<SELECT_LOGS> -> $_ is copy {
+for split ' ', %*ENV<SELECT_LOGS> -> $_ is copy {
 	s:perl5:g{^:}{};
 	$active |= $_;
 }
@@ -26,7 +26,7 @@ sub note(*@msg is copy, *%tags is copy) is export {
 			@msg.push(" at $caller.file() line $caller.line().\n");
 		}
 		print $ERR: @msg;
-		return [~]@msg #but true;
+		return [~] @msg #but true;
 	}
 	return;
 }

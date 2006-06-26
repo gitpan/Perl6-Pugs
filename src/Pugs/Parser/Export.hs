@@ -8,27 +8,33 @@ module Pugs.Parser.Export (
     exportSym,
 ) where
 import Pugs.Internals
-import Pugs.Rule
 import Pugs.AST
 
 import Pugs.Parser.Types
 import Pugs.Parser.Unsafe
+import Pugs.Lexer (isWordAlpha)
 
-exportSym :: Scope -> String -> Val -> RuleParser Exp
+exportSym :: Scope -> String -> Val -> RuleParser ()
 exportSym scope ('&':subname) ref = do
-    (Val (VList subs)) <- unsafeEvalExp $ Syn "@{}" [Val ref]
-    env <- getRuleEnv
-    let newPkg = envPackage env
-    exps <- forM subs $ \(VCode sub) -> do
-        let name = ('&':subname)
-            mkMulti = if isMulti sub then ('&':) else id
-            mkExp = Syn ":=" [Var name, Val $ VCode sub]
-            mkSym = Sym scope (mkMulti name) mkExp
-        doExport scope mkSym
-    return $ case scope of
-        SMy -> Pad SMy (foldl unionPads (mkPad []) [ pad | Pad SMy pad _ <- exps ]) emptyExp
-        _   -> emptyExp 
-exportSym _ _ _ = fail "notyet"
+    rv <- unsafeEvalExp $ Syn "," [Syn "@{}" [Val ref]]
+    case rv of
+        Val (VList subs) -> do
+            exps <- forM subs $ \val -> do
+                let name    = '&':subname
+                    mkMulti = case val of
+                        VCode sub | isMulti sub -> ('&':)
+                        _                       -> id
+                    mkExp   = Syn ":=" [Var name, Val val]
+                    mkSym   = Sym scope (mkMulti name) mkExp
+                doExport scope mkSym
+            case scope of
+                SMy -> addBlockPad SState 
+                    (foldl unionPads (mkPad []) [ pad | Pad SMy pad _ <- exps ])
+                _   -> return () 
+        _ -> fail $ "Invalid export list: " ++ show rv
+exportSym scope subname@(sig:_) ref | isWordAlpha sig = do
+    exportSym scope ('&':subname) ref
+exportSym _ _ _ = fail "Non-Code exports does not work yet"
 --exportSym' scope name sym = other vars...
 
 doExport :: Scope -> Exp -> RuleParser Exp

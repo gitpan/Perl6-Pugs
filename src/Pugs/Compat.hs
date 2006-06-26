@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fvia-C -optc-w -fno-warn-orphans -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -fvia-C -optc-w -fno-warn-orphans -cpp -fno-warn-deprecations #-}
 
 {-|
     POSIX calls and emulations.
@@ -42,15 +42,21 @@ module Pugs.Compat (
     rewindDirStream,
     closeDirStream,
     executeFile',        -- the prime signifies we changed signature.
+    getCurrentDirectory,
+    setCurrentDirectory,
+    doesFileExist,
+    doesDirectoryExist,
+    doesExist,
 ) where
 
 import Foreign
+import System.Cmd
 import System.Posix.Types
 
 #ifdef PUGS_HAVE_POSIX
+import System.Posix.Files
 import System.Posix.Process
 import System.Posix.Env hiding (getEnvironment)
-import System.Posix.Files
 import System.Posix.Directory
 import System.Posix.User
 import System.Exit
@@ -60,10 +66,30 @@ import Foreign.C.String
 import Data.Typeable
 import qualified System.Posix.Signals
 
+doesExist :: FilePath -> IO Bool
+doesExist = fileExist
+
+testStatusWith :: (FileStatus -> Bool) -> FilePath -> IO Bool
+testStatusWith t f = fmap t (getFileStatus f) `catch` const (return False)
+
+doesFileExist :: FilePath -> IO Bool
+doesFileExist = testStatusWith isRegularFile
+
+doesDirectoryExist :: FilePath -> IO Bool
+doesDirectoryExist = testStatusWith isDirectory
+
+getCurrentDirectory :: IO FilePath
+getCurrentDirectory = getWorkingDirectory
+
+setCurrentDirectory :: FilePath -> IO ()
+setCurrentDirectory = changeWorkingDirectory
+
 executeFile' :: FilePath -> Bool -> [String] -> Maybe [(String, String)] -> IO ExitCode
+executeFile' prog True args Nothing = rawSystem prog args
 executeFile' prog search args env = do
-	executeFile prog search args env
-	return $ ExitFailure 1            -- if we got here, it failed.
+    print (prog, search, args, env)
+    executeFile prog search args env
+    return $ ExitFailure 1            -- if we got here, it failed.
 
 statFileSize :: FilePath -> IO Integer
 statFileSize f = do
@@ -86,9 +112,9 @@ instance Typeable DirStream where
 
 import Debug.Trace
 import qualified System.Environment
+import System.Directory (getCurrentDirectory, setCurrentDirectory, doesFileExist, doesDirectoryExist)
 import IO
 import System.IO
-import System.Cmd
 import System.Exit
 import Foreign.C.String
 import Foreign.Ptr
@@ -240,9 +266,13 @@ signalProcess :: Int -> Int -> IO ()
 signalProcess _ _ = failWith "kill"
 
 executeFile' :: FilePath -> Bool -> [String] -> Maybe [(String, String)] -> IO ExitCode
-executeFile' prog True args Nothing = do
-    rawSystem prog args
+executeFile' prog True args Nothing = rawSystem prog args
 executeFile' _ _ _ _ = failWithIncomplete "executeFile"
+
+doesExist :: FilePath -> IO Bool
+doesExist f = do
+    rv <- doesFileExist f
+    if rv then return rv else doesDirectoryExist f
 
 #endif
 

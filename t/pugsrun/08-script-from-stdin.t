@@ -10,9 +10,9 @@ indicated by the C<-> switch.
 
 =cut
 
-my @examples = map -> Junction $_ { $_.values } (
+my @examples = map -> Junction $_ { $_.values }, (
    any('say qq.Hello Pugs.',
-       'say @ARGS',
+       'say @*ARGS',
    )
 );
 
@@ -26,7 +26,7 @@ diag "Running under $*OS";
 
 my ($pugs,$redir,$echo) = ("./pugs", ">", "echo");
 
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 

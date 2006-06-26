@@ -67,9 +67,10 @@ sub JS::Root::map(Code $code, *@array is rw) is primitive {
   $arity ||= 1;
 
   my @res;
+  my @args;
   while +@array > 0 {
-    my @args = ();
-    my $i; loop $i = 0; $i < $arity; $i++ {
+    @args = ();
+    my $i; loop ($i = 0; $i < $arity; $i++) {
       # Slighly hacky
       push @args: undef;
       @args[-1] := @array.shift;
@@ -117,7 +118,7 @@ sub JS::Root::reduce(Code $code, *@array) is primitive {
   my $ret = @array.shift;
   while +@array > 0 {
     my @args;
-    my $i; loop $i = 0; $i < $arity - 1; $i++ {
+    my $i; loop ($i = 0; $i < $arity - 1; $i++) {
       # Slighly hacky
       push @args: undef;
       @args[-1] := @array.shift;
@@ -190,11 +191,11 @@ sub JS::Root::uniq(Code $cmp is copy = &infix:<cmp>, *@array) is primitive {
 }
 
 sub JS::Root::zip(Array *@arrays) is primitive is rw {
-  my $maxlen = max map { +$_ } @arrays;  # XXX wanting hyperops
+  my $maxlen = max map { +$_ }, @arrays;  # XXX wanting hyperops
   map {
     my $i := $_;
-    map { @arrays[$_][$i] } 0..@arrays.end;
-  } 0..$maxlen-1;
+    map { @arrays[$_][$i] }, 0..@arrays.end;
+  }, 0..$maxlen-1;
 }
 
 method reverse(*@things is copy:) {
@@ -214,7 +215,7 @@ sub infix:<..>(Num $from, Num $to) is primitive {
   my $i;
   my @res;
 
-  loop $i = $from; $i <= $to; $i++ {
+  loop ($i = $from; $i <= $to; $i++) {
     push @res, $i;
   }
 

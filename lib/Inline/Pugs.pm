@@ -110,21 +110,16 @@ sub quote_pugs {
 
 1;
 
-=head1 AUTHORS
-
-Audrey Tang C<E<lt>autrijus@autrijus.orgE<gt>>
-
 =head1 COPYRIGHT
 
-Copyright 2005 by Audrey Tang C<E<lt>autrijus@autrijus.orgE<gt>>.
+Pugs is Copyright 2005-2006, The Pugs Contributors.
 
-This code is free software; you can redistribute it and/or modify it under
+Pugs is a joint work of authorship by the Pugs Contributors.
+
+Pugs is free software; you can redistribute it and/or modify it under
 the terms of either:
 
     a) the GNU General Public License, version 2, or
     b) the Artistic License, version 2.0beta5.
-
-For the full license text, please see the F<GPL-2> and F<Artistic-2> files
-under the F<LICENSE> directory in the Pugs distribution.
 
 =cut

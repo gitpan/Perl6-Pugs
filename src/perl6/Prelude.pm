@@ -2,6 +2,7 @@ module Prelude-0.0.1;
 
 use v6;
 
+
 =kwid
 
 There are a couple of things going on here.
@@ -29,11 +30,11 @@ the `is builtin` trait.
 class Process {
     multi sub exec($prog, @args) returns Bool is builtin is primitive is unsafe {
         # say "e:prog args"; # XXX delme
-        Pugs::Internals::exec($prog, bool::false, @args);
+        Pugs::Internals::exec($prog, Bool::False, @args);
     }
     multi sub exec(@args) returns Bool is builtin is primitive is unsafe {
         # say "e:args:" ~ @args.perl; # XXX delme
-        Pugs::Internals::exec(@args[0], bool::true, @args);
+        Pugs::Internals::exec(@args[0], Bool::True, @args);
     }
     multi sub exec($string) returns Bool is builtin is primitive is unsafe {
         # say "e:string"; # XXX delme
@@ -89,26 +90,26 @@ class Control::Caller {
     has Str $.subtype;
     has Code $.sub;
     has Str $.params;   # FIXME: needs attention; don't use yet.
+}
 
-    multi sub caller (Class $kind = Any, Int :$skip = 0, Str :$label)
-            returns Control::Caller is primitive is builtin is safe {
-        my @caller = Pugs::Internals::caller($kind, $skip, $label);
+multi sub caller (Class $kind = Any, Int :$skip = 0, Str :$label)
+        returns Control::Caller is primitive is builtin is safe {
+    my @caller = Pugs::Internals::caller($kind, $skip, $label);
 
-        # FIXME: why doesn't this work?
-        # this is here just because of an icky pugsbug.
-        #my %idx = <package file line subname subtype params> Y 0 .. 5; # ugly.
-        #Control::Caller.new( map { ; $_ => @caller[ %idx{$_} ] }, keys %idx );
-        #( map { say( $_ => @caller[ %idx{$_} ] ) }, keys %idx );
+    # FIXME: why doesn't this work?
+    # this is here just because of an icky pugsbug.
+    #my %idx = <package file line subname subtype params> Y 0 .. 5; # ugly.
+    #Control::Caller.new( map { ; $_ => @caller[ %idx{$_} ] }, keys %idx );
+    #( map { say( $_ => @caller[ %idx{$_} ] ) }, keys %idx );
 
-        @caller.elems ?? Control::Caller.new(
-            'package' => @caller[0],
-            'file'    => @caller[1],
-            'line'    => @caller[2],
-            'subname' => @caller[3],
-            'subtype' => @caller[4],
-            'sub'     => @caller[5],
-        ) !! undef;
-    }
+    @caller.elems ?? Control::Caller.new(
+        package => @caller[0],
+        file    => @caller[1],
+        line    => @caller[2],
+        subname => @caller[3],
+        subtype => @caller[4],
+        sub     => @caller[5],
+    ) !! undef;
 }
 
 class fatal {
@@ -123,7 +124,7 @@ class fatal {
     # interface %*INC, instead of this hack.
     # %*INC<fatal> = { filename => "fatal", resname => "<precompiled>", };
 
-    our $fatal::DEFAULT_FATALITY is constant = 1;
+    $fatal::DEFAULT_FATALITY is constant = 1;
     
     sub import {
         Pugs::Internals::install_pragma_value($?CLASS, 1);
@@ -161,15 +162,17 @@ class Carp {
         #while Control::Caller::caller(+:$i) -> $caller {
         #   $mess ~= "\n\t{$caller.package}::{$caller.subname}() at {$caller.file} line {$caller.line}";
         #}
-        loop {
+        loop (;;) {
             my $caller = Control::Caller::caller(skip => $i++) err last;
             $mess ~= "\n\t{$caller.package}::{$caller.subname}() at {$caller.file} line {$caller.line}";
-        }
+        };
+
         $mess;
     }
 }
 
 
+=kwid
 
 role Rule {}
 class Pugs::Internals::VRule does Rule {}
@@ -184,13 +187,13 @@ multi sub infix:<~~> (Rul $r, $x) is primitive is safe is builtin {$r.f.($x)}
 sub rx_common_($hook,%mods0,$pat0,$qo,$qc) is builtin is safe {
     state(%modifiers_known, %modifiers_supported_p6, %modifiers_supported_p5);
     FIRST {
-        %modifiers_known = map {;($_ => 1)}
-        <perl5 Perl5 P5 i ignorecase w words g global c continue p pos
+        %modifiers_known = map {;($_ => 1)},
+        <perl5 Perl5 P5 i ignorecase s sigspace g global c continue p pos
         once bytes codes graphs langs x nth ov overlap ex exhaustive
         rw keepall e each any parsetree stringify>;
-        %modifiers_supported_p6 = map {;($_ => 1)}
-        <i ignorecase w words g global  stringify>;
-        %modifiers_supported_p5 = map {;($_ => 1)}
+        %modifiers_supported_p6 = map {;($_ => 1)},
+        <i ignorecase s sigspace g global  stringify>;
+        %modifiers_supported_p5 = map {;($_ => 1)},
         <perl5 Perl5 P5 i ignorecase g global  stringify>;
     }
     my $pat = $pat0;
@@ -199,15 +202,15 @@ sub rx_common_($hook,%mods0,$pat0,$qo,$qc) is builtin is safe {
     #my sub warning($e){warn(Carp::longmess($e))};# XXX doesnt work yet.
     my sub warning($e){warn("Warning: $e\n")};
     for %mods.keys -> $k {
-        if %modifiers_known{$k} {
-            if $p5 && !%modifiers_supported_p5{$k} {
+        if %modifiers_known.{$k} {
+            if $p5 && !%modifiers_supported_p5.{$k} {
                 warning "Modifier :$k is not (yet?) supported by :perl5 regexps.";
-            } elsif !$p5 && !%modifiers_supported_p6{$k} {
+            } elsif !$p5 && !%modifiers_supported_p6.{$k} {
                 warning "Modifier :$k is not yet supported by PGE/pugs.";
             }
         }
         elsif ($k.chars > 1 && substr($k,-1,1) eq "x"
-               && pugs_internals_m:perl5/\A(\d+)x\Z/) {
+               && internals_m:perl5/\A(\d+)x\Z/) {
             my $n = +$0;
             %mods.delete($k);
             %mods{'x'} = $n;
@@ -220,22 +223,22 @@ sub rx_common_($hook,%mods0,$pat0,$qo,$qc) is builtin is safe {
         }
         else {
             my $msg = "Unknown modifier :$k will probably be ignored.";
-            $msg ~= "  Perhaps you meant :i:w ?" if $k eq ("iw"|"wi");
+            $msg ~= "  Perhaps you meant :i:s ?" if $k eq ("is"|"si");
             warning $msg;
         }
     }
     if !$p5 {
         my $pre = "";
-        if %mods{"i"} || %mods{"ignorecase"} {      
+        if %mods<i> || %mods<ignorecase> {      
             $pre ~= ":i";
             %mods.delete("i"); # avoid haskell handling it.
             %mods.delete("ignorecase");
 #           warning "PGE doesn't actually do :ignorecase yet.";
         }
-        if %mods{"w"} || %mods{"words"} {      
-            $pre ~= ":w";
-            %mods.delete("w"); # avoid haskell handling it.
-            %mods.delete("words");
+        if %mods<s> || %mods<sigspace> {      
+            $pre ~= ":s";
+            %mods.delete("s"); # avoid haskell handling it.
+            %mods.delete("sigspace");
         }
         if $pre ne "" {
             $pre ~= "::" if substr($pat,0,1) ne (":"|"#");
@@ -245,7 +248,7 @@ sub rx_common_($hook,%mods0,$pat0,$qo,$qc) is builtin is safe {
     my $g = %mods{'g'} || %mods{'global'};
     my $ov = %mods{'ov'} || %mods{'overlap'};
     my $ex = %mods{'ex'} || %mods{'exhaustive'};
-    my $adverbs = join("",map {":"~$_} %mods.keys);
+    my $adverbs = join("",map {":"~$_}, %mods.keys);
     if $ov && 0 { # XXX disabled until Rul works.
         my($str,$pos,$re,$m,$m0,$a,$s,$at,$prev) =
         ('$_str_','$_pos_','$_re_','$_m_','$_m0_',
@@ -281,6 +284,7 @@ macro m_ (%mods,$pat,$qo,$qc) is builtin is safe {
     rx_common_("pugs_internals_m",%mods,$pat,$qo,$qc);
 }
 
+=cut
 
 
 class File {
@@ -313,15 +317,15 @@ class File {
         my $fh = Pugs::Internals::openFile($filename, $mode);
 
         # XXX layers :)
-        Pugs::Internals::hSetBinaryMode($fh, bool::true) if
+        Pugs::Internals::hSetBinaryMode($fh, Bool::True) if
             $layer ~~ rx:P5/:raw\b/;
 
         $fh;
     }
 
-    multi method seek ($self: Int $position, Int $whence = $File::SEEK_START)
+    multi method seek (Int $position, Int $whence = $File::SEEK_START)
             returns Bool is primitive is unsafe is builtin {
-        Pugs::Internals::hSeek($seek, $position, $whence);
+        Pugs::Internals::hSeek(self, $position, $whence);
     }
 }
 
@@ -332,8 +336,8 @@ class Pipe {
     multi sub open (Str $command, Bool :$r is copy, Bool :$w) returns IO
             is primitive is unsafe {
         die "Pipe::open is unidirectional" if all($r, $w);
-        $r = bool::true if none($r, $w);
-        my ($in, $out, $err, undef) =
+        $r = Bool::True if none($r, $w);
+        my ($in, $out, $err) =
             Pugs::Internals::runInteractiveCommand($command);
         close $err;
         close  ($r ?? $in !! $out);
@@ -362,17 +366,17 @@ class Pipe {
 
 
 role Iter {
-    multi sub prefix:<=> (Iter $self: ) { $self.shift() }
+    multi sub prefix:<=> () is primitive { self.shift() }
     
-    method shift   ($self: ) { ... }
-    method next    ($self: ) { ... }
-    method current ($self: ) { ... }
+    method shift   () { ... }
+    method next    () { ... }
+    method current () { ... }
 }
 
 # Support for =$fh
 class IO does Iter {
-    method shift   ($self: ) is primitive { $self.readline() }
-    method next    ($self: ) is primitive { $self.shift() }
+    method shift   () is primitive { self.readline() }
+    method next    () is primitive { self.shift() }
 }
 
 # Support for ="some_file"
@@ -380,9 +384,9 @@ class IO does Iter {
 # meaning the same as &readline to $obj.shift(), ="some_file" worked, so I
 # added the .shift() declaration here.  --iblech
 class Str does Iter {
-    method shift ($self: ) is primitive { =open($self) }
+    method shift () is primitive { =open(self) }
 
-    method trans (Str $self: Pair *@intable) is primitive is safe {
+    method trans (Pair *@intable) is primitive is safe {
         # Motto: If in doubt use brute force!
         my sub expand (Str $string is copy) {
             my @rv;
@@ -426,7 +430,7 @@ class Str does Iter {
             %transtable{@ks} = @vs;
         }
 
-        [~] map { %transtable{$_} // $_ } $self.split('');
+        [~] map { %transtable{$_} // $_ }, self.split('');
     }
 }
 
@@ -451,46 +455,46 @@ class Time::Local {
     has Str  $.tzname;  # string, eg, JDT
     has Int  $.tz;      # variation from UTC in seconds
     has Bool $.is_dst;
+}
 
-    multi sub localtime(Num $when = time) returns Time::Local
-            is primitive is builtin is safe {
-        my $res;
-        my $sec = int $when;
-        my $pico = ($when - int $when) * 10**12;
-        # XXX: waiting on a better want
-        #if want ~~ rx:P5/^Item/ {
-        #    $res = Pugs::Internals::localtime(bool::true, $sec, $pico);
-        #} else {
-            my @tm = Pugs::Internals::localtime(bool::false, $sec, $pico);
+multi sub localtime(Num $when = time) returns Time::Local
+        is primitive is builtin is safe {
+    my $res;
+    my $sec = int $when;
+    my $pico = ($when - int $when) * 10**12;
+    # XXX: waiting on a better want
+    #if want ~~ rx:P5/^Item/ {
+    #    $res = Pugs::Internals::localtime(Bool::True, $sec, $pico);
+    #} else {
+        my @tm = Pugs::Internals::localtime(Bool::False, $sec, $pico);
 
-            # FIXME: this is how it oughta look, with @ids being class level.
-            #my @ids = <year month day hour min sec picosec wday yday tzname tz is_dst>; # XXX: this should be a class variable!
-            #Time::Local.new( pairs zip @ids, @tm );
+        # FIXME: this is how it oughta look, with @ids being class level.
+        #my @ids = <year month day hour min sec picosec wday yday tzname tz is_dst>; # XXX: this should be a class variable!
+        #Time::Local.new( pairs zip @ids, @tm );
 
-            $res = Time::Local.new(
-                year    => @tm[0],
-                month   => @tm[1],
-                day     => @tm[2],
-                hour    => @tm[3],
-                min     => @tm[4],
-                sec     => @tm[5],
-                picosec => @tm[6],
-                wday    => @tm[7],
-                yday    => @tm[8],
-                tzname  => @tm[9],
-                tz      => @tm[10],
-                is_dst  => @tm[11],
-            );
-        #}
-        $res;
-    }
+        $res = Time::Local.new(
+            year    => @tm[0],
+            month   => @tm[1],
+            day     => @tm[2],
+            hour    => @tm[3],
+            min     => @tm[4],
+            sec     => @tm[5],
+            picosec => @tm[6],
+            wday    => @tm[7],
+            yday    => @tm[8],
+            tzname  => @tm[9],
+            tz      => @tm[10],
+            is_dst  => @tm[11],
+        );
+    #}
+    $res;
 }
 
 class Num {
-    multi sub round_gen(Int $n, Code $corner) returns Int is safe {
+    multi sub round_gen(Int $n, Code $corner) returns Int is primitive is safe {
         $n
     }
-    multi sub round_gen(Num $n, Code $corner) returns Int is safe {
+    multi sub round_gen(Num $n, Code $corner) returns Int is primitive is safe {
         (int($n) == $n) ?? int($n) !! $corner($n);
     }
 
@@ -543,7 +547,7 @@ sub sprintf ($fmt, *@args) is primitive is builtin is safe {
         my $start = $fi;
         $fi++;
         while !(substr($fmt,$fi,1)
-                ~~ any<% c s d u o x e f g X E G b p n i D U O F>) {
+                ~~ any(<% c s d u o x e f g X E G b p n i D U O F>)) {
             $fi++;
         }
         my $specifier = substr($fmt,$fi,1); $fi++;
@@ -594,10 +598,10 @@ multi as (Scalar $obj: $fmt) is builtin is primitive is safe {
     sprintf($fmt,$obj);
 }
 multi as (List $obj: $fmt, $comma) is builtin is primitive is safe {
-    join($comma, map -> $v { sprintf($fmt,$v) } @$obj );
+    join($comma, map -> $v { sprintf($fmt,$v) }, @$obj );
 }
 multi as (Hash $obj: $fmt, $comma) is builtin is primitive is safe {
-    join($comma, map -> $k,$v { sprintf($fmt,$k,$v) } $obj.kv );
+    join($comma, map -> $k,$v { sprintf($fmt,$k,$v) }, $obj.kv );
 }
 
 sub PIL2JS::Internals::use_jsan_module_imp (*@whatever) {
@@ -609,3 +613,73 @@ sub PIL2JS::Internals::use_perl5_module_imp (*@whatever) {
     die "Can't load perl5 modules via js when not running under PIL2JS!";
 }
 our &PIL2JS::Internals::use_perl5_module_noimp := &PIL2JS::Internals::use_perl5_module_imp;
+
+
+# In src/perl6/Prelude.pm, prefix:<-M> doesn't work. :(
+multi prefix_M ($file) is builtin is primitive is unsafe {
+  if not -e $file {
+    undef;
+  }
+  elsif $file ~~ rx:perl5/[^-_a-zA-Z0-9\.\/\\\:]/ {
+    warn "-M bug: avoided $file";
+    undef;
+  }
+  else {
+    my $cmd = %?CONFIG<perl5path>~q{ -e 'print join("\n", map {-M}, @ARGV,"")' }~$file;
+    my $p = Pipe::open($cmd);
+    my $m = slurp($p);  $p.close;
+    # In src/perl6/Prelude.pm, regexs dont work. :(
+    #die "-M bug $m" if not $m ~~ rx:perl5/\A[-e0-9\.]+\Z/;    
+    +$m;
+  }
+}
+
+
+
+sub Pugs::Internals::Disabled::use ($module=$+_) is builtin is unsafe {
+    #Pugs::Internals::use($module);
+    Pugs::Internals::require_use_helper(Bool::True,$module);
+}
+sub Pugs::Internals::Disabled::require ($module=$+_) is builtin is unsafe {
+    #Pugs::Internals::require($module);
+    Pugs::Internals::require_use_helper(Bool::False,$module);
+}
+sub Pugs::Internals::require_use_helper ($use_,$module) is builtin is unsafe {
+  my sub opRequire() { 
+    $use_
+      ?? Pugs::Internals::use($module)
+      !! Pugs::Internals::require($module);
+  }
+  my sub find() {
+    my $file = join(%?CONFIG<file_sep>,split("::",$module)) ~ ".pm";
+    for @*INC -> $dir {
+      my $path = $dir ~ %?CONFIG<file_sep> ~ $file;
+      next if !(-e $path);
+      my $yml = "$path.yml";
+      if -e $yml && prefix_M($yml) < prefix_M($path) {
+      }
+      else {
+        if 1 {
+          Pugs::Internals::compile_file_to_yml($path);
+        }
+      }
+      return opRequire();
+    }
+    die "Can't find " ~ $file ~ ' in @*INC (@*INC contains: ' ~
+        join(' ',@*INC) ~ ")."; #XXX - should be fail
+  }
+  my $seen = %*INC{$module};
+  if $seen {
+    opRequire();
+  }
+  else {
+    find();
+  }
+}
+sub Pugs::Internals::compile_file_to_yml($file) is builtin is unsafe {
+    # XXX - re-enable this when Parse-YAML supports closures correctly!
+    return if index($file, 'Test.pm') == -1;
+    say "Attempting to compile $file ...";
+    system($*EXECUTABLE_NAME~" -CParse-YAML $file > $file.yml");
+    say "back.";
+}

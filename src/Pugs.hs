@@ -37,7 +37,7 @@ import Pugs.CodeGen
 import Pugs.Embed
 import qualified Data.Map as Map
 import Data.IORef
-import System.FilePath
+import System.FilePath (joinFileName, splitFileName)
 
 {-|
 The entry point of Pugs. Uses 'Pugs.Run.runWithArgs' to normalise the command-line
@@ -46,6 +46,9 @@ arguments and pass them to 'run'.
 pugsMain :: IO ()
 pugsMain = mainWith run
 
+defaultProgramName :: String
+defaultProgramName = "<interactive>"
+
 runFile :: String -> IO ()
 runFile file = do
     withArgs [file] pugsMain
@@ -53,13 +56,7 @@ runFile file = do
 -- see also Run/Args.hs
 run :: [String] -> IO ()
 run (("-d"):rest)                 = run rest
-
-{- -l does not appear here anymore
-   as it will have been replaced by an -e snippet further
-   above .
--- run (("-l"):rest)                 = run rest
--}
-
+run (("-l"):rest)                 = run rest
 run (("-w"):rest)                 = run rest
 run (("-I"):_:rest)               = run rest
 
@@ -77,9 +74,9 @@ run ("-c":"-e":prog:_)          = doCheck "-e" prog
 run ("-c":file:_)               = readFile file >>= doCheck file
 
 -- -CPIL1.Perl5 outputs PIL formatted as Perl 5.
-run ("-C":backend:args) | map toLower backend == "js" = do
+run ("-C":backend:args) | (== map toLower backend) `any` ["js","perl5","js-perl5"] = do
     exec <- getArg0
-    doHelperRun "JS" ("--compile-only":("--pugs="++exec):args)
+    doHelperRun backend ("--compile-only":("--pugs="++exec):args)
 run ("-C":backend:"-e":prog:_)           = doCompileDump backend "-e" prog
 run ("-C":backend:file:_)                = readFile file >>= doCompileDump backend file
 
@@ -119,17 +116,24 @@ readStdin = do
 repLoop :: IO ()
 repLoop = do
     initializeShell
-    env <- liftSTM . newTVar . noEnvDebug =<< tabulaRasa "<interactive>"
+    tvEnv <- liftSTM . newTVar . noEnvDebug =<< tabulaRasa defaultProgramName
     fix $ \loop -> do
         command <- getCommand
+        let parseEnv f prog = do
+                env <- liftSTM (readTVar tvEnv)
+                doParse env f defaultProgramName prog
+            resetEnv = do
+                tabulaRasa defaultProgramName
+                env <- fmap noEnvDebug (tabulaRasa defaultProgramName)
+                liftSTM (writeTVar tvEnv env)
         case command of
             CmdQuit           -> putStrLn "Leaving pugs."
-            CmdLoad fn        -> doLoad env fn >> loop
-            CmdRun opts prog  -> doRunSingle env opts prog >> loop
-            CmdParse prog     -> doParse pretty "<interactive>" prog >> loop
-            CmdParseRaw prog  -> doParse show   "<interactive>" prog >> loop
+            CmdLoad fn        -> doLoad tvEnv fn >> loop
+            CmdRun opts prog  -> doRunSingle tvEnv opts prog >> loop
+            CmdParse prog     -> parseEnv pretty prog >> loop
+            CmdParseRaw prog  -> parseEnv show prog >> loop
             CmdHelp           -> printInteractiveHelp >> loop
-            CmdReset          -> tabulaRasa "<interactive>" >>= (liftSTM . writeTVar env) >> loop
+            CmdReset          -> resetEnv >> loop
 
 mainWith :: ([String] -> IO a) -> IO ()
 mainWith run = do
@@ -143,10 +147,12 @@ mainWith run = do
 eval :: String -> IO ()
 eval prog = do
     args <- getArgs
-    runProgramWith id (putStrLn . pretty) "<interactive>" args prog
+    runProgramWith id (putStrLn . pretty) defaultProgramName args prog
 
 parse :: String -> IO ()
-parse = doParse pretty "-"
+parse prog = do
+    env <- tabulaRasa defaultProgramName
+    doParse env (encodeUTF8 . pretty) "-" prog
 
 dump :: String -> IO ()
 dump = (doParseWith $ \env _ -> print $ envBody env) "-"
@@ -157,17 +163,7 @@ globalFinalize = join $ readIORef _GlobalFinalizer
 dumpGlob :: String -> IO ()
 dumpGlob = (doParseWith $ \env _ -> do
     glob <- liftSTM $ readTVar $ envGlobal env
-    print $ userDefined glob) "-"
-
-userDefined :: Pad -> Pad
-userDefined (MkPad pad) = MkPad $ Map.filterWithKey doFilter pad
-    where
-    doFilter key _ = not (key `elem` reserved)
-    reserved = words $
-        "@*ARGS @*INC %*INC $*PUGS_HAS_HSPLUGINS $*EXECUTABLE_NAME " ++
-        "$*PROGRAM_NAME $*PID $*UID $*EUID $*GID $*EGID @*CHECK @*INIT $*IN " ++
-        "$*OUT $*ERR $*ARGS $/ %*ENV $*CWD @=POD $=POD $?PUGS_VERSION " ++
-        "$*OS &?BLOCK_EXIT %?CONFIG $*_ $*AUTOLOAD"
+    print $ filterUserDefinedPad glob) "-"
 
 {-|
 Create a \'blank\' 'Env' for our program to execute in. Of course,
@@ -192,7 +188,7 @@ doCompile :: String -> FilePath -> String -> IO String
 doCompile backend = doParseWith $ \env _ -> do
     globRef <- liftSTM $ do
         glob <- readTVar $ envGlobal env
-        newTVar $ userDefined glob
+        newTVar $ filterUserDefinedPad glob
     codeGen backend env{ envGlobal = globRef }
 
 initCompile :: IO ()
@@ -230,7 +226,7 @@ doHelperRun backend args =
         "js"    -> if (args' == [])
                    then (doExecuteHelper "jspugs.pl"  args)
                    else (doExecuteHelper "runjs.pl"   args)
-        "perl5" ->       doExecuteHelper "pugs-p5.pl" args
+        "perl5" ->       doExecuteHelper "v6.pm" args
         "js-perl5" -> doExecuteHelper "runjs.pl" (jsPerl5Args ++ args)
         _       ->       fail ("unknown backend: " ++ backend)
     where
@@ -253,6 +249,7 @@ doExecuteHelper helper args = do
     where
     suffixes =
         [ []
+        , ["misc", "pX", "Common", "Pugs-Compiler-Perl6", "lib"]
         , ["perl5", "PIL2JS"]      --  $sourcedir/perl5/PIL2JS/jspugs.pl
         , ["perl5", "PIL-Run"]     --  $sourcedir/perl5/PIL-Run/pugs-p5.pl
         , ["perl5", "lib"]         --  $pugslibdir/perl5/lib/jspugs.pl
@@ -295,9 +292,8 @@ doParseWith f name prog = do
         exitFailure
     f' env = f env name
 
-doParse :: (Exp -> String) -> FilePath -> String -> IO ()
-doParse prettyFunc name prog = do
-    env <- tabulaRasa name
+doParse :: Env -> (Exp -> String) -> FilePath -> String -> IO ()
+doParse env prettyFunc name prog = do
     case envBody $ parseProgram env name (decodeUTF8 prog) of
         (Val err@(VError _ _)) -> putStrLn $ pretty err
         exp -> putStrLn $ prettyFunc exp
@@ -326,12 +322,12 @@ doRunSingle menv opts prog = (`catch` handler) $ do
     where
     parse = do
         env <- liftSTM $ readTVar menv
-        return $ envBody $ parseProgram env "<interactive>" $
+        return $ envBody $ parseProgram env defaultProgramName $
           (dropTrailingSemi $ decodeUTF8 prog)
     dropTrailingSemi = reverse . dropWhile (`elem` " \t\r\n;") . reverse
     theEnv = do
         ref <- if runOptSeparately opts
-                then (liftSTM . newTVar) =<< tabulaRasa "<interactive>"
+                then (liftSTM . newTVar) =<< tabulaRasa defaultProgramName
                 else return menv
         debug <- if runOptDebug opts
                 then fmap Just (liftSTM $ newTVar Map.empty)
@@ -345,8 +341,8 @@ doRunSingle menv opts prog = (`catch` handler) $ do
         else print
     makeProper exp = case exp of
         Val err@(VError (VStr msg) _)
-            | runOptShowPretty opts -> do
---          , "\nunexpected end of input" `isPrefixOf` msg -> do
+            | runOptShowPretty opts
+            , any (== "unexpected end of input") (lines msg) -> do
             cont <- readline "....> "
             case cont of
                 Just line   -> do

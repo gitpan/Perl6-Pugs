@@ -1,11 +1,11 @@
 BUILDING PUGS
 -------------
 
-Pugs needs the Glasgow Haskell Compiler (GHC) 6.4 or above.  To install GHC,
+Pugs needs the Glasgow Haskell Compiler (GHC) 6.4.1 or above.  To install GHC,
 download a binary build from http://haskell.org/ghc/.  Although source code
 for GHC is available, it will take a very long time to build by yourself. 
 
-Pugs needs Parrot 0.4.1 or above to support Perl 6 Rules and PIR evaluation.
+Pugs needs Parrot 0.4.5 or above to support Perl 6 Rules and PIR evaluation.
 To install Parrot, follow the instructions at http://www.parrotcode.org/.
 
 http://www.jwcs.net/~jonathan/perl6/ and http://pxperl.com/ both have 
@@ -55,9 +55,6 @@ PUGS_EMBED variable. For example:
  
     export PUGS_EMBED="perl5 parrot" (bash)
     setenv PUGS_EMBED "perl5 parrot" (csh)
-
-XXX Note!
-Using embedded parrot is currently NOT recommended on win32 and x86_64.
 
 To build with an embedded parrot interpreter, make sure the PUGS_EMBED 
 variable contains "parrot", and set the PARROT_PATH variable to point to 
@@ -141,29 +138,15 @@ CAVEATS FOR ALL USERS
 ---------------------
 
 Parrot is used to provide Perl6-style regular expressions.
-Perl5-style regular expressions (eg, rx:perl5/foo/) can be used
+Perl5-style regular expressions (eg, rx:Perl5/foo/) can be used
 without any parrot at all.  Pugs can be built to use parrot external
 (the default), or embedded.  External is recommended.
 
-Embedding parrot currently requires a parrot version 0.4.1 or later.
-Recent copies of parrot can be obtained from
-http://www.parrotcode.org/source.html .
+Embedding parrot currently requires a parrot version 0.4.5 or later.
+Recent copies of parrot can be obtained from http://www.parrotcode.org/.
 
 CAVEATS FOR Win32 USERS
 -------------------------
 
 Embedding Perl5 is disabled GHC is built with MinGW/GCC and Perl 
 is usually built with VC++, they cannot embed one another.
-  
-CAVEATS FOR GCC 4.0 USERS
--------------------------
-
-GHC 6.4.1 or later is required.
-
-This applies to Mac OS X 10.4 "Tiger", and all other GCC 4.0 systems.
-
-CAVEATS FOR x86_64 MACHINES
----------------------------
-
-GHC 6.4.1 or later is required.
-

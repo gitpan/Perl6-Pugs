@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fno-full-laziness -fno-cse #-}
-{-# OPTIONS_GHC -#include "../UnicodeC.h" #-}
 
 {-|
     Primitive operators.
@@ -47,6 +46,11 @@ import Pugs.Prim.Lifts
 import Pugs.Prim.Eval
 import Pugs.Prim.Code
 import Pugs.Prim.Param
+import qualified Data.IntSet as IntSet
+import DrIFT.YAML
+
+constMacro :: Exp -> [Val] -> Eval Val
+constMacro = const . expToEvalVal
 
 -- |Implementation of 0-ary and variadic primitive operators and functions
 -- (including list ops).
@@ -55,8 +59,10 @@ op0 "&"  = fmap opJuncAll  . mapM fromVal
 op0 "^"  = fmap opJuncOne  . mapM fromVal
 op0 "|"  = fmap opJuncAny  . mapM fromVal
 op0 "want"  = const $ fmap VStr (asks (maybe "Void" envWant . envCaller))
-op0 "bool::true" = const $ return (VBool True)
-op0 "bool::false" = const $ return (VBool False)
+op0 "Bool::True" = const . return $ VBool True
+op0 "Bool::False" = const . return $ VBool False
+op0 "True" = constMacro . Val $ VBool True
+op0 "False" = constMacro . Val $ VBool False
 op0 "time"  = const $ do
     clkt <- guardIO getClockTime
     return $ VRat $ fdiff $ diffClockTimes clkt epochClkT
@@ -71,22 +77,22 @@ op0 "times"  = const $ do
     ProcessTimes _ u s cu cs <- guardIO getProcessTimes
     return . VList $ map (castV . (% (clocksPerSecond :: VInt)) . toInteger . fromEnum)
         [u, s, cu, cs]
-op0 "¥" = op0Zip
-op0 "Y" = op0 "¥"
+op0 "\xA5" = op0Zip -- ¥
+op0 "Y" = op0 "\xA5"
 op0 "File::Spec::cwd" = const $ do
     cwd <- guardIO getCurrentDirectory
     return $ VStr cwd
 op0 "File::Spec::tmpdir" = const $ do
     tmp <- guardIO getTemporaryDirectory
     return $ VStr tmp
-op0 "pi" = const $ return (VNum pi)
-op0 "self" = const $ evalExp $ Var "$?SELF"
+op0 "pi" = constMacro . Val $ VNum pi
+op0 "self" = const $ expToEvalVal (Var "$?SELF")
 op0 "say" = const $ op1 "IO::say" (VHandle stdout)
 op0 "print" = const $ op1 "IO::print" (VHandle stdout)
 op0 "return" = const $ op1Return (shiftT . const $ retEmpty)
 op0 "yield" = const $ op1Yield (shiftT . const $ retEmpty)
 op0 "take" = const $ retEmpty
-op0 "nothing" = const $ return $ VBool True
+op0 "nothing" = const . return $ VBool True
 op0 other = const $ fail ("Unimplemented listOp: " ++ other)
 
 -- |Implementation of unary primitive operators and functions
@@ -95,20 +101,23 @@ op1 "!"    = op1Cast (VBool . not)
 op1 "id" = \x -> do
     val <- fromVal x
     case val of
-        VObject o   -> return . castV . hashUnique $ objId o
+        VObject o   -> return . castV . unObjectId $ objId o
         _           -> return undef
 op1 "chop" = \x -> do
     str <- fromVal x
     if null str
         then return $ VStr str
         else return $ VStr $ init str
-op1 "chomp" = \x -> do
+op1 "Scalar::chomp" = \x -> do
     str <- fromVal x
     if null str || last str /= '\n'
         then return $ VStr str
         else do
             -- writeRef ref $ VStr (init str)
             return $ VStr $ init str
+op1 "chomp" = \v -> do
+    vlist <- fromVal v
+    fmap VList $ forM vlist (op1 "Scalar::chomp")
 op1 "Str::split" = op1Cast (castV . words)
 op1 "lc" = op1Cast (VStr . map toLower)
 op1 "lcfirst" = op1StrFirst toLower
@@ -162,7 +171,9 @@ op1 "--"   = \mv -> do
     op1 "post:--" mv
     fromVal mv
 op1 "-"    = op1Numeric negate
-op1 "item" = return -- XXX refify?
+op1 "item" = \v -> return $ case v of
+    VList vs    -> VRef . arrayRef $ vs
+    _           -> v
 op1 "sort" = \v -> do
     args    <- fromVal v
     (valList, sortBy) <- case args of
@@ -184,21 +195,12 @@ op1 "sort" = \v -> do
                 int <- fromVal rv
                 return (int <= (0 :: Int))
             returnList sorted
+op1 "Scalar::reverse" = \v -> do
+    str     <- fromVal v
+    return (VStr $ reverse str)
 op1 "reverse" = \v -> do
-    case v of
-        (VRef _) -> do
-            ifValTypeIsa v "Scalar"
-                (do ref     <- fromVal v
-                    val     <- readRef ref
-                    str     <- fromVal val
-                    return (VStr $ reverse str))
-                (do ref     <- fromVal v
-                    vals    <- readRef ref
-                    vlist   <- fromVal vals
-                    return (VList $ reverse vlist))
-        _ -> ifListContext
-            (op1Cast (VList . reverse) v)
-            (op1Cast (VStr . reverse) v)
+    vlist <- fromVal v
+    return (VList $ reverse vlist)
 op1 "list" = op1Cast VList
 op1 "pair" = op1Cast $ VList . (map $ \(k, v) -> castV ((VStr k, v) :: VPair))
 op1 "~"    = op1Cast VStr
@@ -215,13 +217,22 @@ op1 "\\"   = \v -> do
         _           -> VRef . scalarRef $ v
 op1 "^" = op2RangeExclRight (VNum 0)
 op1 "post:..."  = op1Range
+op1 "not"  = op1 "!"
 op1 "true" = op1 "?"
 op1 "any"  = op1Cast opJuncAny
 op1 "all"  = op1Cast opJuncAll
 op1 "one"  = op1Cast opJuncOne
 op1 "none" = op1Cast opJuncNone
-op1 "perl" = fmap VStr . prettyVal 0
-op1 "yaml" = dumpYaml 1024 -- number == max recursion depth
+op1 "perl" = \v -> do
+    recur   <- liftSTM (newTVar False)
+    let ?seen  = IntSet.empty
+        ?recur = recur
+    rv      <- prettyVal v
+    isRecur <- liftSTM (readTVar recur)
+    if isRecur
+        then return (VStr $ "$_ := " ++ rv)
+        else return (VStr rv)
+op1 "yaml" = dumpYaml
 op1 "require_haskell" = \v -> do
     name    <- fromVal v
     externRequire "Haskell" name
@@ -248,8 +259,13 @@ op1 "Pugs::Internals::eval_parrot" = \v -> do
             , ".end"
             ]
     return $ VBool True
-op1 "use" = opRequire True
+
+-- XXX - revert these two to Prelude.pm's ::Disabled version once YAML+Closure is working
+op1 "use" = opRequire True 
 op1 "require" = opRequire False
+
+op1 "Pugs::Internals::use" = opRequire True
+op1 "Pugs::Internals::require" = opRequire False
 op1 "Pugs::Internals::eval" = \v -> do
     str <- fromVal v
     opEval quiet "<eval>" str
@@ -265,8 +281,14 @@ op1 "Pugs::Internals::eval_perl5" = \v -> do
         envSV <- mkVal (VControl $ ControlEnv env)
         sv <- evalPerl5 str envSV $ enumCxt (envContext env)
         return $ PerlSV sv
+op1 "Pugs::Internals::eval_p6y" = op1EvalP6Y
 op1 "Pugs::Internals::eval_haskell" = op1EvalHaskell
 op1 "Pugs::Internals::eval_yaml" = evalYaml
+op1 "atomically" = \v -> do
+    genSymPrim "&retry" (const $ guardSTM retry) $ \symRetry -> do
+        enterLex [symRetry] $ do
+            env <- ask
+            guardSTM . runEvalSTM env . evalExp $ App (Val v) Nothing []
 op1 "try" = \v -> do
     sub <- fromVal v
     val <- resetT $ evalExp (App (Val $ VCode sub) Nothing [])
@@ -298,13 +320,12 @@ op1 "take" = \v -> do
     lex <- asks envLexical
     arr <- findSymRef "@?TAKE" lex
     op2 "push" (VRef arr) v
-op1 "sign" = \v -> if defined v
-    then op1Cast (VInt . signum) v
-    else return undef
+op1 "sign" = \v -> withDefined [v] $
+    op1Cast (VInt . signum) v
 
 op1 "rand"  = \v -> do
     x    <- fromVal v
-    rand <- guardIO $ randomRIO (0, if x == 0 then 1 else x)
+    rand <- guardSTM . unsafeIOToSTM $ randomRIO (0, if x == 0 then 1 else x)
     return $ VNum rand
 op1 "say" = op2 "IO::say" (VHandle stdout)
 op1 "print" = op2 "IO::print" (VHandle stdout)
@@ -319,9 +340,11 @@ op1 "Pugs::Safe::safe_print" = \v -> do
     return $ VBool True
 op1 "die" = \v -> do
     pos <- asks envPos
-    shiftT . const . return $ VError (errmsg v) [pos]
+    v'  <- fromVal $! v
+    shiftT . const . return $! VError (errmsg $! v') [pos]
     where
     errmsg VUndef      = VStr "Died"
+    errmsg VType{}     = VStr "Died"
     errmsg (VStr "")   = VStr "Died"
     errmsg (VList [])  = VStr "Died"
     errmsg (VList [x]) = x
@@ -343,6 +366,7 @@ op1 "fail_" = \v -> do
     shiftT . const . return . VRef . thunkRef $ MkThunk die anyType
     where
     errmsg VUndef      = VStr "Failed"
+    errmsg VType{}     = VStr "Failed"
     errmsg (VStr "")   = VStr "Failed"
     errmsg (VList [])  = VStr "Failed"
     errmsg (VList [x]) = x
@@ -389,9 +413,9 @@ op1 "readdir" = \v -> do
 op1 "slurp" = \v -> do
     ifValTypeIsa v "IO"
         (do h <- fromVal v
-            ifListContext
-                (op1 "=" v)
-                (fmap VStr (guardIO $ hGetContents h)))
+            ifListContext (op1 "=" v) $ do
+                content <- guardIO $ hGetContents h
+                return $! VStr $! decodeUTF8 $! length content `seq` content)
         (do
             fileName    <- fromVal v
             ifListContext
@@ -400,8 +424,8 @@ op1 "slurp" = \v -> do
     where
     slurpList file = op1 "=" (VList [VStr file])
     slurpScalar file = do
-        content <- guardIO $ readFile file
-        return $ VStr content
+        content <- guardIO (readFile file)
+        return $! VStr $! decodeUTF8 $! length content `seq` content
 op1 "opendir" = \v -> do
     str <- fromVal v
     dir <- guardIO $ openDirStream str
@@ -431,7 +455,7 @@ op1 "Pugs::Internals::runInteractiveCommand" = \v -> do
                        ]
 op1 "Pugs::Internals::check_for_io_leak" = \v -> do
     rv      <- evalExp (App (Val v) Nothing [])
-    leaked  <- fromVal =<< op2Match rv (VType $ MkType "IO")
+    leaked  <- fromVal =<< op2Match rv (VType $ mkType "IO")
     when leaked $ do
         fail $ "BEGIN and CHECK blocks may not return IO handles,\n" ++
                "as they would be invalid at runtime."
@@ -479,6 +503,7 @@ op1 "async" = \v -> do
         { threadId      = tid
         , threadLock    = lock
         }
+    return undef
 op1 "listen" = \v -> do
     port    <- fromVal v
     socket  <- guardIO $ listenOn (PortNumber $ fromInteger port)
@@ -510,19 +535,20 @@ op1 "values" = valuesFromVal
 op1 "="        = \v -> case v of
     VObject _   -> evalExp $ App (Var "&shift") (Just $ Val v) []
     _           -> op1 "readline" v
-op1 "readline" = \v -> op1Read v (getLines) (getLine)
+op1 "readline" = \v -> op1Read v getLines getLine
     where
     getLines :: VHandle -> Eval Val
     getLines fh = do
         line <- getLine fh
-        if defined line
+        if defined $! line
             then do
-                (VList rest) <- getLines fh
-                return $ VList (line:rest)
-            else return $ VList []
+                VList rest <- getLines fh
+                return (rest `seq` VList (line:rest))
+            else return $! VList $! []
     getLine :: VHandle -> Eval Val
-    getLine fh = guardIOexcept [(isEOFError, undef)] $
-        fmap (VStr . (++ "\n") . decodeUTF8) (hGetLine fh)
+    getLine fh = guardIOexcept [(isEOFError, undef)] $ do
+        line <- hGetLine fh
+        return $! VStr $! decodeUTF8 $! length line `seq` line
 op1 "getc"     = \v -> op1Read v (getChar) (getChar)
     where
     getChar :: VHandle -> Eval Val
@@ -566,9 +592,9 @@ op1 "gather" = \v -> do
     evl <- asks envEval
     evl (Syn "gather" [Val v])
 op1 "Thread::yield" = const $ do
-    ok <- tryIO False $ do { yield ; return True } -- change to guardIO?
-    return $ VBool ok
-op1 "DESTROYALL" = op1WalkAllNoArgs id "DESTROY"
+    guardSTM . unsafeIOToSTM $ yield
+    return $ VBool True
+op1 "DESTROYALL" = \x -> cascadeMethod id "DESTROY" x VUndef
 -- [,] is a noop -- It simply returns the input list
 op1 "prefix:[,]" = return
 op1 "Code::assoc" = op1CodeAssoc
@@ -576,6 +602,11 @@ op1 "Code::name"  = op1CodeName
 op1 "Code::arity" = op1CodeArity
 op1 "Code::body"  = op1CodeBody
 op1 "Code::pos"   = op1CodePos
+op1 "Code::retry_with" = \vs -> do
+    cs  <- fromVals vs
+    env <- ask
+    let runInSTM v = runEvalSTM env . evalExp $ App (Val v) Nothing []
+    guardSTM $ foldl1 orElse (map runInSTM cs)
 op1 "IO::tell"    = \v -> do
     h <- fromVal v
     res <- guardIO $ hTell h
@@ -623,7 +654,28 @@ op1 "Pugs::Internals::caller_pragma_value" = \v -> do
     case caller of
         Just env -> local (const env) (op1 "Pugs::Internals::current_pragma_value" v)
         _        -> return $ VUndef
-op1 "**"    = \v -> return $ deepSeq v v
+op1 "eager" = \v -> do
+    vlist <- fromVal v
+    return $! VList $! deepSeq vlist vlist
+op1 "Pugs::Internals::emit_yaml" = \v -> do
+    glob <- filterPrim =<< asks envGlobal
+    yml  <- liftIO $ showYaml (filterUserDefinedPad glob, v)
+    return $ VStr yml
+op1 "Object::meta" = \v -> do
+    typ     <- evalValType v
+    evalExp $ Var (':':'*':showType typ)
+op1 "Class::name" = \v -> do
+    cls     <- fromVal v
+    meta    <- readRef =<< fromVal cls
+    fetch   <- doHash meta hash_fetchVal
+    str     <- fromVal =<< fetch "name"
+    return str
+op1 "Class::traits" = \v -> do
+    cls     <- fromVal v
+    meta    <- readRef =<< fromVal cls
+    fetch   <- doHash meta hash_fetchVal
+    str     <- fromVal =<< fetch "traits"
+    return str
 op1 other   = \_ -> fail ("Unimplemented unaryOp: " ++ other)
 
 op1IO :: Value a => (Handle -> IO a) -> Val -> Eval Val
@@ -631,42 +683,32 @@ op1IO = \fun v -> do
     val <- fromVal v
     fmap castV (guardIO $ fun val)
 
-{-
-returnList :: [Val] -> Eval Val
-returnList vals = ifListContext
-    (return . VRef $ arrayRef vals)
-    (return . VList $ vals)
--}
-
 returnList :: [Val] -> Eval Val
 returnList = return . VList
 
-op1WalkAllNoArgs :: ([VStr] -> [VStr]) -> VStr -> Val -> Eval Val
-op1WalkAllNoArgs f meth v = do
-    pkgs    <- pkgParents =<< fmap showType (evalValType v)
-    forM_ (f pkgs) $ \pkg -> do
+cascadeMethod :: ([VStr] -> [VStr]) -> VStr -> Val -> Val -> Eval Val
+cascadeMethod f meth v args = do
+    typ     <- evalValType v
+    pkgs    <- fmap f (pkgParents $ showType typ)
+    named   <- case args of
+        VUndef -> return Map.empty
+        VType{}-> return Map.empty
+        _      -> join $ doHash args hash_fetch
+    forM_ pkgs $ \pkg -> do
         let sym = ('&':pkg) ++ "::" ++ meth
-        maybeM (fmap (findSym sym) askGlobal) $ \_ -> do
-            enterEvalContext CxtVoid (App (Var sym) (Just $ Val v) [])
-    return undef
-
-op1WalkAll :: ([VStr] -> [VStr]) -> VStr -> Val -> Val -> Eval Val
-op1WalkAll f meth v hashval = do
-    pkgs    <- pkgParents =<< fmap showType (evalValType v)
-    named   <- join $ doHash hashval hash_fetch
-    forM_ (f pkgs) $ \pkg -> do
-        let sym = ('&':pkg) ++ "::" ++ meth
-        maybeM (fmap (findSym sym) askGlobal) $ \_ -> do
-            enterEvalContext CxtVoid (App (Var sym) (Just $ Val v)
-                [ Syn "named" [Val (VStr key), Val val]
-                | (key, val) <- Map.assocs named ])
-    return undef
+        maybeM (fmap (findSym sym) askGlobal) . const $ do
+            enterEvalContext CxtVoid $
+                App (Var sym) (Just $ Val v)
+                    [ Syn "named" [Val (VStr key), Val val]
+                    | (key, val) <- Map.assocs named
+                    ]
+    return VUndef
 
 op1Return :: Eval Val -> Eval Val
 op1Return action = do
     depth <- asks envDepth
     if depth == 0 then fail "cannot return() outside a subroutine" else do
-    sub   <- fromVal =<< readVar "&?SUB"
+    sub   <- fromVal =<< readVar "&?ROUTINE"
     -- If this is a coroutine, reset the entry point
     case subCont sub of
         Nothing -> action
@@ -682,7 +724,7 @@ op1Yield :: Eval Val -> Eval Val
 op1Yield action = do
     depth <- asks envDepth
     if depth == 0 then fail "cannot yield() outside a coroutine" else do
-    sub   <- fromVal =<< readVar "&?SUB"
+    sub   <- fromVal =<< readVar "&?ROUTINE"
     case subCont sub of
         Nothing -> fail $ "cannot yield() from a " ++ pretty (subType sub)
         Just tvar -> callCC $ \esc -> do
@@ -859,7 +901,8 @@ op2 "err"= op2 "//"
 op2 "grep" = op2Grep
 op2 "map"  = op2Map
 op2 "join" = op2Join
-op2 "reduce" = op2FoldL
+op2 "reduce" = op2ReduceL False
+op2 "produce" = op2ReduceL True
 op2 "kill" = \s v -> do
     sig  <- fromVal s
     pids <- fromVals v
@@ -899,7 +942,10 @@ op2 "Pugs::Internals::hSetBinaryMode" = \x y -> do
 op2 "Pugs::Internals::openFile" = \x y -> do
     filename <- fromVal x
     mode     <- fromVal y
-    hdl      <- guardIO $ openFile filename (modeOf mode)
+    hdl      <- guardIO $ do
+        h <- openFile filename (modeOf mode)
+        hSetBuffering h NoBuffering
+        return h
     return $ VHandle $ hdl
     where
     modeOf "r"  = ReadMode
@@ -951,7 +997,7 @@ op2 "sort" = \x y -> do
     op1 "sort" . VList $ xs ++ ys
 op2 "IO::say" = op2Print hPutStrLn
 op2 "IO::print" = op2Print hPutStr
-op2 "BUILDALL" = op1WalkAll reverse "BUILD"
+op2 "BUILDALL" = cascadeMethod reverse "BUILD"
 op2 "Pugs::Internals::install_pragma_value" = \x y -> do
     name <- fromVal x
     val  <- fromVal y
@@ -966,7 +1012,7 @@ op2 "Pugs::Internals::base" = \x y -> do
     base <- fromVal x
     case y of
         VRef{}  -> op2BasedDigits base =<< fromVal y
-        VList xs-> op2BasedDigits base =<< fromVal y
+        VList{} -> op2BasedDigits base =<< fromVal y
         _       -> do
             str <- fromVal y
             op2BasedDigits base [ s | Just s <- map baseDigit str ]
@@ -1043,7 +1089,7 @@ op3 "Pugs::Internals::caller" = \x y z -> do
         _        -> fromVal x
     skip <- fromVal y
     when (skip < 0) $ do
-        liftIO $ fail "Pugs::Internals::caller called with negative skip"
+        fail "Pugs::Internals::caller called with negative skip"
     label <- fromVal z
     op3Caller kind skip label
 op3 "index" = \x y z -> do
@@ -1085,8 +1131,7 @@ op3 "Object::new" = \t n p -> do
     named   <- fromVal n
     attrs   <- liftSTM $ newTVar Map.empty
     writeIVar (IHash attrs) named
-    uniq    <- liftIO $ newUnique
-    env     <- ask
+    uniq    <- newObjectId
     unless (positionals == VList []) (fail "Must only use named arguments to new() constructor")
     let obj = VObject $ MkObject
             { objType   = typ
@@ -1097,16 +1142,14 @@ op3 "Object::new" = \t n p -> do
     -- Now start calling BUILD for each of parent classes (if defined)
     op2 "BUILDALL" obj $ (VRef . hashRef) named
     -- Register finalizers by keeping weakrefs somehow
-    liftIO $ do
-        objRef <- mkWeakPtr obj (Just $ objectFinalizer env obj)
-        modifyIORef _GlobalFinalizer (>> finalize objRef)
-    return obj
-op3 "Object::clone" = \t n p -> do
+    setFinalization obj
+
+op3 "Object::clone" = \t n _ -> do
     named <- fromVal n
     (VObject o) <- fromVal t
     attrs   <- readIVar (IHash $ objAttrs o)
     attrs'  <- liftSTM $ newTVar Map.empty
-    uniq    <- liftIO $ newUnique
+    uniq    <- newObjectId
     writeIVar (IHash attrs') (named `Map.union` attrs)
     return $ VObject o{ objAttrs = attrs', objId = uniq }
 
@@ -1178,7 +1221,7 @@ op4 "substr" = \x y z w -> do
         rep <- fromVal new
         writeRef var (VStr $ concat [pre, rep, post])
     -- If the replacement is given in w, change the str.
-    when (defined w && result /= VUndef) $ change w
+    when (defined w && not (defined result)) $ change w
     -- Return a proxy which will modify the str if assigned to.
     return $ VRef . MkRef $ proxyScalar (return result) change
     where
@@ -1278,8 +1321,8 @@ op2Cmp f cmp x y = do
     y' <- f y
     return $ VBool $ x' `cmp` y'
 
-op2Ord :: (Ord ord) => (a -> Eval ord) -> a -> a -> Eval Val
-op2Ord f x y = do
+op2Ord :: (Ord ord) => (Val -> Eval ord) -> Val -> Val -> Eval Val
+op2Ord f x y = withDefined [x, y] $ do
     x' <- f x
     y' <- f y
     return $ VInt $ case x' `compare` y' of
@@ -1311,26 +1354,41 @@ op3Caller kind skip _ = do                                 -- figure out label
         ]
     kindFilter :: (Env, Maybe VCode) -> Bool
     kindFilter (_, Just sub) =
-        case (kind, subType sub) of
-            (MkType "Any",      _)          -> True  -- I hope this is optimized
-            (MkType "Method",   SubMethod)  -> True
-            (MkType "Sub",      SubRoutine) -> True
-            (MkType "Block",    SubBlock)   -> True
-            (MkType "Block",    SubPointy)  -> True
-            (_,                 _)          -> False
-    kindFilter _ = kind == MkType "Any"
+        case (showType kind, subType sub) of
+            ("Any",      _)          -> True  -- I hope this is optimized
+            ("Method",   SubMethod)  -> True
+            ("Sub",      SubRoutine) -> True
+            ("Block",    SubBlock)   -> True
+            ("Block",    SubPointy)  -> True
+            (_,          _)          -> False
+    kindFilter _ = kind == anyType
     labelFilter _ = True                             -- TODO: figure out how
     callChain :: Env -> Eval [(Env, Maybe VCode)]
     callChain cur = 
         case envCaller cur of
             Just caller -> do
-                val <- local (const caller) (readVar "&?SUB")
+                val <- local (const caller) (readVar "&?ROUTINE")
                 if (val == undef) then return [(caller, Nothing)] else do
                 sub <- fromVal val
                 rest <- callChain caller
                 return ((caller, Just sub) : rest)
             _           -> return []
 
+
+{-| Assert that a list of Vals is all defined.
+This should 'fail' (in the Perl sense).
+
+TOTHINK: report which element in the input list was the one
+triggering the failure. Just zipping with [1 ..] may not be
+enough because our caller may not be passing through its own
+input args in the same order/position to us.
+
+-}
+withDefined :: (Monad m) => [Val] -> m a -> m a
+withDefined [] c = c
+withDefined (VUndef:_) _  = fail "use of uninitialized value"
+withDefined (VType{}:_) _ = fail "use of uninitialized value"
+withDefined (_:xs) c = withDefined xs c
 
 -- |Returns a transaction to install a primitive operator using
 -- 'Pugs.AST.genMultiSym'.
@@ -1339,58 +1397,64 @@ op3Caller kind skip _ = do                                 -- figure out label
 -- the default is 'op0'.
 -- The Pad symbol name is prefixed with \"&*\" for functions and
 -- \"&*\" ~ fixity ~ \":\" for operators.
-primOp :: String -> String -> Params -> String -> Bool -> STM (PadMutator)
-primOp sym assoc prms ret isSafe =
+primOp :: String -> String -> Params -> String -> Bool -> Bool -> STM (PadMutator)
+primOp sym assoc prms ret isSafe isMacro =
     -- In safemode, we filter all prims marked as "unsafe".
-    if (not isSafe) && safeMode
-        then return id
-        else genMultiSym name sub
+    genMultiSym name (sub (isSafe || not safeMode))
     where
     name | isAlpha (head sym)
          , fixity == "prefix"
          = "&*" ++ sym
          | otherwise
          = "&*" ++ fixity ++ (':':sym)
-    sub  = codeRef $ mkPrim
+    pkg = do
+        (_, pre) <- breakOnGlue "::" (reverse sym)
+        return $ dropWhile (not . isAlphaNum) (reverse pre)
+    sub safe = codeRef $! mkPrim
         { subName     = sym
-        , subType     = if sym == "Object::new" then SubMethod else SubPrim
+        , subType     = case pkg of
+            Nothing | isMacro       -> SubMacro
+                    | otherwise     -> SubPrim
+            Just "Pugs::Internals"  -> SubPrim
+            _                       -> SubMethod
         , subAssoc    = assoc
         , subParams   = prms
         , subReturns  = mkType ret
-        , subBody     = Prim f
+        , subBody     = Prim $! if safe then f else unsafe
         }
-    symStr = encodeUTF8 sym
+    unsafe :: [Val] -> Eval Val
+    unsafe _ = fail $ "Unsafe function '" ++ sym ++ "' called under safe mode"
     f :: [Val] -> Eval Val
-    f    = case (arity :: Integer) of
-        0 -> \x -> op0 symStr x
-        1 -> \x     -> case x of
+    f    = case arity of
+        Arity0 -> op0 sym
+        Arity1 -> \x -> case x of
             [a]       -> op1 symName a
-            [a,b]     -> op2 symStr a b
-            [a,b,c]   -> op3 symStr a b c
-            [a,b,c,d] -> op4 symStr a b c d
-            a         -> op0 symStr a
-        2 -> \[x,y] -> op2 symStr x y
-        3 -> \[x,y,z] -> op3 symStr x y z
-        4 -> \[x,y,z,w] -> op4 symStr x y z w
-        _ -> error (show arity)
-    symName = if modify then assoc ++ ":" ++ symStr else symStr
+            [a,b]     -> op2 sym a b
+            [a,b,c]   -> op3 sym a b c
+            [a,b,c,d] -> op4 sym a b c d
+            a         -> op0 sym a
+        Arity2 -> \[x,y] -> op2 sym x y
+    symName = if modify then assoc ++ ":" ++ sym else sym
     -- prefix symName with post, circum or other (not yet used)
     -- to disambiguate, for example, &*prefix:++ and &*postfix:++ in 'op0'
     (arity, fixity, modify) = case assoc of
-        "pre"       -> (1, "prefix", False)
-        "spre"      -> (1, "prefix", False)
-        "post"      -> (1, "postfix", True)
-        "circum"    -> (1, "circumfix", True)
-        "left"      -> (2, "infix", False)
-        "right"     -> (2, "infix", False)
-        "non"       -> (2, "infix", False)
-        "chain"     -> (2, "infix", False)
-        "list"      -> (0, "infix", False)
-        other       -> (0, other, True)
+        "pre"       -> (Arity1, "prefix", False)
+        "spre"      -> (Arity1, "prefix", False)
+        "post"      -> (Arity1, "postfix", True)
+        "circum"    -> (Arity1, "circumfix", True)
+        "left"      -> (Arity2, "infix", False)
+        "right"     -> (Arity2, "infix", False)
+        "non"       -> (Arity2, "infix", False)
+        "chain"     -> (Arity2, "infix", False)
+        "list"      -> (Arity0, "infix", False)
+        other       -> (Arity0, other, True)
+
+data Arity = Arity0 | Arity1 | Arity2
+    deriving (Show, Eq, Ord, Typeable)
 
 -- |Produce a Pad update transaction with 'primOp' from a string description
 primDecl :: String -> STM PadMutator
-primDecl str = primOp sym assoc params ret (safe == "safe")
+primDecl str = primOp sym assoc params ret ("safe" `isPrefixOf` safe) ("macro" `isSuffixOf` safe)
     where
     (ret:assoc:sym:safe:prms) = words str
     takeWord = takeWhile isWord . dropWhile (not . isWord)
@@ -1399,50 +1463,68 @@ primDecl str = primOp sym assoc params ret (safe == "safe")
     prms'' = foldr foldParam [] prms'
     params = map (\p -> p{ isWritable = isLValue p }) prms''
 
+setFinalization :: Val -> Eval Val
+setFinalization obj = do
+    env <- ask
+    -- XXX - Not sure if this can break guarantees in STM or not; disable for now
+    if envAtomic env
+        then return obj -- liftSTM $ unsafeIOToSTM (obj `setFinalization` env)
+        else liftIO $ obj `setFinalizationIn` env
+    where
+    setFinalizationIn obj env = do
+        objRef <- mkWeakPtr obj . Just $ do
+            runEvalIO env $ do
+                evalExp $ App (Var "&DESTROYALL") (Just $ Val obj) []
+            return ()
+        modifyIORef _GlobalFinalizer (>> finalize objRef)
+        return obj
 
 -- op1 "perl"
-prettyVal :: Int -> Val -> Eval VStr
-prettyVal 1024 _ = return " ... "
-prettyVal d v@(VRef r) = do
+prettyVal :: (?seen :: IntSet.IntSet, ?recur :: TVar Bool) => Val -> Eval VStr
+prettyVal v@(VRef r) = do
+    ptr <- liftIO (addressOf r)
+    if IntSet.member ptr ?seen
+        then do
+            liftSTM $ writeTVar ?recur True
+            return "\\$_"
+        else let ?seen = IntSet.insert ptr ?seen in doPrettyVal v
+prettyVal v = doPrettyVal v
+
+doPrettyVal :: (?seen :: IntSet.IntSet, ?recur :: TVar Bool) => Val -> Eval VStr
+doPrettyVal v@(VRef r) = do
     v'  <- readRef r
     ifValTypeIsa v "Pair"
         (case v' of
             VList [ks, vs] -> do
-                kStr <- prettyVal (d+1) ks
-                vStr <- prettyVal (d+1) vs
+                kStr <- prettyVal ks
+                vStr <- prettyVal vs
                 return $ "(" ++ kStr ++ " => " ++ vStr ++ ")"
-            _ -> prettyVal (d+1) v'
+            _ -> prettyVal v'
         )
-        (do str <- prettyVal (d+1) v'
+        (do str <- prettyVal v'
             ifValTypeIsa v "Array"
                 (return $ ('[':(init (tail str))) ++ "]")
                 (ifValTypeIsa v "Hash"
                     (return $ ('{':(init (tail str))) ++ "}")
                     (return ('\\':str)))
         )
-prettyVal d (VList vs) = do
-    vs' <- mapM (prettyVal (d+1)) vs
+doPrettyVal (VList vs) = do
+    vs' <- mapM prettyVal vs
     -- (3,) should dump as (3,), not a (3), which would be the same as 3.
     return $ case vs' of
         []  -> "()"
         [x] -> "(" ++ x ++ ",)"
         _   -> "(" ++ concat (intersperse ", " vs') ++ ")"
-prettyVal d v@(VObject obj) = do
+doPrettyVal v@(VObject obj) = do
     -- ... dump the objAttrs
     -- XXX this needs fixing WRT demagicalized pairs:
     -- currently, this'll return Foo.new((attr => "value)), with the inner
     -- parens, which is, of course, wrong.
     hash    <- fromVal v :: Eval VHash
-    str     <- prettyVal d (VRef (hashRef hash))
+    str     <- prettyVal (VRef (hashRef hash))
     return $ showType (objType obj)
         ++ ".new(" ++ init (tail str) ++ ")"
-prettyVal _ v = return $ pretty v
-
--- | Call object destructors when GC takes them away
-objectFinalizer :: Env -> Val -> IO ()
-objectFinalizer env obj = do
-    runEvalIO env (evalExp (App (Var "&DESTROYALL") (Just $ Val $ obj) []))
-    return ()
+doPrettyVal v = return (pretty v)
 
 -- XXX -- Junctive Types -- XXX --
 
@@ -1458,32 +1540,32 @@ objectFinalizer env obj = do
 initSyms :: STM [PadMutator]
 initSyms = mapM primDecl syms
     where
-    syms = filter (not . null) . lines $ decodeUTF8 "\
+    syms = filter (not . null) . lines $ "\
 \\n   Bool      spre    !       safe   (Bool)\
 \\n   Num       spre    +       safe   (Num)\
-\\n   Num       pre     abs     safe   (?Num=$_)\
-\\n   Int       pre     Pugs::Internals::truncate safe   (?Num=$_)\
-\\n   Int       pre     Pugs::Internals::round    safe   (?Num=$_)\
-\\n   Int       pre     Pugs::Internals::floor    safe   (?Num=$_)\
-\\n   Int       pre     Pugs::Internals::ceiling  safe   (?Num=$_)\
+\\n   Num       pre     abs     safe   (Num)\
+\\n   Int       pre     Pugs::Internals::truncate safe   (Num)\
+\\n   Int       pre     Pugs::Internals::round    safe   (Num)\
+\\n   Int       pre     Pugs::Internals::floor    safe   (Num)\
+\\n   Int       pre     Pugs::Internals::ceiling  safe   (Num)\
 \\n   Num       pre     atan    safe   (Num)\
 \\n   Num       pre     atan    safe   (Num, Num)\
-\\n   Num       pre     cos     safe   (?Num=$_)\
-\\n   Num       pre     sin     safe   (?Num=$_)\
-\\n   Num       pre     tan     safe   (?Num=$_)\
-\\n   Any       pre     pi      safe   ()\
-\\n   Any       pre     self    safe   ()\
+\\n   Num       pre     cos     safe   (Num)\
+\\n   Num       pre     sin     safe   (Num)\
+\\n   Num       pre     tan     safe   (Num)\
+\\n   Any       pre     pi      safe,macro   ()\
+\\n   Any       pre     self    safe,macro   ()\
 \\n   Bool      pre     nothing safe   ()\
-\\n   Num       pre     exp     safe   (?Num=$_, ?Num)\
-\\n   Num       pre     sqrt    safe   (?Num=$_)\
-\\n   Bool      spre    -r      unsafe (?Str=$_)\
-\\n   Bool      spre    -w      unsafe (?Str=$_)\
-\\n   Bool      spre    -x      unsafe (?Str=$_)\
-\\n   Bool      spre    -e      unsafe (?Str=$_)\
-\\n   Bool      spre    -z      unsafe (?Str=$_)\
-\\n   Int       spre    -s      unsafe (?Str=$_)\
-\\n   Bool      spre    -f      unsafe (?Str=$_)\
-\\n   Bool      spre    -d      unsafe (?Str=$_)\
+\\n   Num       pre     exp     safe   (Num, ?Num)\
+\\n   Num       pre     sqrt    safe   (Num)\
+\\n   Bool      spre    -r      unsafe (Str)\
+\\n   Bool      spre    -w      unsafe (Str)\
+\\n   Bool      spre    -x      unsafe (Str)\
+\\n   Bool      spre    -e      unsafe (Str)\
+\\n   Bool      spre    -z      unsafe (Str)\
+\\n   Int       spre    -s      unsafe (Str)\
+\\n   Bool      spre    -f      unsafe (Str)\
+\\n   Bool      spre    -d      unsafe (Str)\
 \\n   Num       spre    -       safe   (Num)\
 \\n   Str       spre    ~       safe   (Str)\
 \\n   Bool      spre    ?       safe   (Bool)\
@@ -1492,13 +1574,14 @@ initSyms = mapM primDecl syms
 \\n   Str       pre     readline unsafe (?IO)\
 \\n   List      pre     readline unsafe (?IO)\
 \\n   Str       pre     getc     unsafe (?IO)\
-\\n   Int       pre     int     safe   (?Int=$_)\
+\\n   Int       pre     int     safe   (Int)\
 \\n   List      pre     list    safe   (List)\
 \\n   Hash      pre     hash    safe   (List)\
 \\n   List      pre     pair    safe   (List)\
 \\n   Scalar    pre     item    safe   (Scalar)\
-\\n   Any       pre     reverse safe   (rw!Any)\
+\\n   Any       pre     Scalar::reverse safe   (Scalar)\
 \\n   Any       pre     reverse safe   (List)\
+\\n   List      pre     eager   safe   (List)\
 \\n   Int       spre    +^      safe   (Int)\
 \\n   Int       spre    ~^      safe   (Str)\
 \\n   Bool      spre    ?^      safe   (Bool)\
@@ -1508,17 +1591,18 @@ initSyms = mapM primDecl syms
 \\n   List      post    ...     safe   (Scalar)\
 \\n   Any       pre     undef     safe   ()\
 \\n   Any       pre     undefine  safe   (?rw!Any)\
-\\n   Str       pre     chop    safe   (?Str=$_)\
-\\n   Str       pre     chomp   safe   (?Str=$_)\
+\\n   Str       pre     chop    safe   (Str)\
+\\n   Str       pre     Scalar::chomp   safe   (Scalar)\
+\\n   Any       pre     chomp   safe   (List)\
 \\n   Any       right   =       safe   (rw!Any, Any)\
 \\n   Int       pre     index   safe   (Str, Str, ?Int=0)\
 \\n   Int       pre     rindex  safe   (Str, Str, ?Int)\
 \\n   Int       pre     substr  safe   (rw!Str, Int, ?Int, ?Str)\
-\\n   Str       pre     lc      safe   (?Str=$_)\
-\\n   Str       pre     lcfirst safe   (?Str=$_)\
-\\n   Str       pre     uc      safe   (?Str=$_)\
-\\n   Str       pre     ucfirst safe   (?Str=$_)\
-\\n   Str       pre     capitalize safe   (?Str=$_)\
+\\n   Str       pre     lc      safe   (Str)\
+\\n   Str       pre     lcfirst safe   (Str)\
+\\n   Str       pre     uc      safe   (Str)\
+\\n   Str       pre     ucfirst safe   (Str)\
+\\n   Str       pre     capitalize safe   (Str)\
 \\n   Str       post    ++      safe   (rw!Str)\
 \\n   Str       post    --      safe   (rw!Str)\
 \\n   Num       post    ++      safe   (rw!Num)\
@@ -1527,18 +1611,20 @@ initSyms = mapM primDecl syms
 \\n   Str       spre    --      safe   (rw!Str)\
 \\n   Num       spre    ++      safe   (rw!Num)\
 \\n   Num       spre    --      safe   (rw!Num)\
-\\n   Bool      pre     not     safe   (List)\
+\\n   Bool      pre     not     safe   (Bool)\
 \\n   Bool      pre     true    safe   (Bool)\
 \\n   List      pre     gather  safe   (Code)\
 \\n   List      pre     map     safe   (Code, List)\
 \\n   List      pre     grep    safe   (Code, List)\
 \\n   List      pre     sort    safe   (Code, List)\
 \\n   List      pre     reduce  safe   (Code, List)\
+\\n   List      pre     produce safe   (Code, List)\
 \\n   List      pre     sort    safe   (Array)\
 \\n   List      pre     map     safe   (Array: Code)\
 \\n   List      pre     grep    safe   (Array: Code)\
 \\n   List      pre     sort    safe   (Array: Code)\
 \\n   List      pre     reduce  safe   (Array: Code)\
+\\n   List      pre     produce safe   (Array: Code)\
 \\n   Any       pre     splice  safe   (rw!Array, ?Int=0)\
 \\n   Any       pre     splice  safe   (rw!Array, Int, Int)\
 \\n   Any       pre     splice  safe   (rw!Array, Int, Int, List)\
@@ -1570,15 +1656,20 @@ initSyms = mapM primDecl syms
 \\n   Str       pre     perl    safe   (rw!Any|Junction|Pair)\
 \\n   Any       pre     try     safe   (Code)\
 \\n   Any       pre     lazy    safe   (Code)\
+\\n   Any       pre     atomically     safe   (Code)\
 \\n   Any       pre     Pugs::Internals::eval    safe   (Str)\
 \\n   Any       pre     evalfile     unsafe (Str)\
 \\n   Any       pre     Pugs::Internals::eval_parrot  unsafe (Str)\
 \\n   Any       pre     Pugs::Internals::eval_perl5   unsafe (Str)\
 \\n   Any       pre     Pugs::Internals::eval_haskell unsafe (Str)\
+\\n   Any       pre     Pugs::Internals::eval_p6y unsafe (Str)\
 \\n   Any       pre     Pugs::Internals::eval_yaml    safe   (Str)\
+\\n   Any       pre     Pugs::Internals::emit_yaml    unsafe   (rw!Any)\
 \\n   Str       pre     yaml    safe   (rw!Any|Junction|Pair)\
-\\n   Any       pre     require unsafe (?Str=$_)\
-\\n   Any       pre     use     unsafe (?Str=$_)\
+\\n   Any       pre     Pugs::Internals::require unsafe (Str)\
+\\n   Any       pre     Pugs::Internals::use     unsafe (Str)\
+\\n   Any       pre     require unsafe (Str)\
+\\n   Any       pre     use     unsafe (Str)\
 \\n   Any       pre     require_haskell unsafe (Str)\
 \\n   Any       pre     require_parrot  unsafe (Str)\
 \\n   Any       pre     require_perl5   unsafe (Str)\
@@ -1618,7 +1709,7 @@ initSyms = mapM primDecl syms
 \\n   Socket    pre     listen  unsafe (Int)\
 \\n   Socket    pre     connect unsafe (Str, Int)\
 \\n   Any       pre     accept  unsafe (Any)\
-\\n   List      pre     slurp   unsafe (?Str=$_)\
+\\n   List      pre     slurp   unsafe (Str)\
 \\n   List      pre     slurp   unsafe (Handle)\
 \\n   List      pre     readdir unsafe (Str)\
 \\n   Bool      pre     Pugs::Internals::exec    unsafe (Str, Bool, List)\
@@ -1639,15 +1730,15 @@ initSyms = mapM primDecl syms
 \\n   Junction  pre     one     safe   (List)\
 \\n   Junction  pre     none    safe   (List)\
 \\n   Bool      pre     sleep   unsafe (Int)\
-\\n   Bool      pre     rmdir   unsafe (?Str=$_)\
+\\n   Bool      pre     rmdir   unsafe (Str)\
 \\n   Bool      pre     mkdir   unsafe (Str)\
 \\n   Bool      pre     chdir   unsafe (Str)\
 \\n   Int       pre     elems   safe   (Array)\
 \\n   Int       pre     List::end     safe   (Array)\
-\\n   Int       pre     graphs  safe   (?Str=$_)\
-\\n   Int       pre     codes   safe   (?Str=$_)\
-\\n   Int       pre     chars   safe   (?Str=$_)\
-\\n   Int       pre     bytes   safe   (?Str=$_)\
+\\n   Int       pre     graphs  safe   (Str)\
+\\n   Int       pre     codes   safe   (Str)\
+\\n   Int       pre     chars   safe   (Str)\
+\\n   Int       pre     bytes   safe   (Str)\
 \\n   Int       pre     chmod   unsafe (Int, List)\
 \\n   Scalar    pre     key     safe   (rw!Pair)\
 \\n   Scalar    pre     value   safe   (rw!Pair)\
@@ -1686,7 +1777,6 @@ initSyms = mapM primDecl syms
 \\n   Str       left    ~&      safe   (Str, Str)\
 \\n   Str       left    ~<      safe   (Str, Str)\
 \\n   Str       left    ~>      safe   (Str, Str)\
-\\n   Any       spre    **      safe   (Any)\
 \\n   Num       right   **      safe   (Num, Num)\
 \\n   Num       left    +       safe   (Num, Num)\
 \\n   Num       left    -       safe   (Num, Num)\
@@ -1725,7 +1815,7 @@ initSyms = mapM primDecl syms
 \\n   Scalar    left    //      safe   (Bool, ~Bool)\
 \\n   Scalar    left    .[]     safe   (Array, Int)\
 \\n   Scalar    left    .{}     safe   (Hash, Str)\
-\\n   List      list    ¥       safe   (Array)\
+\\n   List      list    \xA5    safe   (Array)\
 \\n   List      list    Y       safe   (Array)\
 \\n   List      spre    <==     safe   (List)\
 \\n   List      left    ==>     safe   (List, Code)\
@@ -1733,9 +1823,9 @@ initSyms = mapM primDecl syms
 \\n   Scalar    left    or      safe   (Bool, ~Bool)\
 \\n   Scalar    left    xor     safe   (Bool, Bool)\
 \\n   Scalar    left    err     safe   (Bool, ~Bool)\
-\\n   Str       pre     chr     safe   (?Int=$_)\
-\\n   Int       pre     ord     safe   (?Str=$_)\
-\\n   Str       pre     oct     safe   (?Str=$_)\
+\\n   Str       pre     chr     safe   (Int)\
+\\n   Int       pre     ord     safe   (Str)\
+\\n   Str       pre     oct     safe   (Str)\
 \\n   Int       pre     from    safe   (Match)\
 \\n   Int       pre     to      safe   (Match)\
 \\n   List      pre     matches safe   (Match)\
@@ -1752,6 +1842,9 @@ initSyms = mapM primDecl syms
 \\n   Object    pre     DESTROYALL safe   (Object)\
 \\n   Code      pre     TEMP    safe   (rw!Any)\
 \\n   Object    pre     Object::clone   safe   (Object: Named)\
+\\n   Class     pre     Object::meta    safe   (Object)\
+\\n   Str       pre     Class::name    safe   (Class)\
+\\n   Hash      pre     Class::traits  safe   (Class)\
 \\n   Object    pre     id      safe   (Any)\
 \\n   Int       pre     Rat::numerator   safe   (Rat:)\
 \\n   Int       pre     Rat::denominator safe   (Rat:)\
@@ -1768,14 +1861,17 @@ initSyms = mapM primDecl syms
 \\n   IO        pre     Pugs::Internals::openFile               unsafe (Str, Str)\
 \\n   List      pre     Pugs::Internals::caller                 safe (Any, Int, Str)\
 \\n   Any       pre     Pugs::Internals::check_for_io_leak      safe (Code)\
-\\n   Bool      pre     bool::true  safe   ()\
-\\n   Bool      pre     bool::false safe   ()\
+\\n   Bool      pre     Bool::True  safe   ()\
+\\n   Bool      pre     Bool::False safe   ()\
+\\n   Bool      pre     True  safe,macro   ()\
+\\n   Bool      pre     False safe,macro   ()\
 \\n   List      spre    prefix:[,]  safe   (List)\
 \\n   Str       pre     Code::name    safe   (Code:)\
 \\n   Int       pre     Code::arity   safe   (Code:)\
 \\n   Str       pre     Code::assoc   safe   (Code:)\
 \\n   Code::Exp pre     Code::body    safe   (Code:)\
 \\n   Str       pre     Code::pos     safe   (Code:)\
+\\n   Any       pre     Code::retry_with    safe   (List)\
 \\n   IO::Dir   pre     opendir    unsafe (Str)\
 \\n   Str       pre     IO::Dir::readdir    unsafe (IO::Dir)\
 \\n   List      pre     IO::Dir::readdir    unsafe (IO::Dir)\

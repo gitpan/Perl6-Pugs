@@ -9,11 +9,11 @@ has @.spans;
 submethod BUILD ( @.spans ) {}
 
 method empty_set ($class: ) returns Set::Infinite::Functional {
-    $class.new( spans => () );
+    $class.new( spans => [] );
 }
 
 method universal_set ($class: ) returns Set::Infinite::Functional {
-    $class.new( spans => Span.new( start => -Inf, end => Inf ) );
+    $class.new( spans => [Span.new( start => -Inf, end => Inf )] );
 }
 
 method is_empty () returns bool { return ! @.spans }
@@ -33,22 +33,22 @@ method end () returns Object {
     return $last.end;
 }
 method start_is_open () returns bool {
-    return bool::false unless @.spans;
+    return Bool::False unless @.spans;
     my $head = @.spans[0];
     return $head.start_is_open;
 }
 method start_is_closed () returns bool {
-    return bool::false unless @.spans;
+    return Bool::False unless @.spans;
     my $head = @.spans[0];
     return $head.start_is_closed;
 }
 method end_is_open () returns bool {
-    return bool::false unless @.spans;
+    return Bool::False unless @.spans;
     my $last = @.spans[-1];
     return $last.end_is_open;
 }
 method end_is_closed () returns bool {
-    return bool::false unless @.spans;
+    return Bool::False unless @.spans;
     my $last = @.spans[-1];
     return $last.end_is_closed;
 }
@@ -110,16 +110,16 @@ method intersects ( Set::Infinite::Functional $set ) returns bool {
     my @a = @.spans;
     my @b = $set.spans;
     while @a && @b {
-        return bool::true if @a[0].intersection( @b[0] );
+        return Bool::True if @a[0].intersection( @b[0] );
         if @a[0].end < @b[0].end { shift @a } else { shift @b }
     }
-    return bool::false;
+    return Bool::False;
 }
 
 method complement ($self: ) returns Set::Infinite::Functional {
     return $self.universal_set() 
         if $self.is_empty;
-    return @.spans.map:{ $self.new( spans => $_.complement ) }
+    return @.spans.map:{ $self.new( spans => $_.complement ) }\
                   .reduce:{ $^a.intersection( $^b ) };
 }
 

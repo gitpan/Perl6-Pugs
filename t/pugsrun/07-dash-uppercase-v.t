@@ -49,7 +49,7 @@ if $*OS eq "browser" {
 diag "Running under $*OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 
@@ -83,7 +83,7 @@ is $nonexistent, "\tunknown_option_that_does_not_exist: UNKNOWN\n", "Nonexistent
 
 # -V:foo vs. -V foo
 my $fullversion = run_pugs('-V unknown_option_that_does_not_exist');
-ok( ($fullversion ~~ rx:perl5/^This.is.Perl6.User's.Golfing.System/), "-V foo vs. -V:foo")
+isnt( index($fullversion, "This is Perl6 User's Golfing System"), -1, "-V foo vs. -V:foo")
   or diag $fullversion;
 
 

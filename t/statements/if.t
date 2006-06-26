@@ -11,7 +11,7 @@ L<S04/"Conditional statements">
 
 =cut
 
-plan 18;
+plan 19;
 
 my $x = 'test';
 if ($x eq $x) { pass("if ($x eq $x) {} works"); } else { flunk("if ($x eq $x) {} failed"); }
@@ -86,7 +86,7 @@ is $foo, 1, "die should stop execution immediately.";
 
 {
     my $foo = 1;
-    if { 1 > 0 } { $foo = 2 } else { $foo = 3 };
+    if ({ 1 > 0 }) { $foo = 2 } else { $foo = 3 };
     is $foo, 2, 'if with no parens, and closure as cond';
 }
 
@@ -103,6 +103,9 @@ is $foo, 1, "die should stop execution immediately.";
     eval_is(
         'if( ( my $x = 2 ) == 2 ) { $x; }',
         2,
-        "'my' variable within 'if' conditional",
-    :todo<feature>);
+        "'my' variable within 'if' conditional");
+}
+
+{
+    isnt(eval('if 1; 2'), 2, 'test "if 1"');
 }

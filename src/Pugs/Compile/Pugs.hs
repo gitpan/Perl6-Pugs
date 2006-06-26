@@ -1,240 +1,166 @@
-{-# OPTIONS_GHC -cpp -fglasgow-exts #-}
-
-#include "../pugs_config.h"
+{-# OPTIONS_GHC -fglasgow-exts #-}
 
 module Pugs.Compile.Pugs (genPugs) where
 import Pugs.AST
 import Pugs.Types
 import Pugs.Internals
-import Text.PrettyPrint
+import qualified Data.ByteString.Char8 as Str
 import qualified Data.Map as Map
 
+type Str = Str.ByteString
+type Comp a = WriterT [a] Eval a
+
 class (Show x) => Compile x where
-    compile :: x -> Eval Doc
+    compile :: x -> Comp Str
     compile x = fail ("Unrecognized construct: " ++ show x)
-    compileList :: [x] -> Eval Doc
-    compileList = fmap prettyList . mapM compile
+    compileList :: [x] -> Comp Str
+    compileList xs = do
+        xsC <- mapM compile xs
+        return $ Str.concat [bl, joinMany xsC, br]
+
+joinMany :: [Str] -> Str
+joinMany xs = Str.join cm (filter (not . Str.null) xs)
 
 instance (Compile x) => Compile [x] where
     compile = compileList
 
-sep1 :: Doc -> Doc -> Doc
-sep1 a b = sep [a, b]
-
-prettyList :: [Doc] -> Doc
-prettyList = brackets . vcat . punctuate comma
-
-prettyDo :: [Doc] -> Doc
-prettyDo docs = parens $ text "do" <+> braces (sep $ punctuate semi docs)
-
-prettyRecord :: String -> [(String, Doc)] -> Doc
-prettyRecord con = (text con <+>) . braces . sep . punctuate comma . map assign
-    where assign (name, val) = text name <+> char '=' <+> val
-
-prettyBind :: String -> Doc -> Doc
-prettyBind var doc = text var <+> text "<-" <+> doc
-
 instance Compile (Maybe Exp) where
-    compile Nothing = return $ text "return Nothing"
-    compile (Just exp) = do
-        expC <- compile exp
-        return $ prettyDo 
-            [ prettyBind "exp" expC
-            , text "return (Just exp)"
-            ]
+    compile Nothing = return $ Str.pack "Nothing"
+    compile (Just exp) = compWith "Just" [compile exp]
+
+pl, pr, bl, br :: Str
+pl = Str.pack "("
+pr = Str.pack ")"
+bl = Str.pack "["
+br = Str.pack "]"
+cm = Str.pack ", "
+
+ret :: String -> Comp Str
+ret = return . Str.pack
+
+compWith :: String -> [Comp Str] -> Comp Str
+compWith con xs = do
+    xsC <- sequence xs
+    return $ Str.concat [pl, Str.unwords (Str.pack con:concatMap (\x -> [pl, x, pr]) xsC), pr]
 
 instance Compile Exp where
     compile (App exp1 exp2 exps) = do
-        exp1C <- compile exp1
-        exp2C <- compile exp2
-        expsC <- compileList exps
-        return $ prettyDo 
-            [ prettyBind "exp1" exp1C
-            , prettyBind "exp2" exp2C
-            , prettyBind "exps" (text "sequence" `sep1` expsC)
-            , text "return (App exp1 exp2 exps)"
-            ]
+        compWith "App" [compile exp1, compile exp2, compile exps]
     compile (Syn syn exps) = do
-        expsC <- compileList exps
-        return $ prettyDo
-            [ prettyBind "exps" (text "sequence" `sep1` expsC)
-            , text "return" <+> parens (text $ "Syn " ++ show syn ++ " exps")
-            ]
-    compile (Ann ann exp) = compileShow2 "Ann" ann exp
+        compWith "Syn" [ret (show syn), compile exps]
+    compile (Ann ann exp) = do
+        compWith "Ann" [ret (show ann), compile exp]
     compile (Pad scope pad exp) = do
-        padC <- compile pad
-        expC <- compile exp
-        return $ prettyDo
-            [ prettyBind "pad" padC
-            , prettyBind "exp" expC
-            , text ("return (Pad " ++ show scope ++ " pad exp)")
-            ]
+        compWith "Pad" [ret (show scope), compile pad, compile exp]
     compile (Stmts exp1 exp2) = do
-        exp1C <- compile exp1
-        exp2C <- compile exp2
-        return $ prettyDo 
-            [ prettyBind "exp1" exp1C
-            , prettyBind "exp2" exp2C
-            , text "return (Stmts exp1 exp2)"
-            ]
+        compWith "Stmts" [compile exp1, compile exp2]
     compile (Val val) = do
-        valC <- compile val
-        return $ prettyDo 
-            [ prettyBind "val" valC
-            , text "return (Val val)"
-            ]
-    compile exp = return $ text "return" $+$ parens (text $ show exp)
-
-compileShow2 :: Show a => String -> a -> Exp -> Eval Doc
-compileShow2 con anno exp = do
-    expC <- compile exp
-    return $ prettyDo
-        [ prettyBind "exp" expC
-        , text ("return (" ++ con ++ " (" ++ show anno ++ ") exp)")
-        ]
+        compWith "Val" [compile val]
+    compile exp = ret $ "(" ++ show exp ++ ")"
 
 instance Compile Pad where
     compile pad = do
         symsC <- mapM compile syms
-        return $ text "fmap mkPad . sequence $ "
-            $+$ nest 4 (prettyList $ filter (not . isEmpty) symsC)
+        return $ Str.concat [Str.pack "(mkPad [", joinMany symsC, Str.pack "])"]
         where
         syms = padToList pad
 
 instance Compile (String, [(TVar Bool, TVar VRef)]) where
-    compile ((':':'*':_), _) = return empty -- XXX - :*Bool etc; punt for now
+    compile ((':':'*':_), _) = return Str.empty -- XXX - :*Bool etc; punt for now
     compile (n, tvars) = do
-        tvarsC <- fmap (filter (not . isEmpty)) $ mapM compile tvars
-        if null tvarsC then return empty else do
-        return $ prettyDo 
-                [ prettyBind "tvars" (text "sequence" `sep1` prettyList tvarsC)
-                , text ("return (" ++ show n ++ ", tvars)")
-                ]
+        tvarsC <- fmap (filter (not . Str.null)) $ mapM compile tvars
+        if null tvarsC then return Str.empty else do
+        return $ Str.concat [pl, Str.pack (show n), Str.pack ", [", joinMany tvarsC, br, pr]
 
 instance (Typeable a) => Compile (Maybe (TVar a)) where
-    compile = const . return $ text "Nothing"
+    compile = const . ret $ "Nothing"
 
 instance Compile (TVar Bool, TVar VRef) where
     compile (fresh, tvar) = do
-        freshC <- compile fresh
         tvarC  <- compile tvar
-        if isEmpty tvarC then return empty else do
-        return $ prettyDo 
-                [ prettyBind "fresh" freshC
-                , prettyBind "tvar" tvarC
-                , text "return (fresh, tvar)"
-                ]
+        if Str.null tvarC then return Str.empty else do
+        freshC <- compile fresh
+        return $ Str.concat [pl, freshC, cm, tvarC, pr]
 
 instance Compile Bool where
-    compile bool = return $ text "return" <+> parens (text $ show bool)
+    compile bool = ret $ "(" ++ show bool ++ ")"
 
 instance Compile a => Compile (Map VStr a) where
-    compile map | Map.null map = return (text "return Map.empty")
+    compile map | Map.null map = ret $ "(Map.empty)"
     compile map = error (show map) 
 
 instance Compile (IVar VScalar) where
     compile iv = do
-        val     <- readIVar iv
+        val     <- lift $ readIVar iv
         valC    <- compile val
-        return $ prettyDo
-            [ prettyBind "val" valC
-            , text "newScalar val"
-            ]
+        return $ Str.concat [Str.pack "(newScalar ", valC, pr]
 
 instance (Typeable a, Compile a) => Compile (TVar a) where
     compile fresh = do
-        vref    <- liftSTM $ readTVar fresh
+        vref    <- liftIO $ atomically (readTVar fresh)
         vrefC   <- compile vref
-        if isEmpty vrefC then return empty else do
-        return $ prettyDo
-            [ prettyBind "vref" vrefC
-            , text "liftSTM (newTVar vref)"
-            ]
+        if Str.null vrefC then return Str.empty else do
+        tv      <- liftIO $ fmap (Str.pack . ('t':) . show . hashUnique) newUnique
+        tell [Str.concat [tv, Str.pack " <- liftSTM (newTVar ", vrefC, Str.pack ");\n"]]
+        return tv
 
 instance Compile VRef where
     compile (MkRef (ICode cv)) = do
-        vsub    <- code_fetch cv
+        vsub    <- lift $ code_fetch cv
         vsubC   <- compile vsub
-        if isEmpty vsubC then return empty else do
-        return $ prettyDo
-            [ prettyBind "vsub" vsubC
-            , text "return (MkRef $ ICode vsub)"
-            ]
+        if Str.null vsubC then return Str.empty else do
+        return $ Str.concat [Str.pack "(MkRef (ICode ", vsubC, pr, pr]
     compile (MkRef (IScalar sv)) | scalar_iType sv == mkType "Scalar::Const" = do
-        sv  <- scalar_fetch sv
+        sv  <- lift $ scalar_fetch sv
         svC <- compile sv
-        if isEmpty svC then return empty else do
-        return $ prettyDo
-            [ prettyBind "sv" svC
-            , text "return (MkRef $ IScalar sv)"
-            ]
+        if Str.null svC then return Str.empty else do
+        return $ Str.concat [Str.pack "(MkRef (IScalar ", svC, pr, pr]
     compile ref = do
-        return $ text $ "newObject (mkType \"" ++ showType (refType ref) ++ "\")"
+        objc   <- liftIO $ fmap (Str.pack . ('o':) . show . hashUnique) newUnique
+        tell [Str.append objc (Str.pack (" <- newObject (mkType \"" ++ showType (refType ref) ++ "\");\n"))]
+        return objc
 
 instance Compile Val where
     compile (VCode code) = do
-        codeC <- compile code
-        return $ prettyDo
-            [ prettyBind "code" codeC
-            , text "return $ VCode code"
-            ]
+        compWith "VCode" [compile code]
     compile (VObject obj) = do
-        objC <- compile obj
-        return $ prettyDo
-            [ prettyBind "obj" objC
-            , text "return $ VObject obj"
-            ]
-    compile x = return $ text "return" $+$ parens (text $ show x)
+        compWith "VObject" [compile obj]
+    compile val = ret $ "(" ++ show val ++ ")"
 
 instance Compile VObject where
     compile (MkObject typ attrs Nothing _) = do
         attrsC <- compile attrs
-        let vobj = prettyRecord "MkObject" $
-                [ ("objType",   text (show typ))
-                , ("objAttrs",  text "attrs")
-                , ("objOpaque", text "Nothing")
-                , ("objId",     text "id")
-                ]
-        return $ prettyDo
-            [ prettyBind "attrs" attrsC
-            , prettyBind "id" (text "liftIO newUnique")
-            , text "return" <+> parens vobj
-            ]
+        uniq   <- liftIO $ fmap (Str.pack . ('u':) . show . hashUnique) newUnique
+        tell [Str.append uniq (Str.pack " <- liftIO newUnique;\n")]
+        return $ Str.unwords [pl, Str.pack "MkObject", Str.pack (show typ), attrsC, Str.pack "Nothing", uniq, pr]
     compile obj = fail $ "Cannot compile Object of Dynamic type: " ++ show obj
 
 -- Haddock can't cope with Template Haskell
 instance Compile VCode where
     -- compile MkCode{ subBody = Prim _ } = return $ text "return mkPrim"
-    compile MkCode{ subBody = Prim _ } = return empty
-    compile code = do 
-        bodyC <- compile $ subBody code
-        let comp :: Show a => (VCode -> a) -> Doc
-            comp f = text $ show (f code)
-            vsub = prettyRecord "MkCode" $
-                [ ("isMulti",       comp isMulti)
-                , ("subName",       comp subName)
-                , ("subType",       comp subType)
-                , ("subEnv",        text "Nothing")
-                , ("subAssoc",      comp subAssoc)
-                , ("subParams",     comp subParams)
-                , ("subBindings",   comp subBindings)
-                , ("subSlurpLimit", comp subSlurpLimit)
-                , ("subReturns",    comp subReturns)
-                , ("subLValue",     comp subLValue)
-                , ("subBody",       text "body")
-                , ("subCont",       text "Nothing")
-                ]
-        return $ prettyDo
-            [ prettyBind "body" bodyC
-            , text "return" <+> parens vsub
+    compile MkCode{ subBody = Prim _ } = return Str.empty
+    compile (MkCode v1 v2 v3 _ v4 v5 v6 v7 v8 v9 v10 _) = do 
+        compWith "MkCode"
+            [ compile v1
+            , ret (show v2)
+            , ret (show v3)
+            , ret "Nothing"
+            , ret (show v4)
+            , ret (show v5)
+            , ret (show v6)
+            , ret (show v7)
+            , ret (show v8)
+            , compile v9
+            , compile v10
+            , ret "Nothing"
             ]
 
 genPugs :: Eval Val
 genPugs = do
-    exp     <- asks envBody
-    glob    <- askGlobal
-    globC   <- compile glob
-    expC    <- compile exp
+    exp             <- asks envBody
+    glob            <- askGlobal
+    (globC, globT)  <- runWriterT $ compile glob
+    (expC, expT)    <- runWriterT $ compile exp
     return . VStr . unlines $
         [ "{-# OPTIONS_GHC -fglasgow-exts -fno-warn-unused-imports -fno-warn-unused-binds #-}"
         , "module Main where"
@@ -249,8 +175,8 @@ genPugs = do
         , "    exp  <- expC"
         , "    runAST glob exp"
         , ""
-        , renderStyle (Style PageMode 100 0) $ text "globC =" <+> globC
+        , "globC = do {" ++ Str.unpack (Str.concat globT) ++ "return " ++ Str.unpack globC ++ "}"
         , ""
-        , renderStyle (Style PageMode 100 0) $ text "expC =" <+> expC
+        , "expC = do {" ++ Str.unpack (Str.concat expT) ++ "return " ++ Str.unpack expC ++ "}"
         , ""
         ]

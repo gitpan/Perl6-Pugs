@@ -61,7 +61,7 @@ diag "Running under $?OS";
 
 my ($pugs,$redir) = ("../../pugs", ">");
 
-if($?OS eq any<MSWin32 mingw cygwin>) {
+if($?OS eq any <MSWin32 mingw cygwin>) {
   $pugs = '..\\..\\pugs.exe';
   if (-e 'pugs.exe') { $pugs = 'pugs.exe' }
 }
@@ -86,7 +86,7 @@ sub run_pugs ($c) {
 for @urls -> $t_url {
   my $url = $t_url;
   $url ~~ s:perl5/%s/$base_url/;
-  my $inc = map {qq! "-I$_"!}, @INC;
+  my $inc = map {qq! "-I$_"!}, @*INC;
 
   # Will block forever
   # my $output = run_pugs(qq! $inc -MLWP::Simple -e "getprint('$url')" !);

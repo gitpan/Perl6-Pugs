@@ -3,19 +3,12 @@ module FindBin-6.0.0;
 use v6;
 use File::Spec;
 
-my Str $Bin;
-my Str $Dir;
-my Str $Script;
-my Str $RealBin;
-my Str $RealDir;
-my Str $RealScript;
-
-our Str $FindBin::Bin        := $Bin;
-our Str $FindBin::Dir        := $Dir;
-our Str $FindBin::Script     := $Script;
-our Str $FindBin::RealBin    := $RealBin;
-our Str $FindBin::RealDir    := $RealDir;
-our Str $FindBin::RealScript := $RealScript;
+our Str $Bin;
+our Str $Dir;
+our Str $Script;
+our Str $RealBin;
+our Str $RealDir;
+our Str $RealScript;
 
 sub init {
     $Dir := $Bin;
@@ -32,7 +25,7 @@ sub init {
         my Int $dosish = ( $?OS eq 'MSWin32' or $?OS eq 'os2' );
         &readlink := { undef } if $dosish;
 
-        unless ( ( $script ~~ m:P5#/# || ( $dosish && $script ~~ m:P5#\\# ) )
+        unless ( ( $script ~~ m:P5 [/] || ( $dosish && $script ~~ m:P5 [\\] ) )
                  && -f $script )
         {
             for File::Spec.path() -> $dir {
@@ -40,7 +33,8 @@ sub init {
                 if -r $scr && ( !$dosish || -x _ ) {
                     $script = $scr;
                     if -f $*PROGRAM_NAME {
-                        $script = $*PROGRAM_NAME unless -T $script;
+			# XXX -T doesn't work yet.
+                        $script = $*PROGRAM_NAME unless try { -T $script };
                     }
                     last;
                 }

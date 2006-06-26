@@ -11,7 +11,6 @@ The C<-p> command line switch mimics the Perl5 C<-p> command line
 switch, and wraps the whole script in
 
   while ($_ = =<>) {
-    $_ .= chomp;
     ...         # your script
     say;
   };
@@ -37,7 +36,7 @@ diag "Running under $*OS";
 
 my ($pugs,$redir_in,$redir_out) = ("./pugs", "<", ">");
 
-if($*OS eq any<MSWin32 mingw msys cygwin>) {
+if($*OS eq any <MSWin32 mingw msys cygwin>) {
   $pugs = 'pugs.exe';
 };
 

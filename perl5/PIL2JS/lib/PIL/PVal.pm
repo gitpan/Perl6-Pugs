@@ -2,6 +2,14 @@ use warnings;
 use strict;
 
 {
+  package PIL::VType;
+  sub fixup { $_[0] }
+  sub as_js {
+    return "new PIL2JS.Box.Constant(undefined)";
+  }
+}
+
+{
   package PIL::PVal;
 
   sub fixup { $_[0] }
@@ -27,7 +35,7 @@ use strict;
   sub as_js {
     local $_;
     return sprintf "new PIL2JS.Box.Constant([%s])",
-      join ", ", map { $_->as_js } @{ $_[0]->[0] };
+      join ", ", map { $_ eq "VUndef" ? "new PIL2JS.Box.Constant(undefined)" : $_->as_js } @{ $_[0]->[0] };
   }
 }
 

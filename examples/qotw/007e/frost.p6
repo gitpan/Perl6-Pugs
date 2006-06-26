@@ -11,10 +11,10 @@ my $ICE = '*';
 
 my $t = 0;
 
-frost(create_volume(@ARGS[0],@ARGS[1],@ARGS[2]));
+frost(create_volume(@*ARGS[0],@*ARGS[1],@*ARGS[2]));
 
 sub cls returns Void {
-    system(($?OS eq any<MSWin32 mingw cygwin>) ?? 'cls' !! 'clear');
+    system(($?OS eq any <MSWin32 mingw cygwin>) ?? 'cls' !! 'clear');
 }
 
 # create a volume of size M x N with vapor density D
@@ -105,7 +105,7 @@ sub process ($a is rw,$b is rw,$c is rw,$d is rw) {
 
   if ($ice) {
     # freeze vapor
-    ($a,$b,$c,$d) = map {$_ eq $VAPOR ?? $ICE !! $_} ($a,$b,$c,$d);
+    ($a,$b,$c,$d) = map {$_ eq $VAPOR ?? $ICE !! $_}, $a,$b,$c,$d;
   }
   else {
     # randomly rotate vapor

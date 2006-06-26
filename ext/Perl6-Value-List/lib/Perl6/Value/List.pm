@@ -49,9 +49,9 @@ class Perl6::Value::List {
 
     submethod BUILD () {
         $.cis_infinite   //= sub { &{$.celems}() == Inf },
-        $.cis_contiguous //= sub { bool::false }, 
+        $.cis_contiguous //= sub { Bool::False }, 
         $.cstringify     //= sub { &{$.cstart}() ~ '....' ~ &{$.cend}() }, 
-        $.is_lazy        //= bool::true,
+        $.is_lazy        //= Bool::True,
         $.celems         //= ( defined $.cstart || defined $.cend ) ?? 
                              sub { Inf } !! 
                              sub { 0 };
@@ -112,11 +112,11 @@ class Perl6::Value::List {
         );
     }
 
-    method from_single ( $class: @list is copy ) {
-        $class.new( cstart => sub{ &*shift(@list) },
-                    cend =>   sub{ &*pop(@list) },
+    method from_single ( $class: *@list is copy ) {
+        $class.new( cstart => sub{ @list.shift },
+                    cend =>   sub{ @list.pop },
                     celems => sub{ +@list },
-                    is_lazy => bool::false );
+                    is_lazy => Bool::False );
     }
 
     method from_coro ( $class: $start ) {
@@ -130,7 +130,7 @@ class Perl6::Value::List {
                     cend =>    sub {},
                     celems =>  sub { $size },
                     cis_infinite => sub { $size == Inf },
-                    cis_contiguous => sub { bool::false },
+                    cis_contiguous => sub { Bool::False },
         );
     }
 
@@ -171,15 +171,15 @@ class Perl6::Value::List {
                 cstart => coro {
                         my @ret;
                         my $x = $ret.shift // yield;
-                        &*unshift(@ret, &$code($x)); 
-                        yield &*shift(@ret) while @ret;
+                        &*unshift(@ret: &$code($x)); 
+                        yield @ret.shift while @ret;
                         return;
                 },
                 cend => coro {
                         my @ret; 
                         my $x = $ret.pop // yield;
                         &*push(@ret, &$code($x));
-                        yield &*pop(@ret) while @ret;
+                        yield @ret.pop while @ret;
                         return;
                 },
                 # TODO - signal end of data using 'elems()'
@@ -193,7 +193,7 @@ class Perl6::Value::List {
                 cstart => coro {
                         my $x = $ret.shift // yield;
                         unless %seen{$x} { 
-                            %seen{$x} = bool::true; 
+                            %seen{$x} = Bool::True; 
                             yield $x;
                         }                       
                         return;
@@ -201,7 +201,7 @@ class Perl6::Value::List {
                 cend => coro {
                         my $x = $ret.pop // yield;
                         unless %seen{$x} { 
-                            %seen{$x} = bool::true; 
+                            %seen{$x} = Bool::True; 
                             yield $x;
                         }
                         return;

@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fglasgow-exts -fallow-undecidable-instances -fno-warn-orphans -funbox-strict-fields -cpp #-}
-{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 module Pugs.CodeGen.PIL2 (
     genPIL2,
@@ -7,6 +6,7 @@ module Pugs.CodeGen.PIL2 (
 ) where
 import Pugs.Internals
 import Pugs.AST
+import Pugs.PIL2.Instances ()
 import Pugs.PIL2
 import Pugs.Compile.PIL2
 import DrIFT.Perl5

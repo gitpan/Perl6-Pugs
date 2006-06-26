@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fglasgow-exts -cpp #-}
-{-# OPTIONS_GHC -#include "../../UnicodeC.h" #-}
 
 module Pugs.Eval.Var (
     findVar, findVarRef,
@@ -13,13 +12,14 @@ import Pugs.AST
 import Pugs.Types
 import Pugs.Embed.Perl5
 import Pugs.Bind
-import Pugs.Prim.List (op2Fold, op1HyperPrefix, op1HyperPostfix, op2Hyper)
+import Pugs.Prim.List (op2Reduce, op1HyperPrefix, op1HyperPostfix, op2Hyper)
 import Pugs.Prim.Param (foldParam)
 import Pugs.Pretty
 import Pugs.Config
 import Pugs.Monads
 
 findVar :: Var -> Eval (Maybe VRef)
+findVar (':':x:_) | x /= '*' = return Nothing
 findVar name = do
     rv <- findVarRef name
     case rv of
@@ -33,21 +33,41 @@ findVar name = do
 findVarRef :: Var -> Eval (Maybe (TVar VRef))
 findVarRef name
     | Just (package, name') <- breakOnGlue "::" name
-    , Just (sig, "") <- breakOnGlue "CALLER" package = do
-        maybeCaller <- asks envCaller
-        case maybeCaller of
-            Just env -> local (const env) $ do
-                rv <- findVarRef (sig ++ name')
-                return rv
-            Nothing -> retError "cannot access CALLER:: in top level" name
-    | Just (package, name') <- breakOnGlue "::" name
-    , Just (sig, "") <- breakOnGlue "OUTER" package = do
-        maybeOuter <- asks envOuter
-        case maybeOuter of
-            Just env -> local (const env) $ do
-                findVarRef (sig ++ name')
-            Nothing -> retError "cannot access OUTER:: in top level" name
-    | (sig:'+':name') <- name = findVarRef (sig:("CALLER::"++name'))
+    = case () of
+        _ | Just (sig, "") <- breakOnGlue "CALLER" package -> do
+            maybeCaller <- asks envCaller
+            case maybeCaller of
+                Just env -> local (const env) $ do
+                    rv <- findVarRef (sig ++ name')
+                    return rv
+                Nothing -> retError "cannot access CALLER:: in top level" name
+        _ | Just (sig, "") <- breakOnGlue "ENV" package -> fix $ \upLevel -> do
+            maybeCaller <- asks envCaller
+            case maybeCaller of
+                Just env -> local (const env) $ do
+                    rv <- findVarRef (sig ++ name')
+                    if isJust rv then return rv else upLevel
+                Nothing -> do
+                    -- final callback: try an "environment" lookup
+                    -- XXX: how does "@+PATH" differ from "$+PATH"?
+                    -- XXX: how to tell empty env from nonexistent env?
+                    --      should we allow writes?
+                    exists <- evalExp $ App (Var "&exists") (Just (Var "%*ENV")) [Val (VStr name')]
+                    case exists of
+                        VBool False -> do
+                            retError "no such ENV:: variable" name'
+                        _           -> do
+                            rv   <- enterLValue (evalExp $ Syn "{}" [Var "%*ENV", Val (VStr name')])
+                            tvar <- liftSTM . newTVar =<< fromVal rv
+                            return (Just tvar)
+        _ | Just (sig, "") <- breakOnGlue "OUTER" package -> do
+            maybeOuter <- asks envOuter
+            case maybeOuter of
+                Just env -> local (const env) $ do
+                    findVarRef (sig ++ name')
+                Nothing -> retError "cannot access OUTER:: in top level" name
+        _ -> doFindVarRef name
+    | (sig:'+':name') <- name = findVarRef (sig:("ENV::"++name'))
     | (_:'?':_) <- name = do
         rv  <- getMagical name
         case rv of
@@ -199,15 +219,17 @@ findSub name' invs args = do
                     _       -> VList (map PerlSV rv)
             }
     possiblyBuildMetaopVCode :: String -> Eval (Maybe VCode)
-    possiblyBuildMetaopVCode op' | "&prefix:[" `isPrefixOf` op', "]" `isSuffixOf` op' = do 
+    possiblyBuildMetaopVCode op'' | "&prefix:[" `isPrefixOf` op'', "]" `isSuffixOf` op'' = do 
         -- Strip the trailing "]" from op
-        let op = drop 9 (init op')
+        let op' = drop 9 (init op'')
+        let (op, keep) | '\\':real <- op' = (real, True)
+                       | otherwise        = (op', False)
         -- We try to find the userdefined sub.
         -- We use the first two elements of invs as invocants, as these are the
         -- types of the op.
             rv = fmap (either (const Nothing) Just) $ findSub ("&infix:" ++ op) Nothing (take 2 $ args ++ [Val undef, Val undef])
         maybeM rv $ \code -> return $ mkPrim
-            { subName     = "&prefix:[" ++ op ++ "]"
+            { subName     = "&prefix:[" ++ (if keep then "\\" else "") ++ op ++ "]"
             , subType     = SubPrim
             , subAssoc    = "spre"
             , subParams   = makeParams $
@@ -217,7 +239,7 @@ findSub name' invs args = do
             , subReturns  = anyType
             , subBody     = Prim $ \[vs] -> do
                 list_of_args <- fromVal vs
-                op2Fold list_of_args (VCode code)
+                op2Reduce keep list_of_args (VCode code)
             }
         -- Now we construct the sub. Is there a more simple way to do it?
     possiblyBuildMetaopVCode op' | "&prefix:" `isPrefixOf` op', "\171" `isSuffixOf` op' = do 
@@ -355,7 +377,7 @@ inferExpType (Val val) = fromVal val
 inferExpType (App (Val val) _ _) = do
     sub <- fromVal val
     return $ subReturns sub
-inferExpType (App (Var "&new") (Just (Var (':':name))) _) = return $ mkType name
+inferExpType (App (Var "&new") (Just (Val (VType typ))) _) = return typ
 inferExpType (App (Var name) invs args) = do
     sub <- findSub name invs args
     case sub of
@@ -375,10 +397,10 @@ inferExpType (Syn "@{}" _)  = return $ mkType "Array"
 inferExpType (Syn "%{}" _)  = return $ mkType "Hash"
 inferExpType (Syn "=>" _)   = return $ mkType "Pair"
 inferExpType exp@(Syn "{}" [_, idxExp]) = if isSimpleExp exp
-    then fromVal =<< evalExp exp
+    then fromVal =<< enterRValue (evalExp exp)
     else fmap typeOfCxt (inferExpCxt idxExp)
 inferExpType exp@(Syn "[]" [_, idxExp]) = if isSimpleExp exp
-    then fromVal =<< evalExp exp
+    then fromVal =<< enterRValue (evalExp exp)
     else fmap typeOfCxt (inferExpCxt idxExp)
 inferExpType (Syn "sub" [exp]) = inferExpType exp
 inferExpType _ = return anyType
@@ -395,22 +417,27 @@ isSimpleExp _               = False
 Return the context that an expression bestows upon a hash or array
 subscript. See 'reduce' for @\{\}@ and @\[\]@.
 -}
+inferExpCxt :: Exp -> Eval Cxt
+inferExpCxt exp = return $ if isScalarLValue exp
+    then cxtItemAny
+    else cxtSlurpyAny
+{-
 inferExpCxt :: Exp -- ^ Expression to find the context of
          -> Eval Cxt
-inferExpCxt (Ann (Pos _) exp)            = inferExpCxt exp
+inferExpCxt (Ann (Pos {}) exp)           = inferExpCxt exp
 inferExpCxt (Ann (Cxt cxt) _)            = return cxt
 inferExpCxt (Syn "," _)            = return cxtSlurpyAny
 inferExpCxt (Syn "[]" [_, exp])    = inferExpCxt exp
 inferExpCxt (Syn "{}" [_, exp])    = inferExpCxt exp
 inferExpCxt (Syn (sigil:"{}") _) = return $ cxtOfSigil sigil
-inferExpCxt (Val (VList _))        = return cxtSlurpyAny
+inferExpCxt (Val (VList {}))       = return cxtSlurpyAny
 inferExpCxt (Val (VRef ref))       = do
     cls <- asks envClasses
     let typ = refType ref
     return $ if isaType cls "List" typ
         then cxtSlurpyAny
         else CxtItem typ
-inferExpCxt (Val _)                 = return cxtItemAny
+inferExpCxt (Val {})                = return cxtItemAny
 inferExpCxt (Var (sigil:_))         = return $ cxtOfSigil sigil
 inferExpCxt (App (Var "&list") _ _) = return cxtSlurpyAny
 inferExpCxt (App (Var "&item") _ _) = return cxtSlurpyAny
@@ -424,6 +451,7 @@ inferExpCxt (App (Var name) invs args)   = do
             -> CxtItem (subReturns sub)
         _ -> cxtSlurpyAny
 inferExpCxt _                      = return cxtSlurpyAny
+-}
 
 {-|
 Evaluate the \'magical\' variable associated with a given name. Returns 

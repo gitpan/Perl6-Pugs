@@ -7,33 +7,27 @@
 >   A light from the shadows shall spring
 >   Renewed shall be blade that was broken
 >   The crownless again shall be king.
+
 -}
 
--- Based on the Parsec library, Copyright 1999-2000, Daan Leijen.
--- See src/Rule/LICENSE for the full license text.
 
-module Pugs.Rule
-               ( -- complete modules
-                 module Pugs.Rule.Prim
-               , module Pugs.Rule.Combinator
-               , module Pugs.Rule.Char
-               
-               -- module Pugs.Rule.Error
-               , ParseError   
-               , errorPos   
-               
-               -- module Pugs.Rule.Pos
-               , SourcePos
-               , SourceName, Line, Column             
-               , sourceName, sourceLine, sourceColumn             
-               , incSourceLine, incSourceColumn
-               , setSourceLine, setSourceColumn, setSourceName
+module Pugs.Rule (
+    module Pugs.Rule.Expr,
+    module Text.ParserCombinators.Parsec,
+    module Pugs.Rule,
+) where
 
-             ) where
-
-import Pugs.Rule.Pos            -- textual positions
-import Pugs.Rule.Error          -- parse errors
-import Pugs.Rule.Prim           -- primitive combinators
-import Pugs.Rule.Combinator     -- derived combinators
-import Pugs.Rule.Char           -- character parsers
-
+import Pugs.Rule.Expr
+import Text.ParserCombinators.Parsec hiding (
+    token       ,
+    char        ,
+    octDigit    ,
+    satisfy     ,
+    oneOf       ,
+    string      ,
+    anyChar     ,
+    upper       ,
+    hexDigit    ,
+    digit       ,
+    noneOf      ,
+    )

@@ -6,6 +6,7 @@ use Test;
 # L<S02/Names and Variables /To get a Perlish representation of any data value/>
 
 plan 95;
+#force_todo 8, 44, 46, 48; # untodo with r10745
 
 unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
   skip_rest "eval() not yet implemented in $?PUGS_BACKEND.";
@@ -29,13 +30,13 @@ sub desc_ref ($obj) {
     # tests 1-6
     for (42, 42/10, 4.2,) -> $obj {
       is ~$obj.perl.eval    , ~$obj    , desc_perl($obj);
-      is  $obj.perl.eval.ref,  $obj.ref, desc_ref($obj);
+      is ~$obj.perl.eval.ref, ~$obj.ref, desc_ref($obj);
     }
     
     # tests 7,8
     for (sqrt(2)) -> $obj {
         is ~$obj.perl.eval    , ~$obj    , desc_perl($obj);
-        is  $obj.perl.eval.ref,  $obj.ref, desc_ref($obj), :todo<bug>;
+        is ~$obj.perl.eval.ref, ~$obj.ref, desc_ref($obj), :todo<bug>;
     }
     
     # tests 9-16
@@ -56,7 +57,7 @@ sub desc_ref ($obj) {
 
     for (rx:Perl5{foo}, rx:Perl5{}, rx:Perl5{^.*$},) -> $obj {
         is ~$obj.perl.eval    , ~$obj    , desc_perl($obj), :todo<bug>;
-        is  $obj.perl.eval.ref,  $obj.ref, desc_ref($obj),  :todo<bug>;
+        is  $obj.perl.eval.ref,  $obj.ref, desc_ref($obj), :todo<bug>;
     }
 
     for (\42, \Inf, \-Inf, \NaN, \"string", \"", \?1, \?0, \undef,) -> $obj {

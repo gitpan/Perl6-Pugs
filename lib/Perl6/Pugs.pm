@@ -2,7 +2,7 @@ package Perl6::Pugs;
 use 5.006;
 use strict;
 
-our $VERSION = 6.002011;
+our $VERSION = 6.002012;
 
 =head1 NAME
 
@@ -10,7 +10,7 @@ Perl6::Pugs - A Perl 6 Implementation
 
 =head1 VERSION
 
-This document describes version 6.2.11 of Pugs, released February 1, 2005.
+This document describes version 6.2.12 of Pugs, released June 26, 2006.
 
 =head1 SYNOPSIS
 
@@ -88,15 +88,14 @@ Please submit bug reports to C<E<lt>pugsbugs@perl.orgE<gt>>.
 
 =head1 COPYRIGHT
 
-Copyright 2005, 2006 by Audrey Tang C<E<lt>autrijus@autrijus.orgE<gt>>.
+Pugs is Copyright 2005-2006, The Pugs Contributors.
 
-This code is free software; you can redistribute it and/or modify it under
+Pugs is a joint work of authorship by the Pugs Contributors.
+
+Pugs is free software; you can redistribute it and/or modify it under
 the terms of either:
 
     a) the GNU General Public License, version 2, or
     b) the Artistic License, version 2.0beta5.
-
-For the full license text, please see the F<GPL-2> and F<Artistic-2> files
-under the F<LICENSE> directory in the Pugs distribution.
 
 =cut

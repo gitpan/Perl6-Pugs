@@ -3,7 +3,7 @@
 use v6;
 use Test;
 
-plan 186;
+plan 188;
 
 my $five = abs(-5);
 
@@ -50,6 +50,12 @@ tryeq  13 %  4, 1;
 tryeq -13 %  4, 3;
 tryeq  13 % -4, -3;
 tryeq -13 % -4, -1;
+
+# % now does floats {
+    tryeq 5 % 2.5, 0;
+    tryeq 2.5 % 1, .5;
+# }
+
 
 my $limit = 1e6;
 
