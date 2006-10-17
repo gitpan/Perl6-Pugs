@@ -14,7 +14,7 @@ class Perl::Compiler::CodeGen::NameGen {
         my $ret = $?CLASS.new(
             template     => $.template,
             conter       => $.counter,
-            parent       => $?SELF,
+            parent       => self,
             parent_ident => $ident,
             state        => %.state,
         );
@@ -34,15 +34,15 @@ class Perl::Compiler::CodeGen::NameGen {
     }
 
     method ret($value) {
-        ./inject('RET', $value);
+        self.inject('RET', $value);
     }
 
     method r($name) {
-        %.names{$name} //= ./newreg;
+        %.names{$name} //= self.newreg;
     }
 
     method newreg() {
-        $.template($.counter[0]++);
+        $.template()($.counter[0]++);
     }
 }
 

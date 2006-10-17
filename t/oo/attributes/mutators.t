@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
 # this tests that you can define mutators, that do more interesting
 # things than merely assigning the value!
 
-use v6;
 use Test;
 
 plan 25;
@@ -21,10 +20,8 @@ class LValueMutator {
 }
 
 my $lvm = LValueMutator.new(:foo(3));
-is($lvm.foo, 3, "constructor uses lvalue accessor method",
-   :todo<bug>);
-is($lvm.get_foo, undef, "constructor doesn't simply set attributes",
-   :todo<bug>);
+is($lvm.foo, 3, "constructor uses lvalue accessor method", :todo<bug>);
+is($lvm.get_foo, undef, "constructor doesn't simply set attributes");
 
 lives_ok { $lvm.get_foo = 6 }, "lvalue accessors seem to work";
 is($lvm.get_foo, 6, "lvalue accessors work");
@@ -34,7 +31,7 @@ is($lvm.foo, 5, "mutator seems to work");
 
 our Int $count = 0;
 
-my $parsefail = !eval_ok '
+my $parsefail = !ok eval('
     class MagicVal {
         has Int $.constant;
         has Int $.varies is rw;
@@ -48,7 +45,7 @@ my $parsefail = !eval_ok '
         return $var;
         }
     }
-', "can parse Proxy trait", :todo<feature>;
+'), "can parse Proxy trait", :todo<feature>;
 
 if ($parsefail) {
     skip 11, "Proxy trait is parsefail";
@@ -80,7 +77,7 @@ if ($parsefail) {
 
 # test interface tentatively not entirely disapproved of by
 # all(@Larry) at L<"http://xrl.us/gnxp">
-$parsefail = !eval_ok '
+$parsefail = !ok eval('
     class MagicSub {
         has Int $.constant;
         has Int $.varies is rw;
@@ -89,7 +86,7 @@ $parsefail = !eval_ok '
             ( :FETCH{ $.varies += 2 },
               :STORE{ $.varies = $^v + 1 } );
     }
-', "can parse Proxy trait", :todo<feature>;
+'), "can parse Proxy trait", :todo<feature>;
 
 if ($parsefail) {
     skip 6, "Proxy trait is parsefail";

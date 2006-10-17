@@ -1,5 +1,5 @@
+use v6-alpha;
 module Config::Tiny-0.01;
-use v6;
 
 # Config::Tiny has already been ported to Perl6 at
 # http://tpe.freepan.org/repos/adamk/Config-Tiny/lib/Config/Tiny.pm
@@ -13,7 +13,8 @@ sub Config::Tiny::new () returns Ref {
         'err_str' => { %self<_err_str> },
         'read' => sub ($file) {
             my $input = try { open($file) };
-            if ( ref $input ne 'IO' ) {
+            
+            if (  WHAT $input ne 'IO' ) {
                 %self<_err_str> = "Failed to open '$file' for reading" and return FALSE;
             }
             my $sect = '';
@@ -47,7 +48,7 @@ sub Config::Tiny::new () returns Ref {
                 %self<_err_str> = 'You did not specify a file name' and return FALSE;
             }
             my $output = open($file, :w);
-            if ( ref $output ne 'IO' ) {
+            if ( WHAT $output ne 'IO' ) {
                 %self<_err_str> = "Failed to open $file for writing" and return FALSE;
             }
             # for grep {$_ ne '_err_str' }, sort keys %self -> $section {

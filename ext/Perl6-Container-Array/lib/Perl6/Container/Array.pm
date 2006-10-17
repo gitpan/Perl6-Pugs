@@ -1,6 +1,6 @@
-use v6;
+use v6-alpha;
 
-=for ChangeLog
+=begin ChangeLog
 
 2005-08-10
 * New methods Array.flatten(), is_lazy()
@@ -180,7 +180,7 @@ method splice (
 { 
     my ( @head, @body, @tail );
     # say "items: ", @.items, " splice: $offset, $length, ", @list;
-    # say 'insert: ', $_, ' ', $_.ref for @list;
+    # say 'insert: ', $_, ' ', $_.WHAT for @list;
     if $offset >= 0 {
         @head = self._shift_n( $offset );
         if $length >= 0 {
@@ -224,12 +224,14 @@ method pop () {
 }
 
 method unshift ( *@item ) {
-    &*unshift(@.items: @item);
+    # &*unshift(@.items: @item);
+    &*unshift(@(self.items): @item);       # XXX bug?
     return self;
 }
 
 method push ( *@item ) {
-    &*push(@.items: @item);
+    # &*push(@.items: @item);
+    &*push(@(self.items): @item);    # XXX bug?
     return self;
 }
 

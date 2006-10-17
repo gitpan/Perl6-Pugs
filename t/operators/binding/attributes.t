@@ -1,7 +1,7 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+
+# L<S03/"Binding">
 
 plan 12;
 

@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # Test primarily aimed at PIL2JS
@@ -62,7 +61,7 @@ plan 8;
   my $count;
   for ($arrayref) { $count++ }
 
-  is $count, 1, 'for ($arrayref) {...} executes the loop body only once', :todo<feature>;
+  is $count, 1, 'for ($arrayref) {...} executes the loop body only once';
 }
 
 {
@@ -71,5 +70,5 @@ plan 8;
   my $count;
   for $arrayref { $count++ }
 
-  is $count, 1, 'for $arrayref {...} executes the loop body only once', :todo<feature>;
+  is $count, 1, 'for $arrayref {...} executes the loop body only once';
 }

@@ -40,15 +40,17 @@ printCommandLineHelp
         putStrLn "-n               wrap the -e fragments in a 'while(=<>){...}' loop"
         putStrLn "-p               wrap the -e fragments in a 'while(=<>){...;say}' loop"
         putStrLn "-c               parse the file or -e, but do not run it"
+        putStrLn "-d               run the program with debug tracing"
         putStrLn "-Bbackend        execute using the compiler backend"
         putStrLn "-Cbackend        compile using the compiler backend"
+        putStrLn "-Mmodule         execute 'use module' before running the program"
+        putStrLn "-Ipath           add path to module search paths in @*INC"
         putStrLn ("                 (valid backends are: " ++ backendsStr ++ ")")
-        putStrLn "-Mmodule         execute 'use module' before executing the program"
         putStrLn "-h or --help     give this message"
         putStrLn "-V               long configuration information & version"
         putStrLn "-V:item          short configuration information for item"
         putStrLn "-v or --version  version"
-        putStrLn "-l -d and -w are ignored for compatibility with Perl 5"
+        putStrLn "-l and -w are ignored for compatibility with Perl 5"
         putStrLn "See documentation of pugs::run for more help."
     where
     backendsStr = foldr1 addComma $ sort ("JS":backends)

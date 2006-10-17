@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 our $PIL = (($*OS eq 'MSWin32') ?? 'pil.exe' !! './pil');

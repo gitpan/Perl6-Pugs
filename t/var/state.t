@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 12;
+plan 16;
 
 # L<S04/"The Relationship of Blocks and Declarations" /There is a new state declarator that introduces/>
 
@@ -25,7 +24,7 @@ plan 12;
     my $gen = {
         # Note: The following line is only executed once, because it's equivalent
         # to
-        #   state $svar will first{ 42 };
+        #   state $svar will first { 42 };
         # See L<S04/"Closure traits" /emantics to any initializer, so this also works/>
         state $svar = 42;
         my $ret = { $svar++ };
@@ -45,13 +44,13 @@ plan 12;
         $svar++;
 
         # Only check on last run
-        if($val == 3) {
+        if $val == 3 {
             is $svar, 3, "state() works inside for-loops";
         }
     }
 }
 
-# state will first{...}
+# state will first {...}
 {
     my ($a, $b);
     eval '
@@ -64,7 +63,7 @@ plan 12;
         $b = $gen()();  # $svar == 44
     ';
 
-    is $b, 44, 'state will first{...} works', :todo<feature>;
+    is $b, 44, 'state will first {...} works', :todo<feature>;
 }
 
 # Return of a reference to a state() var
@@ -86,7 +85,7 @@ plan 12;
 {
     # XXX -- currently this is parsed as \&state()
     my $gen = eval '{ try { \state } }';
-    $gen //= sub { \(my $x) };
+    $gen //= sub { my $x; \$x };
 
     my $svar_ref = $gen();               # $svar == 0
     try { $$svar_ref++; $$svar_ref++ };  # $svar == 2
@@ -143,4 +142,17 @@ plan 12;
 
     is(step().perl, "(43, 41)", "chained state (#1)", :todo<bug>);
     is(step().perl, "(44, 40)", "chained state (#2)", :todo<bug>);
+}
+
+# state in cloned closures
+{
+    for <first second> {
+        my $code = {
+            state $foo = 42;
+            ++$foo;
+        };
+
+        is $code(), 43, "state was initialized properly ($_ time)";
+        is $code(), 44, "state keeps its value across calls ($_ time)";
+    }
 }

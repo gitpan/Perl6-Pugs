@@ -1,10 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 39;
-force_todo <3 4 5 6 7 8 9 16 17 18 19 26 27 30 31 32 33 35>;
+force_todo <3 4 5 6 7 8 9 16 17 26 27>;
 
 # use_ok( 'Perl6::Container::Array' );
 use Perl6::Container::Array; 
@@ -111,7 +109,7 @@ use Perl6::Value::List;
   my $a1 = Perl6::Container::Array.from_list( $iter );
   $a1 = $a1.to_list.Perl6::Value::List::pairs;
   my $p = $a1.shift;
-  is( ~($p.ref),  'Pair',     'pair' );
+  is( ~($p.WHAT),  'Pair',     'pair' );
   is( $p.perl, '(0 => 4)', 'pair' );
 }
 

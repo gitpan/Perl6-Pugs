@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
 plan 8;
+
+# L<S02/"Built-In Data Types" /Perl 6 should by default make standard IEEE floating point concepts visible/>
 
 {
     my $x = Inf;

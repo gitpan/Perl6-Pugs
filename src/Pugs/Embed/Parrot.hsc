@@ -13,6 +13,7 @@ import System.IO.Unsafe
 import Data.Maybe
 import Control.Monad
 import Pugs.Compat (getEnv)
+import Pugs.Internals (encodeUTF8)
 
 findExecutable' :: String -> IO (Maybe FilePath)
 findExecutable' cmd = do
@@ -99,10 +100,11 @@ evalPGE path match rule subrules = do
                     | otherwise   = errMsg
             fail $ "*** Running external 'parrot' failed:\n" ++ msg
     where
-    escape "" = ""
-    escape ('\\':xs) = "\\\\" ++ escape xs
-    escape ('\n':xs) = "\\n" ++ escape xs
-    escape (x:xs) = (x:escape xs)
+    escape = escape . encodeUTF8
+    _escape "" = ""
+    _escape ('\\':xs) = "\\\\" ++ _escape xs
+    _escape ('\n':xs) = "\\n" ++ _escape xs
+    _escape (x:xs) = (x:_escape xs)
 
 initPGE :: FilePath -> IO ParrotInterp
 initPGE path = do
@@ -133,10 +135,7 @@ _DoCompile = Nothing
 {-# OPTIONS_GHC -#include "parrot/extend.h" #-}
 {-# INCLUDE "../../pge/parrotembed.c" #-}
 
-#include <parrot/packfile.h>
-#include <parrot/interpreter.h>
-#include <parrot/register.h>
-#include <parrot/string_funcs.h>
+#include <parrot/parrot.h>
 
 module Pugs.Embed.Parrot where
 
@@ -214,7 +213,7 @@ initParrot = do
         interp <- readIORef _ParrotInterp
         if interp == nullPtr then return () else do
         writeIORef _ParrotInterp nullPtr
-        parrot_exit 0
+        parrot_exit interp 0
 
 makeAscii :: String -> ParrotInterp -> IO ParrotString
 makeAscii str interp = withCString str (const_string interp)
@@ -346,7 +345,7 @@ foreign import ccall "const_string"
 foreign import ccall "string_make"
     string_make :: ParrotInterp -> CString -> Int -> CString -> CInt -> IO ParrotString
 
-foreign import ccall "Parrot_find_global"
+foreign import ccall "Pugs_get_base_global"
     parrot_find_global :: ParrotInterp -> ParrotString -> ParrotString -> IO ParrotPMC
 
 foreign import ccall "Parrot_get_strreg"
@@ -356,7 +355,7 @@ foreign import ccall "Parrot_set_debug"
     parrot_set_debug :: ParrotInterp -> CInt -> IO ()
 
 foreign import ccall "Parrot_exit"
-    parrot_exit :: CInt -> IO ()
+    parrot_exit :: ParrotInterp -> CInt -> IO ()
 
 foreign import ccall "string_to_cstring"
     parrot_string_to_cstring :: ParrotInterp -> ParrotString -> IO CString

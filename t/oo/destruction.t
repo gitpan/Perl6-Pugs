@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 6;
@@ -26,7 +25,7 @@ class Child is Parent
 }
 
 my $foo = Foo.new();
-is( $foo.ref,      'Foo', 'basic instantiation of declared class' );
+is( $foo.WHAT,      'Foo', 'basic instantiation of declared class' );
 ok( ! $in_destructor,    'destructor should not fire while object is active' );
 
 # -- erratic behaviour; fail+todo for now

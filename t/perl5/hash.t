@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan(1);
@@ -9,9 +8,6 @@ unless eval 'eval("1", :lang<perl5>)' {
     skip_rest;
     exit;
 }
-
-skip_rest; # XXX - for release
-exit;
 
 die unless
 eval(q/
@@ -55,9 +51,9 @@ sub push {
 1;
 /, :lang<perl5>);
 
-my $p5ha = eval("My::Hash", :lang<perl5>);
+my $p5ha = eval('sub { My::Hash->new($_[0]) }', :lang<perl5>);
 my %hash = (5 => 'a', 6 => 'b', 7 => 'c', 8 => 'd');
-my $p5hash = $p5ha.new(\%hash);
+my $p5hash = $p5ha(\%hash);
 
 my $rethash = $p5hash.hash;
 my @keys = %hash.keys.sort;

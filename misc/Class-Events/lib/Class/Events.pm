@@ -1,4 +1,4 @@
-use v6;
+use v6-alpha;
 
 # perl 5's Class::Publisher redone for all the Perl 6 OOP goodness
 
@@ -27,11 +27,11 @@ role Class::Events::Publisher {
     }
     
     method notify (*@args) {
-        .notify(Class::Events::Event.new(*@args));
+        .notify(Class::Events::Event.new([,] @args));
     }
 
     method mk_notifications (*@subscriptions of Class::Events::Subscription) {
-        map { Class::Events::Notification.new(:subscriber($_), :event($event)) }, *@subscriptions;
+        map { Class::Events::Notification.new(:subscriber($_), :event($event)) }, [,] @subscriptions;
     }
     
     method get_subscriptions (Class::Events::Publisher $publisher, Class::Publisher::Event $event) {
@@ -39,7 +39,7 @@ role Class::Events::Publisher {
             take $.subscriptions.members;
 
             # FIXME this is bullshit - i ought to read the details
-            #for $class ($self.meta.superclasses){
+            #for $class ($self.HOW.superclasses){
             #    take $class.subscriptions;
             #}
         }
@@ -64,7 +64,7 @@ class Class::Events::Subscription {
     }
 
     method delete {
-        $.publisher.remove_subscription($?SELF);
+        $.publisher.remove_subscription(self);
     }
 }
 
@@ -79,7 +79,7 @@ class Class::Events::Subscription::Named {
 
         # when you say add_subscription("foo", ...) then "foo" is the name of the subscription
         method add_subscription (String $name, $subscriber = $?CALLER::?SELF) {
-            my $subscription = Class::Events::Subscription::Named.new(:name($name), :subscriber($subscriber), :publisher($?SELF));
+            my $subscription = Class::Events::Subscription::Named.new(:name($name), :subscriber($subscriber), :publisher(self));
             ( %.subscriptions<$name> ||= Set.new ).insert($subscription);
             $subscriber.note_subscription($subscription);
         }
@@ -127,7 +127,7 @@ class Class::Events::Notification {
     has Class::Events::Event $.event;
 
     method dispatch {
-        dispatch($?SELF, $.subscription.subscriber);
+        dispatch(self, $.subscription.subscriber);
     }
     
     method dispatch (Code & Class::Events::Subscriber $subscriber) {

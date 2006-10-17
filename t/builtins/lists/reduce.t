@@ -1,7 +1,6 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
 use Test;
-use v6;
 
 =head1 DESCRIPTION
 
@@ -13,6 +12,8 @@ L<"http://groups.google.com/groups?selm=420DB295.3000902%40conway.org">
 =cut
 
 plan 11;
+
+# L<S29/List/=item reduce>
 
 {
   my @array = <5 -3 7 0 1 -9>;
@@ -42,7 +43,7 @@ plan 11;
   my $hash = {a => {b => {c => 42}}};
   my @reftypes;
   sub foo (Hash $hash, String $key) {
-    push @reftypes, $hash.ref;
+    push @reftypes, $hash.WHAT;
     $hash.{$key};
   }
   is((reduce(&foo, $hash, <a b c>)), 42, 'reduce(&foo) (foo ~~ .{}) works three levels deep');

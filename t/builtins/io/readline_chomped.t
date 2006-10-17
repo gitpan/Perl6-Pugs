@@ -1,7 +1,7 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+
+# L<S16/"Filehandles, files, and directories"/"open">
 
 plan 3;
 
@@ -21,4 +21,5 @@ eval '
   $line = =$fh;
 ';
 
-is($line, "#!/usr/bin/pugs", "first line was chomped");
+is($line, "use v6-alpha;", "first line was chomped", :todo<feature>,
+    :depends<'is chomped'>);

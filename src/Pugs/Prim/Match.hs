@@ -1,7 +1,7 @@
-{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fallow-overlapping-instances #-}
 
 module Pugs.Prim.Match (
-    op2Match, rxSplit, rxSplit_n, matchFromMR, pkgParents
+    op2Match, rxSplit, rxSplit_n, matchFromMR, pkgParents, pkgParentClasses
 ) where
 import Pugs.Internals
 import Pugs.Embed
@@ -9,7 +9,6 @@ import Pugs.AST
 import Pugs.Types
 import Pugs.Config
 import Pugs.Prim.Code
-import qualified RRegex.PCRE as PCRE
 import qualified Data.Map as Map
 import qualified Data.Array as Array
 
@@ -31,20 +30,27 @@ ruleWithAdverbs _ = fail "PCRE regexes can't be compiled to PGE regexes"
 
 doMatch :: String -> VRule -> Eval VMatch
 doMatch cs rule@MkRulePGE{ rxRule = ruleStr } = do
-    let pwd1 = getConfig "installarchlib" ++ "/CORE/pugs/pge"
-        pwd2 = getConfig "sourcedir" ++ "/src/pge"
+    let pwd1 = getConfig "installsitelib" ++ "/auto/pugs/perl5/lib"
+        pwd2 = getConfig "sourcedir" ++ "/perl5/Pugs-Compiler-Rule/lib"
     hasSrc <- liftIO $ doesDirectoryExist pwd2
     let pwd = if hasSrc then pwd2 else pwd1
     glob    <- askGlobal
-    let syms = [ (name, tvar) | (('<':'*':name), [(_, tvar)]) <- padToList glob ]
+    let syms = [ (cast $ v_name var, tvar)
+               | (var, [(_, tvar)]) <- padToList glob
+               , SRegex == v_sigil var
+               , isGlobalVar var
+               ]
     subrules <- forM syms $ \(name, tvar) -> do
         ref         <- liftSTM $ readTVar tvar
         VRule rule  <- fromVal =<< readRef ref
         text        <- ruleWithAdverbs rule
         return (name, text)
     text <- ruleWithAdverbs rule
-    pge  <- liftIO $ evalPGE pwd (encodeUTF8 cs) (encodeUTF8 text) subrules
-            `catch` (\e -> return $ ioeGetErrorString e)
+    rv   <- liftIO $ fmap (fmap (fmap toUpper)) (getEnv "PUGS_REGEX_ENGINE")
+    let ruleEngine | Just "PGE" <- rv   = evalPGE
+                   | otherwise          = evalPCR
+    pge  <- liftIO $ ruleEngine pwd cs text subrules
+            `catchIO` (\e -> return $ show e)
     rv  <- tryIO Nothing $ fmap Just (readIO $ decodeUTF8 pge)
     let matchToVal PGE_Fail = VMatch mkMatchFail
         matchToVal (PGE_String str) = VStr str
@@ -58,11 +64,11 @@ doMatch cs rule@MkRulePGE{ rxRule = ruleStr } = do
     case rv of
         Just m  -> fromVal (matchToVal m)
         Nothing -> do
-            liftIO $ putStrLn ("*** Cannot parse PGE: " ++ ruleStr ++ "\n*** Error: " ++ pge)
+            liftIO $ putStrLn ("*** Cannot parse regex: " ++ ruleStr ++ "\n*** Error: " ++ pge)
             return mkMatchFail
 
 doMatch csChars MkRulePCRE{ rxRegex = re } = do
-    rv <- liftIO $ PCRE.execute re csBytes 0
+    rv <- liftIO $ matchRegexWithPCRE re csBytes 0
     if isNothing rv then return mkMatchFail else do
     let ((fromBytes, lenBytes):subs) = Array.elems (fromJust rv)
         substr str from len = take len (drop from str)
@@ -100,13 +106,14 @@ classType = mkType "Class"
 -- XXX - need to generalise this
 op2Match :: Val -> Val -> Eval Val
 
-op2Match _ y@(VCode _) = do
+op2Match x y@(VCode _) = do
     (arity :: Int) <- fromVal =<< op1CodeArity y
     res <- fromVal =<< case arity of
-        0 -> evalExp $ App (Val y) Nothing []
+        0 -> do
+            writeVar (cast "$*_") x
+            evalExp $ App (Val y) Nothing []
         1 -> do
-             topic <- readVar "$_"
-             evalExp $ App (Val y) Nothing [Val topic]
+            evalExp $ App (Val y) Nothing [Val x]
         _ -> fail ("Unexpected arity in smart match: " ++ (show arity))
     return $ VBool $ res
 
@@ -128,7 +135,20 @@ op2Match x y@(VObject MkObject{ objType = cls }) | cls == classType = do
     name    <- fromVal =<< fetch "name"
     op2Match x (VType (mkType name))
 
-op2Match x (VSubst (rx, subst)) | rxGlobal rx = do
+-- $x ~~ tr/x/y/ ==> $x = ~$x.trans('x' => 'y')
+op2Match x (VSubst (MkTrans from to)) = do
+    str <- fromVal x
+    evalExp $ Syn "="
+        [ Val x
+        , App (_Var "&trans") (Just (Val (VStr str)))
+            [ App (_Var "&infix:=>") Nothing
+                [ Val (VStr from)
+                , Val (VStr to)
+                ]
+            ]
+        ]
+
+op2Match x (VSubst (MkSubst rx subst)) | rxGlobal rx = do
     str         <- fromVal x
     (str', cnt) <- doReplace str 0
     if cnt == 0 then return (VBool False) else do
@@ -141,7 +161,7 @@ op2Match x (VSubst (rx, subst)) | rxGlobal rx = do
         match <- str `doMatch` rx
         if not (matchOk match) then return (str, ok) else do
         glob    <- askGlobal
-        matchSV <- findSymRef "$/" glob
+        matchSV <- findSymRef (cast "$/") glob
         writeRef matchSV (VMatch match)
         str'    <- fromVal =<< evalExp subst
         -- XXX - on zero-width match, advance the cursor and, if can't,
@@ -154,13 +174,13 @@ op2Match x (VSubst (rx, subst)) | rxGlobal rx = do
                 (after', ok') <- doReplace (genericDrop to str) (ok + 1)
                 return (concat [genericTake from str, str', after'], ok')
 
-op2Match x (VSubst (rx, subst)) = do
+op2Match x (VSubst (MkSubst rx subst)) = do
     str     <- fromVal x
     ref     <- fromVal x
     match   <- str `doMatch` rx
     if not (matchOk match) then return (VBool False) else do
     glob    <- askGlobal
-    matchSV <- findSymRef "$/" glob
+    matchSV <- findSymRef (cast "$/") glob
     writeRef matchSV (VMatch match)
     str'    <- fromVal =<< evalExp subst
     writeRef ref . VStr $ concat
@@ -174,13 +194,16 @@ op2Match x (VRule rx) | rxGlobal rx = do
     str     <- fromVal x
     rv      <- matchOnce str
     cxt     <- asks envContext
-    if (not $ isSlurpyCxt cxt)
-        then return (VInt $ genericLength rv)
-        else if rxStringify rx
-            then do
-                strs <- mapM fromVal rv
-                return (VList $ map VStr strs)
-            else return (VList rv)
+    case rxStringify rx of
+        True -> do
+            strs <- mapM fromVal rv
+            return $ case strs of
+                [str]   -> VStr str
+                _       -> VList $ map VStr strs
+        _ | isSlurpyCxt cxt -> do
+            return (VList rv)
+        _ -> do
+            return (VInt $ genericLength rv)
     where
     hasSubpatterns = case rx of
         MkRulePGE{}             -> True -- XXX bogus - use <p6rule> to parse itself
@@ -190,7 +213,7 @@ op2Match x (VRule rx) | rxGlobal rx = do
         match <- str `doMatch` rx
         if not (matchOk match) then return [] else do
         let ret x = return $ if hasSubpatterns
-                        then (matchSubPos match) ++ x
+                        then [ m | m@(VMatch MkMatch{ matchOk = True }) <- matchSubPos match ] ++ x
                         else (VMatch match):x
         case (matchTo match, matchFrom match) of
             (0, 0) -> if null str then ret [] else do
@@ -204,7 +227,7 @@ op2Match x (VRule rx) = do
     str     <- fromVal x
     match   <- str `doMatch` rx
     glob    <- askGlobal
-    matchSV <- findSymRef "$/" glob
+    matchSV <- findSymRef (cast "$/") glob
     writeRef matchSV (VMatch match)
     ifListContext
         (return $ VList (matchSubPos match))
@@ -274,11 +297,22 @@ rxSplit_n rx str n = do
 
 pkgParents :: VStr -> Eval [VStr]
 pkgParents pkg = do
-    ref     <- readVar (':':'*':pkg)
+    ref     <- readVar $ cast (':':'*':pkg)
     if ref == undef then return [] else do
     meta    <- readRef =<< fromVal ref
     fetch   <- doHash meta hash_fetchVal
-    attrs   <- fromVal =<< fetch "traits"
-    pkgs    <- mapM pkgParents attrs
+    attrs   <- fromVal =<< fetch "is"
+    attrs'  <- fromVal =<< fetch "does" -- XXX wrong
+    pkgs    <- mapM pkgParents (attrs ++ attrs')
     return $ nub (pkg:concat pkgs)
 
+-- XXX - copy and paste code; merge with above!
+pkgParentClasses :: VStr -> Eval [VStr]
+pkgParentClasses pkg = do
+    ref     <- readVar $ cast (':':'*':pkg)
+    if ref == undef then return [] else do
+    meta    <- readRef =<< fromVal ref
+    fetch   <- doHash meta hash_fetchVal
+    attrs   <- fromVal =<< fetch "is"
+    pkgs    <- mapM pkgParentClasses attrs
+    return $ nub (pkg:concat pkgs)

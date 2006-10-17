@@ -1,5 +1,5 @@
+use v6-alpha;
 module Benchmark-0.1;
-use v6;
 
 sub timeit ($count, $code is copy) is export {
     $code = eval "sub \{ $code \}" unless $code.isa("Code");
@@ -38,8 +38,7 @@ Benchmark - Benchmark running time of Perl 6 code
 
 =head1 SYNOPSIS
 
-    #!/usr/bin/pugs
-    use v6;
+    use v6-alpha;
     use Benchmark;
 
     @t = timeit($count, 'code');

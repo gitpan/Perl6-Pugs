@@ -1,12 +1,9 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 27;
 
 use Set::Infinite; pass "(dummy instead of broken use_ok)";
-use Set::Infinite;   # XXX should not need this
 use Recurrence;
 
 my $universe_recurr = Recurrence.new( 
@@ -43,7 +40,7 @@ is( $u.start_is_closed, Bool::True, "start_is_closed" );
 is( $u.end_is_closed,   Bool::True, "end_is_closed" );
 
 is( $u.next( 10 ), 11, 'next' );
-is( try { $u.previous( 10 ) }, 9, 'previous', :todo<bug> );
+is( try { $u.previous( 10 ) }, 9, 'previous');
 
 my $even_recurr = Recurrence.new( 
     closure_next =>     
@@ -69,14 +66,10 @@ my $even_numbers = Set::Infinite.new(
 );
 
 is( $even_numbers.next( 10 ), 12, 'next even' );
-is( try { $even_numbers.previous( 10 ) }, 8, 'previous even', :todo<bug> );
+is( try { $even_numbers.previous( 10 ) }, 8, 'previous even' );
 
 # Unfortunately, the rest of this also creates infinite loops.
 # So we'll skip the rest. ;(
-
-flunk "intersection() not yet implemented correctly", :todo<bug>;
-skip_rest;
-exit;
 
 {
     # union
@@ -98,7 +91,7 @@ exit;
 
     my $each_3_span = Set::Infinite.new( spans => Span.new( start => 10, end => 30 ) );
     my $each_3_spancode = $each_3_span.intersection( $each_3_rec );
-    is( $each_3_span.ref, 
+    is( $each_3_span.WHAT, 
         'Set::Infinite', 
         'intersection isa Set::Infinite' );
     is( $each_3_span.stringify, 
@@ -115,7 +108,7 @@ exit;
         'each 2 from 20 to 40' );
 
     my $result = $each_3_spancode.union( $even_spancode );
-    is( $result.ref, 
+    is( $result.WHAT, 
         'Set::Infinite', 
         'union isa Set::Infinite' );
     is( $result.stringify, 
@@ -156,7 +149,7 @@ my $odd_numbers = $even_numbers.complement;
 is( $odd_numbers.next( 10 ),    11, 'odd recurrence' );
 is( $odd_numbers.previous( 10 ), 9, 'odd recurrence' );
 
-=for later
+=begin later
 
 {
     # -- intersection with a continuous span
@@ -318,7 +311,7 @@ is( $odd_numbers.previous( 10 ), 9, 'odd recurrence' );
 
 =cut
 
-=for later
+=begin later
 
 is( $span.size, 2, "real size" );
 # is( $span.size( density => 1 ), 3, "integer size" );

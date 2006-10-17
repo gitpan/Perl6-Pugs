@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 77;
@@ -127,7 +126,7 @@ Some deeper tests were already added.
     is(%hash<key>[2], 3, 'got the right value');
     
     {
-        my @array = @{ %hash<key> };
+        my @array = @( %hash<key> );
         is(+@array, 3, 'it should have 3 values in it');    
         is(@array[0], 1, 'got the right value (when I pull the array out)');
         is(@array[1], 2, 'got the right value (when I pull the array out)');    
@@ -141,7 +140,7 @@ Some deeper tests were already added.
 }
 
 { # Hashref survive addition to an array.
-  my %h = qw(a 5 b 6);
+  my %h = qw<a 5 b 6>;
   my $hr = \%h;
   my $a0 = [ \%h ,'extra' ];
   my $a1 = [ \%h ];
@@ -153,7 +152,7 @@ Some deeper tests were already added.
 
 { # nested, declared in one statement
     my $h = { a => [ 1,2,3 ] };
-    is($h<a>.ref, 'Array', "array nested in hashref in one declaration");
+    is($h<a>.WHAT, 'Array', "array nested in hashref in one declaration");
 }
 
 { # structures deeper than 2 levels

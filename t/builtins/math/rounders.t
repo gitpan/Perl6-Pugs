@@ -1,13 +1,15 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
 plan 36;
+
+# L<S29/Num/"=item round">
+# L<S29/Num/"=item floor">
+# L<S29/Num/"=item truncate">
+# L<S29/Num/"=item ceiling">
 
 =pod
 
-Basic tests for the round(), floor(), trunc() and ceil() built-ins
+Basic tests for the round(), floor(), truncate() and ceil() built-ins
 
 =cut
 
@@ -32,7 +34,7 @@ if $?PUGS_BACKEND ne "BACKEND_PUGS" {
 }
 
 for %tests.keys.sort -> $type {
-    my @subtests = *%tests{$type};
+    my @subtests = @(%tests{$type});	# XXX .[] doesn't work yet!
     for @subtests -> $test {
         my $code = "{$type}($test[0])";
             my $res = eval($code);

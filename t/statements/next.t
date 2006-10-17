@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -61,7 +60,6 @@ plan 12;
         $tracker,
         0,
         "tracker is 0 because next before increment",
-        :todo<bug>
     );
 }
 
@@ -79,7 +77,6 @@ plan 12;
         $tracker,
         0,
         "tracker is 0 because next before increment in nested loop",
-        :todo<bug>
     );
 }
 

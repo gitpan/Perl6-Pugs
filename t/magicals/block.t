@@ -1,21 +1,18 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =pod
 
 This tests the &?BLOCK magical from Synoposis 6
 
-L<S06/"The &?BLOCK routine">
-
-L<S06
+L<S06/"The C<&?BLOCK> object">
 
 =cut
 
 plan 1;
 
-# L<S06/"The &?BLOCK routine" /tail-recursion on an anonymous block:$/>
+# L<S06/"The C<&?BLOCK> object" /tail-recursion on an anonymous block:$/>
 my $anonfactorial = -> Int $n { $n < 2 ?? 1 !! $n * &?BLOCK($n-1) };
 
 my $result = $anonfactorial(3);

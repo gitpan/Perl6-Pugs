@@ -1,6 +1,6 @@
-package Newton;
+use v6-alpha;
 
-use v6;
+package Newton;
 
 sub update_guess(Num $guess is rw, Num $target, Code $f, Code $fprime) {
     $guess += ($target - $f($guess)) / $fprime($guess);
@@ -14,10 +14,10 @@ sub approxfprime(Code $f, Num $x) {
 sub newton(
     Num  $target,
     Code $f,
-    Code +$fprime         = &approxfprime.assuming( f => $f ),
-    Num  +$epsilon        = 0.0005,
-    Num  +$max_iterations = 500,
-    Bool +$verbose        = 0
+    Code :$fprime         = &approxfprime.assuming( f => $f ),
+    Num  :$epsilon        = 0.0005,
+    Num  :$max_iterations = 500,
+    Bool :$verbose        = 0
 ) returns Num is export {
     my Num $guess  = $target / 2;
     my Int $count  = 1;
@@ -41,8 +41,7 @@ Newton - performs one dimensional Newton's method
 
 =head1 SYNOPSIS
 
-    #!/usr/bin/pugs
-    use v6;
+    use v6-alpha;
 
     use Newton;
 

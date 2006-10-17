@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 10;
@@ -13,7 +11,7 @@ my $fail_test = Test::Builder::Test::Fail.new(
         description => 'first test description'
         );
 
-is( $fail_test.ref, ::Test::Builder::Test::Fail,
+is( $fail_test.WHAT, ::Test::Builder::Test::Fail,
     'new() should return a Test::Builder::Test::Fail instance' );
 
 is( $fail_test.number(), 1, 'number() should return the provided test number' );

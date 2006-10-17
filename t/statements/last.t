@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -14,9 +13,17 @@ last <label> in nested loops
 
 =cut
 
-plan 7;
+plan 8;
 
 # test for loops with last
+
+{
+    is(
+        eval('sub mylast { last; }; my $tracker = 0; for 1 .. 5 { $tracker = $_; mylast(); } $tracker'),
+        1,
+        "tracker is 1 because mylast exits loop";
+    );
+}
 
 {
     my $tracker = 0;
@@ -55,11 +62,11 @@ plan 7;
 }
 
 {
-    eval_is(
-        'my $var=0; DONE: for (1..2) { last DONE; $var++;} $var',
+    is(
+        eval('my $var=0; DONE: for (1..2) { last DONE; $var++;} $var'),
         0,
         "var is 0 because last before increment",
-        :todo(1)
+        :todo<bug>
     );
 }
 
@@ -75,8 +82,8 @@ plan 7;
 }
 
 {
-    eval_is(
-        'my $var=0; OUT: for (1..2) { IN: for (1..2) { last OUT } $var++;} $var',
+    is(
+        eval('my $var=0; OUT: for (1..2) { IN: for (1..2) { last OUT } $var++;} $var'),
         0,
         "var is 0 because last before increment in nested loop",
         :todo(1)

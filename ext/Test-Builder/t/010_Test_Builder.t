@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 5;
@@ -10,7 +8,7 @@ use Test::Builder::TestPlan;
 
 my $ok;
 my $Test = Test::Builder.new();
-is( $Test.ref, ::Test::Builder, 'new() should return a Test::Builder object' );
+is( $Test.WHAT, ::Test::Builder, 'new() should return a Test::Builder object' );
 
 {
     my $Test2 = Test::Builder.new();
@@ -19,14 +17,12 @@ is( $Test.ref, ::Test::Builder, 'new() should return a Test::Builder object' );
 
 my $custom_plan = Test::Builder::TestPlan.new();
 my $Test3       = Test::Builder.create( plan => $custom_plan );
-isnt( $Test3.id, $Test.id, 'create() should return non-singleton object' );
-is( $Test3.testplan.id, $custom_plan.id, '... allowing plan setting' );
+isnt( $Test3.WHICH, $Test.WHICH, 'create() should return non-singleton object' );
+is( $Test3.testplan.WHICH, $custom_plan.WHICH, '... allowing plan setting' );
 
 # now launch an external process to test DESTROY() the smart way
 
-my $destroy_test = '#!/usr/bin/pugs
-
-use Test::Builder;
+my $destroy_test = 'use Test::Builder;
 use Test::Builder::TestPlan;
 
 class Test::Builder::CustomPlan is Test::Builder::NullPlan
@@ -40,10 +36,10 @@ class Test::Builder::CustomPlan is Test::Builder::NullPlan
 my $custom_plan = Test::Builder::CustomPlan.new();
 my $Test        = Test::Builder.new( plan => $custom_plan );';
 
-my $out = open('destroy_test.p6', :w);
+my $out = open('destroy_test.pl', :w);
 unless $out
 {
-    diag( "Could not write destroy_test.p6" );
+    diag( "Could not write destroy_test.pl" );
     exit;
 }
 
@@ -52,7 +48,7 @@ $out.close;
 
 my ($pugs,$redir) = ( '../../pugs', '>' );
 
-if($?OS eq any <MSWin32 mingw cygwin>)
+if $?OS eq any <MSWin32 mingw cygwin>
 {
     $pugs = '..\\..\\pugs.exe';
     $pugs = 'pugs.exe' if -e 'pugs.exe';
@@ -74,12 +70,12 @@ sub run_pugs (Str $filename)
     return $res;
 }
   
-my $output       = run_pugs( 'destroy_test.p6' );
+my $output       = run_pugs( 'destroy_test.pl' );
 
 is( $output, "custom plan output\n",
     'DESTROY() should write plan footer, if it exists' );
 
 END
 {
-    unlink 'destroy_test.p6' unless %*ENV<TEST_DEBUG_FILES>;
+    unlink 'destroy_test.pl' unless %*ENV<TEST_DEBUG_FILES>;
 }

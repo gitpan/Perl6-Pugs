@@ -12,25 +12,34 @@ sub debug($);
 our $compress = sub { return };
 
 GetOptions(
-  "smokeserv=s" =>
-    \(my $smokeserv = "http://m19s28.vlinux.de/cgi-bin/pugs-smokeserv.pl"),
+  "smokeserv=s" => \(my $smokeserver = ""),
   "help"        => \&usage,
   "compress|c!" => \(my $compression_wanted = 1),
   "version"     => sub { print "smokeserv-client.pl v" . VERSION . "\n"; exit },
 ) or usage();
-@ARGV == 1 or usage();
+@ARGV >= 1 or usage();
 
 debug "smokeserv-client v" . VERSION . " started.\n";
+
+my @default_smokeserv = ("http://m19s28.vlinux.de/cgi-bin/pugs-smokeserv.pl");
+my @smokeserv = $smokeserver ? ($smokeserver) : @default_smokeserv;
 
 setup_compression() if $compression_wanted;
 
 my %request = (upload => 1, version => VERSION, smokes => []);
 
 {
-  my $file = shift @ARGV;
-  debug "Reading smoke \"$file\" to upload... ";
+  my ($html) = grep { m/\.html?\+?$/ } @ARGV;
+  my ($yml) = grep { m/\.ya?ml\+?$/ } @ARGV;
 
-  open my $fh, "<", $file or die "Couldn't open \"$file\" for reading: $!\n";
+  unless($html and $yml) {
+    debug "**  Make sure you include both .html and .yml!\n";
+    debug "Aborting.\n\n";
+    exit 1;
+  }
+  debug "Reading smoke \"$html\" to upload... ";
+
+  open my $fh, "<", $html or die "Couldn't open \"$html\" for reading: $!\n";
   local $/;
   my $smoke = <$fh>;
 
@@ -39,11 +48,28 @@ my %request = (upload => 1, version => VERSION, smokes => []);
     exit 1;
   }
 
+  # Check the configuration
+  my $config_re = qr/(Summary of pugs configuration:.*INC:)/s;
+  $smoke =~ $config_re;
+  my $config = $1;
+
   $request{smoke} = $compress->($smoke) || $smoke;
-  debug "ok.\n";
+
+  debug "html ok.\n";
+
+  if($yml and open $fh, '<', $yml) {
+    $smoke = <$fh>;
+
+    unless(($smoke =~ $config_re) and $1 eq $config) {
+      debug "The .yml and .html files don't seem to correspond.  Aborting.\n";
+      exit 1;
+    }
+    
+    $request{yml} = $compress->($smoke) || $smoke;
+  }
 }
 
-{
+foreach my $smokeserv (@smokeserv) {
   debug "Sending data to smokeserver \"$smokeserv\"... ";
   my $ua = LWP::UserAgent->new;
   $ua->agent("pugs-smokeserv-client/" . VERSION);
@@ -51,7 +77,7 @@ my %request = (upload => 1, version => VERSION, smokes => []);
 
   my $resp = $ua->post($smokeserv => \%request);
   if($resp->is_success) {
-    if($resp->content =~ /^ok/) {
+    if($resp->content =~ /ok$/) {
       debug "success!\n";
       exit 0;
     } else {
@@ -65,7 +91,7 @@ my %request = (upload => 1, version => VERSION, smokes => []);
 }
 
 sub usage { print STDERR <<USAGE; exit }
-Usage: $0 [options] -- smoke1.html smoke2.html ...
+Usage: $0 [options] -- smoke1.html smoke1.yml
 
 Available options:
   --smokeserv=http://path/to/smokeserv.pl

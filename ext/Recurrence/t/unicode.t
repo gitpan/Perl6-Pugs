@@ -1,12 +1,9 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 10;
 
 use Recurrence; pass "(dummy instead of broken use_ok)";
-use Recurrence;   # XXX should not need this
 
 my $universe = Recurrence.new( 
     closure_next =>     sub ( $x is copy ) { return -Inf if $_ == -Inf; Inf if $_ ==  Inf; return $x + 1 },

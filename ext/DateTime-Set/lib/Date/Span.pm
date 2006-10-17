@@ -1,11 +1,11 @@
-use v6;
+use v6-alpha;
 
 use Span;
 
 class Date::Span-0.01
     does Span;
 
-=for TODO
+=begin TODO
 
     * change returned 'Inf' to 'Date::Infinite'
 

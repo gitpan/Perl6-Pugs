@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =pod
@@ -116,9 +115,9 @@ my @maps = (
   "«",    171,
 
   # Special chars
-  "\000", 0,
-  "\001", 1,
-  "\003", 3,
+  "\o00", 0,
+  "\o01", 1,
+  "\o03", 3,
 );
 
 plan 32+@maps;

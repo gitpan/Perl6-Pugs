@@ -1,7 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+
+# L<S06/"Parameter traits"/"=item is readonly">
+# should be moved with other subroutine tests?
 
 plan 9;
 

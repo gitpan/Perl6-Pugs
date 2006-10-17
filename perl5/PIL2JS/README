@@ -24,7 +24,7 @@ Alternatively, you can use the compiler directly:
 
   $ cd perl5/PIL2JS
   $ ./pil2js.pl -o Prelude.js lib6/Prelude/JS.pm  # Precompile the Prelude
-  $ ./pil2js.pl -o output.js input.p6             # Compile the actual prog
+  $ ./pil2js.pl -o output.js input.pl             # Compile the actual prog
   $ ./pil2js.pl \                                 # Generate a .html
       --link=html \
       -o output.html \
@@ -254,7 +254,7 @@ The last argument is always the return continuation.
 =head3 Flattening (C<< &prefix:<*> >>)
 
   # Perl 6
-  foo *@a, $x, *@b;
+  foo [,] @a, $x, @b;
 
   # PIL
   foo(&prefix:<*>(@a), $x, &prefix:<*>(@b));
@@ -586,7 +586,7 @@ to give better context information.
 
 =item *
 
-C<method foo (Bar $self:)> should create a C<&Bar::foo>, not a C<&main::foo>.
+C<method foo (Bar $self:)> should create a C<&Bar::foo>, not a C<&Main::foo>.
 Required to implement hash and array autovification elegantly. (Partly a PIL1
 bug.)
 

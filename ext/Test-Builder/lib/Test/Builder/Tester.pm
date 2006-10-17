@@ -1,6 +1,6 @@
-module Test::Builder::Tester-0.2.1;
+use v6-alpha;
 
-use v6;
+module Test::Builder::Tester-0.2.1;
 
 use Test::Builder;
 use Test::Builder::Output;

@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fno-full-laziness -fno-cse -cpp #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-full-laziness -fno-cse -cpp -fallow-overlapping-instances #-}
 
 
 {-|
@@ -16,7 +16,7 @@ module Pugs.Run (
     runAST, runComp,
     getLibs,
     -- mutable global storage
-    _BypassPreludePC, _GlobalFinalizer,
+    _GlobalFinalizer,
 ) where
 import Pugs.Run.Args
 import Pugs.Run.Perl5 ()
@@ -25,11 +25,9 @@ import Pugs.Config
 import Pugs.AST
 import Pugs.Types
 import Pugs.Eval
-import Pugs.Prim
 import Pugs.Prim.Eval
 import Pugs.Embed
 import Pugs.Prelude 
-import Data.IORef
 import qualified Data.Map as Map
 import qualified Data.ByteString as Str
 import DrIFT.YAML
@@ -95,12 +93,14 @@ prepareEnv name args = do
     gid     <- getRealGroupID
     gidSV   <- newScalar (VInt $ toInteger gid)
     egid    <- getEffectiveGroupID
+    failSV  <- newScalar (VBool False)
     egidSV  <- newScalar (VInt $ toInteger egid)
     execSV  <- newScalar (VStr exec)
     progSV  <- newScalar (VStr name)
     checkAV <- newArray []
     initAV  <- newArray []
     endAV   <- newArray []
+    takeAV  <- newArray []
     matchAV <- newScalar (VMatch mkMatchFail)
     incAV   <- newArray (map VStr libs)
     incHV   <- newHash Map.empty
@@ -112,81 +112,79 @@ prepareEnv name args = do
     errSV   <- newScalar (VStr "")
     defSV   <- newScalar undef
     autoSV  <- newScalar undef
-    classes <- initClassObjects (-1) [] initTree
+    classes <- initClassObjects (MkObjectId $ -1) [] initTree
 #if defined(PUGS_HAVE_HSPLUGINS)
     hspluginsSV <- newScalar (VInt 1)
 #else
     hspluginsSV <- newScalar (VInt 0)
 #endif
-    let subExit = \x -> case x of
-            [x] -> op1Exit x     -- needs refactoring (out of Prim)
-            _   -> op1Exit undef
+    let gen = genSym . cast
     env <- emptyEnv name $
-        [ genSym "@*ARGS"       $ hideInSafemode $ MkRef argsAV
-        , genSym "@*INC"        $ hideInSafemode $ MkRef incAV
-        , genSym "%*INC"        $ hideInSafemode $ MkRef incHV
-        , genSym "$*PUGS_HAS_HSPLUGINS" $ hideInSafemode $ MkRef hspluginsSV
-        , genSym "$*EXECUTABLE_NAME"    $ hideInSafemode $ MkRef execSV
-        , genSym "$*PROGRAM_NAME"       $ hideInSafemode $ MkRef progSV
-        , genSym "$*PID"        $ hideInSafemode $ MkRef pidSV
+        [ gen "@*ARGS"       $ hideInSafemode $ MkRef argsAV
+        , gen "@*INC"        $ hideInSafemode $ MkRef incAV
+        , gen "%*INC"        $ hideInSafemode $ MkRef incHV
+        , gen "$*PUGS_HAS_HSPLUGINS" $ hideInSafemode $ MkRef hspluginsSV
+        , gen "$*EXECUTABLE_NAME"    $ hideInSafemode $ MkRef execSV
+        , gen "$*PROGRAM_NAME"       $ hideInSafemode $ MkRef progSV
+        , gen "$*PID"        $ hideInSafemode $ MkRef pidSV
         -- XXX these four need a proper `set' magic
-        , genSym "$*UID"        $ hideInSafemode $ MkRef uidSV
-        , genSym "$*EUID"       $ hideInSafemode $ MkRef euidSV
-        , genSym "$*GID"        $ hideInSafemode $ MkRef gidSV
-        , genSym "$*EGID"       $ hideInSafemode $ MkRef egidSV
-        , genSym "@*CHECK"      $ MkRef checkAV
-        , genSym "@*INIT"       $ MkRef initAV
-        , genSym "@*END"        $ MkRef endAV
-        , genSym "$*IN"         $ hideInSafemode $ MkRef inGV
-        , genSym "$*OUT"        $ hideInSafemode $ MkRef outGV
-        , genSym "$*ERR"        $ hideInSafemode $ MkRef errGV
-        , genSym "$*ARGS"       $ hideInSafemode $ MkRef argsGV
-        , genSym "$!"           $ MkRef errSV
-        , genSym "$/"           $ MkRef matchAV
-        , genSym "%*ENV"        $ hideInSafemode $ hashRef MkHashEnv
-        , genSym "$*CWD"        $ hideInSafemode $ scalarRef MkScalarCwd
+        , gen "$*UID"        $ hideInSafemode $ MkRef uidSV
+        , gen "$*EUID"       $ hideInSafemode $ MkRef euidSV
+        , gen "$*GID"        $ hideInSafemode $ MkRef gidSV
+        , gen "$*EGID"       $ hideInSafemode $ MkRef egidSV
+        , gen "$*FAIL_SHOULD_DIE"$ hideInSafemode $ MkRef failSV
+        , gen "@*CHECK"      $ MkRef checkAV
+        , gen "@*INIT"       $ MkRef initAV
+        , gen "@*END"        $ MkRef endAV
+        , gen "$*TAKE"       $ MkRef takeAV
+        , gen "$*IN"         $ hideInSafemode $ MkRef inGV
+        , gen "$*OUT"        $ hideInSafemode $ MkRef outGV
+        , gen "$*ERR"        $ hideInSafemode $ MkRef errGV
+        , gen "$*ARGS"       $ hideInSafemode $ MkRef argsGV
+        , gen "$!"           $ MkRef errSV
+        , gen "$/"           $ MkRef matchAV
+        , gen "%*ENV"        $ hideInSafemode $ hashRef MkHashEnv
+        , gen "$*CWD"        $ hideInSafemode $ scalarRef MkScalarCwd
         -- XXX What would this even do?
-        -- , genSym "%=POD"        (Val . VHash $ emptyHV)
-        , genSym "@=POD"        $ MkRef $ constArray []
-        , genSym "$=POD"        $ MkRef $ constScalar (VStr "")
+        -- , gen "%=POD"        (Val . VHash $ emptyHV)
+        , gen "@=POD"        $ MkRef $ constArray []
+        , gen "$=POD"        $ MkRef $ constScalar (VStr "")
         -- To answer the question "what revision does evalbot run on?"
-        , genSym "$?PUGS_VERSION" $ MkRef $ constScalar (VStr $ getConfig "pugs_version")
+        , gen "$?PUGS_VERSION" $ MkRef $ constScalar (VStr $ getConfig "pugs_version")
+        , gen "$*PUGS_VERSION" $ MkRef $ constScalar (VStr $ getConfig "pugs_version")
         -- If you change the name or contents of $?PUGS_BACKEND, be sure
         -- to update all t/ and perl5/{PIL2JS,PIL-Run} as well.
-        , genSym "$?PUGS_BACKEND" $ MkRef $ constScalar (VStr "BACKEND_PUGS")
-        , genSym "$*OS"         $ hideInSafemode $ MkRef $ constScalar (VStr $ getConfig "osname")
-        , genSym "&?BLOCK_EXIT" $ codeRef $ mkPrim
-            { subName = "&?BLOCK_EXIT"
-            , subBody = Prim subExit
-            }
-        , genSym "%?CONFIG" $ hideInSafemode $ hashRef confHV
-        , genSym "$*_" $ MkRef defSV
-        , genSym "$*AUTOLOAD" $ MkRef autoSV
+        , gen "$?PUGS_BACKEND" $ MkRef $ constScalar (VStr "BACKEND_PUGS")
+        , gen "$?COMPILER"   $ MkRef $ constScalar (VStr "Pugs")
+        , gen "$?VERSION"    $ MkRef $ constScalar (VStr $ getConfig "pugs_versnum")
+        , gen "$*OS"         $ hideInSafemode $ MkRef $ constScalar (VStr $ getConfig "osname")
+        , gen "%?CONFIG" $ hideInSafemode $ hashRef confHV
+        , gen "$*_" $ MkRef defSV
+        , gen "$*AUTOLOAD" $ MkRef autoSV
         ] ++ classes
-    -- defSVcell <- (genSym "$_" . MkRef) =<< newScalar undef
+    -- defSVcell <- (gen "$_" . MkRef) =<< newScalar undef
     let env' = env
     {-
             { envLexical  = defSVcell (envLexical env)
             , envImplicit = Map.singleton "$_" ()
             }
     -}
-    unless safeMode $ do
-        initPerl5 "" (Just . VControl $ ControlEnv env'{ envDebug = Nothing })
-        return ()
+    initPerl5 "" (Just env')
     initPreludePC env'             -- null in first pass
     where
     hideInSafemode x = if safeMode then MkRef $ constScalar undef else x
 
 initClassObjects :: ObjectId -> [Type] -> ClassTree -> IO [STM PadMutator]
-initClassObjects uniq parent (Node typ children) = do
+initClassObjects uniq parent (MkClassTree (Node typ children)) = do
     obj     <- createObjectRaw uniq Nothing (mkType "Class")
-        [ ("name",   castV $ showType typ)
-        , ("traits", castV $ map showType parent)
+        [ ("name",  castV $ showType typ)
+        , ("is",    castV $ map showType parent)
         ]
     objSV   <- newScalar (VObject obj)
-    rest    <- mapM (initClassObjects (pred uniq) [typ]) children
-    let metaSym  = genSym (':':'*':name) $ MkRef objSV
-        codeSym  = genMultiSym ('&':'*':name) $ codeRef typeCode
+    rest    <- forM children $
+        initClassObjects (MkObjectId . pred $ unObjectId uniq) [typ] . MkClassTree
+    let metaSym  = genSym (cast (":*"++name)) $ MkRef objSV
+        codeSym  = genMultiSym (cast ("&*term:"++name)) $ codeRef typeCode
         name     = showType typ
         typeBody = Val . VType . mkType $ name
         Syn "sub" [Val (VCode typeCode)] = typeMacro name typeBody
@@ -206,8 +204,8 @@ getLibs = do
     return $ filter (not . null) (libs lib $ canonicalArgs args)
     where
     -- broken, need real parser
-    inclibs ("-I":dir:rest) = [dir] ++ inclibs(rest)
-    inclibs (_:rest)        = inclibs(rest)
+    inclibs ("-I":dir:rest) = (dir:inclibs rest)
+    inclibs (_:rest)        = inclibs rest
     inclibs ([])            = []
     libs p6lib args = (inclibs args)
               ++ (split (getConfig "path_sep") p6lib)
@@ -220,19 +218,25 @@ getLibs = do
                  ]
               ++ [ "." ]
 
-{-# NOINLINE _BypassPreludePC #-}
-_BypassPreludePC :: IORef Bool
-_BypassPreludePC = unsafePerformIO $ newIORef False
+bypassPreludePC :: IO Bool
+bypassPreludePC = do
+    compPrelude <- getEnv "PUGS_COMPILE_PRELUDE"
+    return $! case compPrelude of
+        Just "0"    -> True
+        _           -> False
 
 initPreludePC :: Env -> IO Env
 initPreludePC env = do
-    bypass <- readIORef _BypassPreludePC
+    bypass <- bypassPreludePC
     if bypass then return env else do
         let dispProgress = (posName . envPos $ env) == "<interactive>"
         when dispProgress $ putStr "Loading Prelude... "
-        catch loadPreludePC $ \e -> do
-            when (isUserError e && not (null (ioeGetErrorString e))) $ do
-                hPrint stderr e
+        catchIO loadPreludePC $ \e -> do
+            case e of
+                IOException ioe
+                    | isUserError ioe, not . null $ ioeGetErrorString ioe
+                    -> hPrint stderr ioe
+                _ -> return ()
             when dispProgress $ do
                 hPutStr stderr "Reloading Prelude from source..."
             evalPrelude
@@ -246,17 +250,21 @@ initPreludePC env = do
     evalPrelude = runEvalIO env{ envDebug = Nothing } $ opEval style "<prelude>" preludeStr
     loadPreludePC = do  -- XXX: this so wants to reuse stuff from op1EvalP6Y
         -- print "Parsing yaml..."
-        incs <- liftIO $ fmap ("blib6/lib":) getLibs
-        yml  <- liftIO $ getYaml incs "Prelude.pm.yml" Str.readFile
-        when (nodeElem yml == YamlNil) $ fail ""
+        incs     <- liftIO $ fmap ("blib6/lib":) getLibs
+        pathName <- liftIO $ requireInc incs "Prelude.pm.yml" ""
+        yml      <- liftIO $ parseYamlBytes =<< Str.readFile pathName
+        when (n_elem yml == ENil) $ fail ""
         -- FIXME: this detects an error if a bad version number was found,
         -- but not if no number was found at all. Then again, if that
         -- happens surely the fromYAML below will fail?
         case yml of
-            MkYamlNode{ nodeElem=YamlSeq (v:_) }
-                | MkYamlNode{ nodeElem=YamlStr vnum } <- v
+            MkNode{ n_elem=ESeq (v:_) }
+                | MkNode{ n_elem=EStr vnum } <- v
                 , vnum /= (packBuf $ show compUnitVersion) -> do
-                    fail "incompatible version number for compilation unit"
+                    fail $ unlines
+                        [ "Incompatible version number for compilation unit"
+                        , "Consider removing " ++ pathName ++ " and make it again"
+                        ]
             _ -> return ()
         -- print "Parsing done!"
         -- print "Loading yaml..."
@@ -266,9 +274,3 @@ initPreludePC env = do
         liftSTM $ modifyTVar (envGlobal env) (`unionPads` glob)
         runEnv env{ envBody = ast, envDebug = Nothing }
         --     Right Nothing -> fail ""
-        --     x  -> fail $ "Error loading precompiled Prelude: " ++ show x
-    getYaml incs fileName loader = do
-        pathName <- liftIO $ requireInc incs fileName ""
-        parseYamlBytes =<< loader pathName
-        
-

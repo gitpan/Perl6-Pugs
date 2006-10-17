@@ -3,19 +3,18 @@
 PIL2-JSON generic code emitter
 by fglock
 
-This is a non-runnable module - use 'pil2_json_emit_<language>.p6' instead
+This is a non-runnable module - use 'pil2_json_emit_<language>.pl' instead
 
   ../../pugs -CPIL2-JSON -e ' say "hello" ' | \
-    ../../pugs pil2_json_emit_p6.p6
+    ../../pugs pil2_json_emit_p6.pl
 
-  #! /usr/bin/pugs
-  use v6;
+  use v6-alpha;
   &*END () {  }
   (&say("hello"));
 
 =cut
 
-use v6;
+use v6-alpha;
 
 #package PIL2;
 
@@ -79,11 +78,11 @@ sub traverse_ast ( $tree ) {
         say '  ' x $depth, @s 
     }
     
-    if $tree.ref ne 'Array' {
+    if $tree.WHAT ne 'Array' {
         dbg "  # -- unknown: <$tree>";
         return; 
     }
-    if $tree[0].ref eq 'Array' {
+    if $tree[0].WHAT eq 'Array' {
         #dbg "# [";
         my @ret;
         push @ret, traverse_ast( $_ ) for $tree;

@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan(6);
+plan(5);
 
 unless eval 'eval("1", :lang<perl5>)' {
     skip_rest;
@@ -22,29 +21,22 @@ sub identity {
 }
 /, :lang<perl5>);
 
-my $japh = { "Just another $_ hacker" };
-my $japh2 = -> $name { "Just another $name hacker" };
-my $id   = eval("Id", :lang<perl5>);
+my $japh    = { "Just another $_ hacker" };
+my $japh2   = -> $name { "Just another $name hacker" };
+my $id      = eval('sub { Id->new($_[0]) }', :lang<perl5>);
 
-is($id.new($japh).identity.('Pugs'), 'Just another Pugs hacker', "Closure roundtrips");
-is($id.new($japh2).identity.('Pugs'), 'Just another Pugs hacker', "Closure roundtrips");
+is($id($japh).identity.('Pugs'), 'Just another Pugs hacker', "Closure roundtrips");
+is($id($japh2).identity.('Pugs'), 'Just another Pugs hacker', "Closure roundtrips");
 
-my $keys_p5 = eval('sub {warn join(",",@_); return keys %{$_[0]}}', :lang<perl5>);
+my $keys_p5 = eval('sub {keys %{$_[0]}}', :lang<perl5>);
 my $tohash_p5 = eval('sub { return {map {$_ => 1} @_ } }', :lang<perl5>);
 my %hash = (foo => 'bar', hate => 'software');
 {
-    lives_ok {
     my $foo = $tohash_p5.(keys %hash);
     cmp_ok($foo, &infix:<cmp>, %hash);
-    cmp_ok($foo.keys, &infix:<cmp>, %hash.keys);
-    }
+    is_deeply([$foo.keys].sort, [%hash.keys].sort);
 }
 
-skip_rest; # XXX - for release
-exit;
-
 {
-    lives_ok { # is_deeply
-        cmp_ok(%hash.keys, &infix:<cmp>, $keys_p5.(%hash));
-    }
+    is_deeply([%hash.keys].sort, [$keys_p5(VAR %hash)].sort);
 }

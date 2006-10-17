@@ -1,5 +1,4 @@
-#!/usr/bin/pugs
-use v6;
+use v6-alpha;
 
 ###########################################################################
 ###########################################################################
@@ -7,26 +6,26 @@ use v6;
 # Constant values used by packages in this file:
 my Str %TEXT_STRINGS is readonly = (
     'ROS_M_D_ARG_AOH_TO_CONSTR_RT_ND_HAS_KEY_CONFL'
-        => q[<CLASS>.<METH>(): as expected, argument <ARG> is an Array ref]
-           ~ q[ of Hash refs, where each Hash ref specifies the values for]
+        => q[<CLASS>.<METH>(): as expected, argument <ARG> is an Array]
+           ~ q[ of Hashes, where each Hash specifies the values for]
            ~ q[ attributes of a new Node object to be created as a Root]
            ~ q[ Node of the invocant Document; however, at least one of]
-           ~ q[ the given Hash refs defines an explicit '<KEY>' key,]
+           ~ q[ the given Hashes defines an explicit '<KEY>' key,]
            ~ q[ which isn't allowed when creating Nodes from <ARG>.],
 
     'ROS_M_N_ARG_AOH_TO_CONSTR_CH_ND_HAS_KEY_CONFL'
-        => q[<CLASS>.<METH>(): as expected, argument <ARG> is an Array ref]
-           ~ q[ of Hash refs, where each Hash ref specifies the values for]
+        => q[<CLASS>.<METH>(): as expected, argument <ARG> is an Array]
+           ~ q[ of Hashes, where each Hash specifies the values for]
            ~ q[ attributes of a new Node object to be created as a Child]
            ~ q[ Node of the invocant Node; however, at least one of]
-           ~ q[ the given Hash refs defines an explicit '<KEY>' key,]
+           ~ q[ the given Hashes defines an explicit '<KEY>' key,]
            ~ q[ which isn't allowed when creating Nodes from <ARG>.],
 );
 
 ###########################################################################
 ###########################################################################
 
-module Rosetta::Model::L::en-0.400.1 {
+module Rosetta::Model::L::en-0.400.2 {
     sub get_text_by_key (Str $msg_key!) returns Str {
         return %TEXT_STRINGS{$msg_key};
     }
@@ -46,7 +45,7 @@ Localization of Rosetta::Model for English
 
 =head1 VERSION
 
-This document describes Rosetta::Model::L::en version 0.400.1.
+This document describes Rosetta::Model::L::en version 0.400.2.
 
 =head1 SYNOPSIS
 

@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =head1 Binding tests
@@ -27,7 +26,7 @@ plan 28;
   my $z = $x;
   is($z, 'Just Another', 'z is not bound to x');
 
-  ok(!($z =:= $x), 'z is not bound to x (we checked with the =:= identity op)', :todo);
+  ok(!($z =:= $x), 'z is not bound to x (we checked with the =:= identity op)');
 
   $y = 'Perl Hacker';
   is($y, 'Perl Hacker', 'y has been changed to "Perl Hacker"');
@@ -43,8 +42,8 @@ plan 28;
   }
 
   sub foo {
-    env $a = "foo";
-    env $b := $a;
+    my $a is context = "foo";
+    my $b is context := $a;
     return bar(); # && bar2();
   }
 

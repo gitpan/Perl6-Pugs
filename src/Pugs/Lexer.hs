@@ -11,16 +11,16 @@
 
 module Pugs.Lexer (
     wordAlpha, wordAny, isWordAlpha, isWordAny,
-    maybeParens, parens, whiteSpace, mandatoryWhiteSpace, lexeme, identifier,
+    maybeParens, parens, whiteSpace, mandatoryWhiteSpace, lexeme, identifier, identLetter,
     braces, brackets, angles, balanced, balancedDelim, decimal,
 
-    ruleDelimitedIdentifier, ruleQualifiedIdentifier, ruleWhiteSpaceLine,
+    ruleVerbatimIdentifier, ruleDelimitedIdentifier, ruleQualifiedIdentifier, ruleWhiteSpaceLine,
 
     symbol, interpolatingStringLiteral, escapeCode,
 
     rule, verbatimRule, literalRule,
     tryRule, tryVerbatimRule,
-    tryChoice, ruleComma, ruleWs,
+    tryChoice, ruleComma, 
 
     ruleScope, ruleTrait, ruleTraitName, ruleBareTrait, ruleType,
     verbatimParens, verbatimBrackets, verbatimBraces,
@@ -30,8 +30,10 @@ import Pugs.AST
 import Pugs.Rule
 import Pugs.Types
 import Pugs.Parser.Types
-import qualified Text.ParserCombinators.Parsec.Char as C (satisfy)
+import Pugs.Parser.Charnames
+import Text.ParserCombinators.Parsec.Pos (sourceColumn, sourceLine)
 
+identStart, identLetter :: RuleParser Char
 identStart  = satisfy isWordAlpha
 identLetter = satisfy isWordAny
 
@@ -48,10 +50,11 @@ isWordAlpha x = (isAlpha x || x == '_')
 maybeParens :: RuleParser a -> RuleParser a
 maybeParens p = choice [ parens p, p ]
 
-parens p        = between (symbol "(") (symbol ")") p
-braces p        = between (symbol "{") (symbol "}") p
-angles p        = between (symbol "<") (symbol ">") p
-brackets p      = between (symbol "[") (symbol "]") p
+parens, braces, angles, brackets :: RuleParser a -> RuleParser a
+parens p        = between (lexeme (char '(')) (lexeme (char ')')) p
+braces p        = between (lexeme (char '{')) (lexeme (char '}')) p
+angles p        = between (lexeme (char '<')) (lexeme (char '>')) p
+brackets p      = between (lexeme (char '[')) (lexeme (char ']')) p
 
 mandatoryWhiteSpace :: RuleParser ()
 mandatoryWhiteSpace = skipMany1 (simpleSpace <|> comment)
@@ -125,14 +128,15 @@ balancedDelim c = case c of
 balanced :: RuleParser String
 balanced = do
     notFollowedBy alphaNum
-    opendelim <- anyChar 
+    opendelim <- anyChar
     contents <- many $ satisfy (/= balancedDelim opendelim)
     char $ balancedDelim opendelim
     return contents
 
+{-
 -- The \b rule.
-ruleWordBoundary :: RuleParser ()
-ruleWordBoundary = do
+_ruleWordBoundary :: RuleParser ()
+_ruleWordBoundary = do
     prev <- getPrevCharClass
     case prev of
         SpaceClass -> return ()
@@ -151,6 +155,7 @@ ruleWs = do
             if prev == curr then mandatoryWhiteSpace else case curr of
                 SpaceClass  -> whiteSpace
                 _           -> return ()
+-}
 
 {-|
 Match one or more identifiers, separated internally by the given delimiter.
@@ -173,7 +178,7 @@ ruleQualifiedIdentifier = verbatimRule "qualified identifier" $ do
     return $ concat (intersperse "::" chunks)
 
 ruleVerbatimIdentifier :: RuleParser String
-ruleVerbatimIdentifier = (<?> "identifier") $ do
+ruleVerbatimIdentifier = verbatimRule "identifier" $ do
     c  <- identStart
     cs <- many identLetter
     return (c:cs)
@@ -195,24 +200,20 @@ ruleEndOfLine :: RuleParser ()
 ruleEndOfLine = choice [ do { char '\n'; return () }, eof ]
 
 symbol :: String -> RuleParser String
-symbol s
-    | isWordAny (last s) = try $ do
-        rv <- string s
-        choice [ eof >> return ' ', lookAhead (satisfy (aheadWord $ last s)) ]
-        whiteSpace
-        return rv
-    | otherwise          = try $ do
-        rv <- string s
-        -- XXX Wrong - the correct solution is to lookahead as much as possible
-        -- in the expression parser below
-        choice [ eof >> return ' ', lookAhead (satisfy (aheadSym $ last s)) ]
-        whiteSpace
-        return rv
+symbol s = try $ do
+    rv <- string s
+    let lastCh = last s
+        ahead  = if isWordAny lastCh then aheadWord else aheadSym
+    lookAhead (satisfy (ahead lastCh)) <|> (eof >> return ' ')
+    whiteSpace
+    return rv
     where
     aheadWord x  '=' = not $ x `elem` "xY\xA5" -- ¥
     aheadWord _  y   = not $ isWordAny y
     aheadSym '-' '>' = False -- XXX hardcode
     aheadSym '!' '~' = False -- XXX hardcode
+    aheadSym '\\''(' = False -- XXX hardcode
+    aheadSym '|' '<' = False -- XXX hardcode
     aheadSym x   '=' = not (x `elem` "!~+-*&/|.%^")
     aheadSym '?' y   = not (y `elem` "&|^?")
     aheadSym '+' y   = not (y `elem` "&|^+")
@@ -221,7 +222,7 @@ symbol s
     aheadSym x   y   = y `elem` ";!" || x /= y
 
 interpolatingStringLiteral :: RuleParser String -- ^ Opening delimiter
-                           -> RuleParser String -- ^ Closing delimiter 
+                           -> RuleParser String -- ^ Closing delimiter
                            -> RuleParser Exp    -- ^ Interpolator
                            -> RuleParser Exp    -- ^ Entire string
                                                 --     (without delims)
@@ -235,8 +236,8 @@ interpolatingStringLiteral startRule endRule interpolator = do
     homogenConcat (Val (VStr x):Val (VStr y):xs)
         = homogenConcat (Val (VStr (x ++ y)) : xs)
     homogenConcat (x:xs)
-        = App (Var "&infix:~") Nothing [x, homogenConcat xs]
-    
+        = App (_Var "&infix:~") Nothing [x, homogenConcat xs]
+
     stringList :: Int -> RuleParser [Exp]
     stringList i = choice
         [ do
@@ -244,7 +245,7 @@ interpolatingStringLiteral startRule endRule interpolator = do
             rest  <- stringList i
             return (parse:rest)
         , do
-            ch    <- endRule
+            ch    <- try endRule
             if i == 0
                 then return []
                 else do
@@ -262,22 +263,33 @@ interpolatingStringLiteral startRule endRule interpolator = do
 
 -- | Backslashed non-alphanumerics (except for @\^@) translate into themselves.
 escapeCode      :: RuleParser String
-escapeCode      = ch charEsc <|> charNum <|> ch charAscii <|> ch charControl <|> ch anyChar
+escapeCode      = charNum <|> ch charEsc <|> ch charAscii <|> ch charControl <|> ch anyChar
                 <?> "escape code"
     where
     ch = fmap (:[])
 
 charControl :: RuleParser Char
-charControl     = do{ char 'c'
-                    ; code <- upper <|> char '@'
-                    ; return (toEnum (fromEnum code - fromEnum '@'))
-                    }
+charControl = do
+    char 'c'
+    code <- upper <|> oneOf "@["
+    case code of
+        '[' -> do
+            charName <- many (satisfy (/= ']'))
+            char ']'
+            case nameToCode charName of
+                Just c  -> return (chr c)
+                _       -> error $ "Invalid unicode character name: " ++ charName
+        _   -> return (toEnum (fromEnum code - fromEnum '@'))
 
 -- This is currently the only escape that can return multiples.
 charNum :: RuleParser String
 charNum = do
     codes <- choice
-        [ fmap (:[]) decimal 
+        [ many1 digit >>= \ds -> case ds of
+            "0" -> return [0]
+            -- "\08..." and "\09..." are treated as "\0" and then "8..." or "9...".
+            ('0':xs@(x:_)) | x == '8' || x == '9' -> return (0:map (toInteger . ord) xs)
+            _   -> error ("Error: Invalid escape sequence \\" ++ ds ++ "; write as decimal \\d" ++ ds ++ " or octal \\o" ++ ds ++ " instead") -- $ return [read ds]
         , based 'o'  8 octDigit
         , based 'x' 16 hexDigit
         , based 'd' 10 digit
@@ -300,13 +312,13 @@ number base baseDigit
     = do{ digits <- many1 baseDigit
         ; let n = foldl (\x d -> base*x + toInteger (digitToInt d)) 0 digits
         ; seq n (return n)
-        }          
+        }
 
 charEsc         :: RuleParser Char
 charEsc         = choice (map parseEsc escMap)
                 where
                   parseEsc (c,code)     = do{ char c; return code }
-                  
+
 charAscii       :: RuleParser Char
 charAscii       = choice (map parseAscii asciiMap)
                 where
@@ -317,7 +329,7 @@ charAscii       = choice (map parseAscii asciiMap)
 escMap          :: [(Char, Char)]
 escMap          = zip ("abfnrtv\\\"\'") ("\a\b\f\n\r\t\v\\\"\'")
 asciiMap        :: [(String, Char)]
-asciiMap        = zip (ascii3codes ++ ascii2codes) (ascii3 ++ ascii2) 
+asciiMap        = zip (ascii3codes ++ ascii2codes) (ascii3 ++ ascii2)
 
 ascii2codes     :: [String]
 ascii2codes     = ["BS","HT","LF","VT","FF","CR","SO","SI","EM",
@@ -348,7 +360,7 @@ tryRule :: String -> RuleParser a -> RuleParser a
 tryRule name = (<?> name) . lexeme . try
 
 tryVerbatimRule :: String -> RuleParser a -> RuleParser a
-tryVerbatimRule name = (<?> name)
+tryVerbatimRule name = (<?> name) . try
 
 ruleScope :: RuleParser Scope
 ruleScope = rule "scope" $ do
@@ -374,9 +386,9 @@ postSpace rule = try $ do
     whiteSpace
     return rv
 
-ruleTrait :: RuleParser String
-ruleTrait = rule "trait" $ do
-    symbol "is" <|> symbol "does"
+ruleTrait :: [String] -> RuleParser (String, String)
+ruleTrait auxs = rule "trait" $ do
+    aux <- choice $ map symbol auxs
     trait <- do
         optional $ string "::" -- XXX Bad Hack
         ruleQualifiedIdentifier
@@ -386,7 +398,7 @@ ruleTrait = rule "trait" $ do
     -- <Aankhen``> Otherwise, it'll be a pain to go back to every module and
     --             change it all once the proper behaviour is implemented.
     optional $ verbatimParens $ many $ satisfy (/= ')')
-    return trait
+    return (aux, trait)
 
 ruleTraitName :: String -> RuleParser String
 ruleTraitName trait = rule "named trait" $ do
@@ -445,99 +457,17 @@ verbatimBraces = between (lexeme $ char '{') (char '}')
 -----------------------------------------------------------
 -- Numbers
 -----------------------------------------------------------
--- naturalOrFloat :: CharParser st (Either Integer Double)
-naturalOrFloat  = lexeme (natFloat) <?> "number"
 
-float           = lexeme floating   <?> "float"
-integer         = lexeme int        <?> "integer"
-natural         = lexeme nat        <?> "natural"
-
-
--- floats
-floating        = do{ n <- decimal 
-                    ; fractExponent n
-                    }
-
-
-natFloat        = do{ char '0'
-                    ; zeroNumFloat
-                    }
-                    <|> decimalFloat
-                    
-zeroNumFloat    =  do{ n <- hexadecimal <|> octal
-                        ; return (Left n)
-                        }
-                <|> decimalFloat
-                <|> fractFloat 0
-                <|> return (Left 0)                  
-                    
-decimalFloat    = do{ n <- decimal
-                    ; option (Left n) 
-                                (fractFloat n)
-                    }
-
-fractFloat n    = do{ f <- fractExponent n
-                    ; return (Right f)
-                    }
-                    
-fractExponent n = do{ fract <- fraction
-                    ; expo  <- option 1.0 exponent'
-                    ; return ((fromInteger n + fract)*expo)
-                    }
-                <|>
-                    do{ expo <- exponent'
-                    ; return ((fromInteger n)*expo)
-                    }
-
-fraction        = do{ char '.'
-                    ; digits <- many1 digit <?> "fraction"
-                    ; return (foldr op 0.0 digits)
-                    }
-                    <?> "fraction"
-                where
-                    op d f    = (f + fromIntegral (digitToInt d))/10.0
-                    
-exponent'       = do{ oneOf "eE"
-                    ; f <- sign'
-                    ; e <- decimal <?> "exponent"
-                    ; return (power (f e))
-                    }
-                    <?> "exponent"
-                where
-                    power e  | e < 0      = 1.0/power(-e)
-                            | otherwise  = fromInteger (10^e)
-
-
--- integers and naturals
-int             = nat 
-{-do{ f <- lexeme sign
-                    ; n <- nat
-                    ; return (f n)
-                    }
-                    -}
-                    
--- sign            :: CharParser st (Integer -> Integer)
-sign'           =   (char '-' >> return negate) 
-                <|> (char '+' >> return id)     
-                <|> return id
-
-nat             = zeroNumber <|> decimal
-    
-zeroNumber      = do{ char '0'
-                    ; hexadecimal <|> octal <|> decimal <|> return 0
-                    }
-                    <?> ""       
-
-decimal         = number 10 digit        
-hexadecimal     = do{ oneOf "xX"; number 16 hexDigit }
-octal           = do{ oneOf "oO"; number 8 octDigit  }
+decimal :: RuleParser Integer
+decimal         = number 10 digit
 
 -----------------------------------------------------------
 -- Identifiers & Reserved words
 -----------------------------------------------------------
-identifier = lexeme $ try $ ident
-    
-ident           
+identifier, ident :: RuleParser String
+identifier = lexeme . try $ ident
+
+ident
     = do{ c <- identStart
         ; cs <- many identLetter
         ; return (c:cs)
@@ -547,13 +477,15 @@ ident
 -----------------------------------------------------------
 -- White space & symbols
 -----------------------------------------------------------
-lexeme p       
+lexeme :: RuleParser a -> RuleParser a
+lexeme p
     = do{ x <- p; whiteSpace; return x  }
-    
-    
---whiteSpace    
+
+
+whiteSpace :: RuleParser ()
 whiteSpace = skipMany (simpleSpace <|> comment)
 
+comment :: RuleParser ()
 comment = do
     char '#' <?> "comment"
     pos <- getPosition
@@ -568,37 +500,43 @@ comment = do
     file <- (<|> return Nothing) $ try $ do
         many1 $ satisfy (\x -> isSpace x && x /= '\n')
         fileNameQuoted <|> fileNameBare
-    if file == Just Nothing then skipToLineEnd else do
-    many $ satisfy (/= '\n')
-    setPosition $ pos
-        `setSourceLine`     (fromInteger line - 1)
-        `setSourceColumn`   1
-        `setSourceName`     maybe (sourceName pos) fromJust file
-    return ()
+    case file of
+        Just Nothing    -> skipToLineEnd
+        _               -> do
+            many $ satisfy (/= '\n')
+            setPosition $ pos
+                `setSourceLine`     (fromInteger line - 1)
+                `setSourceColumn`   1
+                `setSourceName`     maybe (sourceName pos) fromJust file
 
+fileNameQuoted :: RuleParser (Maybe (Maybe String))
 fileNameQuoted = try $ do
     char '"'
     file <- many (satisfy (/= '"'))
     char '"'
     many $ satisfy (\x -> isSpace x && x /= '\n')
     lookAhead (satisfy (== '\n'))
-    return $ Just $ Just file
+    return . Just $ Just file
 
+fileNameBare :: RuleParser (Maybe (Maybe String))
 fileNameBare = try $ do
     file <- many1 $ satisfy (not . isSpace)
     many $ satisfy (\x -> isSpace x && x /= '\n')
     (<|> return (Just Nothing)) $ try $ do
         lookAhead (satisfy (== '\n'))
-        return $ Just $ Just file
+        return . Just $ Just file
 
+skipToLineEnd :: RuleParser ()
 skipToLineEnd = do
     skipMany (satisfy (/= '\n'))
-    return ()
-        
-simpleSpace =
-    skipMany1 (satisfy isSpace)    
-    
--- XXX - nesting
+
+simpleSpace :: RuleParser ()
+simpleSpace = do
+    skipMany1 (satisfy isSpace)
+    pos <- getPosition
+    modify (\s -> s{ s_wsLine = sourceLine pos, s_wsColumn = sourceColumn pos })
+
+multiLineComment :: RuleParser ()
 multiLineComment = do
     openOne <- satisfy (\x -> balancedDelim x /= x)
     more    <- many (char openOne)

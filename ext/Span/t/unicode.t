@@ -1,12 +1,9 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 13;
 
 use Span; pass "(dummy instead of broken use_ok)";
-use Span;   # XXX should not need this
 
 my $span = Span.new( :start(1), :end(3) );
 
@@ -53,7 +50,7 @@ is( $span.contains( 9 ), Bool::False, 'doesn\'t contain object' );
     is( @a[0].stringify, '[1,2)', 'difference 0' );
 }
 
-=for TODO
+=begin TODO
 
 {
     my @a = $span ∖ 2 );

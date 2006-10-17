@@ -1,7 +1,7 @@
-#!/usr/bin/pugs
-
+use v6-alpha;
 use Test;
-use v6;
+
+# L<S29/"Array"/"=item splice">
 
 =head1 DESCRIPTION
 
@@ -38,12 +38,12 @@ sub splice_ok (Array @got, Array @ref, Array @exp, Array @exp_ref, Str $comment)
   # Once we get Test::Builder, this will be better:
   #if ( (@got ~~ @exp) and (@ref ~~ @exp_ref)) {
   #  flunk($comment);
-  #  if (@got !~ @exp) {
+  #  if (@got !~~ @exp) {
   #    diag "The returned result is wrong:";
   #    diag "  Expected: @exp";
   #    diag "  Got     : @got";
   #  };
-  #  if (@ref !~ @exp_ref) {
+  #  if (@ref !~~ @exp_ref) {
   #    diag "The modified array is wrong:";
   #    diag "  Expected: @exp_ref";
   #    diag "  Got     : @exp";
@@ -120,9 +120,9 @@ my @tmp = (1..10);
 @a = indirect_slurpy_context( @a );
 @tmp = (1..10);
 @b = indirect_slurpy_context( splice @tmp, 5, 3 );
-is( @b, @a, "Calling splice with immediate and indirect context returns consistent results" );
+is( @b, @a, "Calling splice with immediate and indirect context returns consistent results");
 is( @a, [6,7,8], "Explicit call/assignment gives the expected results");
-is( @b, [6,7,8], "Implicit context gives the expected results" );
+is( @b, [6,7,8], "Implicit context gives the expected results"); # this is due to the method-fallback bug
 
 my @tmp = (1..10);
 @a = item splice @tmp, 5, 3;

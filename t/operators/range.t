@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 23;
+plan 24;
 
 # 3..2 must *not* produce "3 2".  Use reverse to get a reversed range. -lwall
 
@@ -28,7 +27,7 @@ is ~(3..9-3), "3 4 5 6", "(..) has correct precedence (1)";
 is ~(2+1..6), "3 4 5 6", "(..) has correct precedence (2)";
 
 # Test the three exclusive range operators:
-# L<S03/"New Operators" /binary range operator has variants/>
+# L<S03/"New operators" /range operator has variants/>
 is [1^..9], [2..9],  "bottom-exclusive range (^..) works";
 is [1 ..^9], [1..8], "top-exclusive range (..^) works";
 is [1^..^9], [2..8], "double-exclusive range (^..^) works";
@@ -38,6 +37,8 @@ is ["a"^.."z"], ["b".."z"], "bottom-exclusive string range (^..) works";
 is ["a"..^"z"], ["a".."y"], "top-exclusive string range (..^) works";
 is ["a"^..^"z"], ["b".."y"], "double-exclusive string range (^..^) works";
 is ['a'^..^'b'], [], "double-exclusive string range (^..^) can produce null range";
+
+is 1.5 ~~ 1^..^2, Bool::True, "lazy evaluation of the range operator", :todo<bug>;
 
 # Test the unary ^ operator
 is ~(^5), "0 1 2 3 4", "unary ^num produces the range 0..^num";

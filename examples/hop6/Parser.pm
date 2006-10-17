@@ -13,13 +13,15 @@
 # package Parser;
 
 # use lib '../Chap6';
+use FindBin;
+use lib $FindBin::RealDir;
 use Stream;# :all;
 
 # use base Exporter;
-# @EXPORT_OK = qw(parser nothing End_of_Input lookfor
+# @EXPORT_OK =   <parser nothing End_of_Input lookfor
 #                 alternate concatenate star list_of 
 #                 operator T 
-#                 error action test);
+#                 error action test>;
 # %EXPORT_TAGS = ('all' => \@EXPORT_OK);
 
 ## Chapter 8 section 3.1
@@ -39,7 +41,7 @@ sub End_of_Input($input) is exported(:all) {
 
 ## Chapter 8 section 3.1
 
-sub lookfor($wanted, Code $value = { $^v.[1] }, ?$u) is exported(:all) {
+sub lookfor($wanted, Code $value = { $^v.[1] }, $u?) is exported(:all) {
   ## XXX - orig: $wanted = [$wanted] unless ref $wanted;
   my $wp := $wanted.isa(Array) ?? $wanted !! [$wanted];
 
@@ -83,8 +85,7 @@ sub concatenate(Array *@p) is exported(:all) {
 ## Chapter 8 section 3.2
 
 sub alternate(Array *@p) is exported(:all) {
-  return -> { }
-    if +@p == 0;
+  return -> { } if +@p == 0;
   return @p[0]
     if +@p == 1;
 

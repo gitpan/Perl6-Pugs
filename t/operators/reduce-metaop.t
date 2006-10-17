@@ -1,7 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+plan 52;
+
+# L<S03/"Reduction operators">
 
 =head1 DESCRIPTION
 
@@ -12,20 +13,19 @@ L<"http://groups.google.de/group/perl.perl6.language/msg/bd9eb275d5da2eda">
 
 =cut
 
-plan 50;
 
 # [...] reduce metaoperator
 {
   my @array = <5 -3 7 0 1 -9>;
   my $sum   = 5 + -3 + 7 + 0 + 1 + -9; # laziness :)
 
-  is(([+] *@array),      $sum, "[+] works");
+  is(([+] @array),      $sum, "[+] works");
   is(([*]  1,2,3),    (1*2*3), "[*] works");
   is(([-]  1,2,3),    (1-2-3), "[-] works");
   is(([/]  12,4,3),  (12/4/3), "[/] works");
   is(([**] 2,2,3),  (2**2**3), "[**] works");
 
-  is((~ [\+] *@array), "5 2 9 9 10 1", "[\\+] works");
+  is((~ [\+] @array), "5 2 9 9 10 1", "[\\+] works");
   is((~ [\-] 1, 2, 3), "1 -1 -4",      "[\\-] works");
 }
 
@@ -58,14 +58,14 @@ plan 50;
 
 {
   my @array = (undef, undef, 3, undef, 5);
-  is ([//]  *@array), 3, "[//] works";
-  is ([err] *@array), 3, "[err] works";
+  is ([//]  @array), 3, "[//] works";
+  is ([err] @array), 3, "[err] works";
 }
 
 {
   my @array = (undef, undef, 0, 3, undef, 5);
-  is ([||] *@array), 3, "[||] works";
-  is ([or] *@array), 3, "[or] works";
+  is ([||] @array), 3, "[||] works";
+  is ([or] @array), 3, "[or] works";
 
   # undefs as well as [//] should work too, but testing it like
   # this would presumably emit warnings when we have them.
@@ -122,6 +122,11 @@ is(try { [more_than_plus] 1, 2, 3 }, 8, "[...] reduce metaop works on user defin
 
   is try { [.{}] $hash, <a c a c a b> }, 42, '[.{}] works with infinite data structures';
 }
+
+# L<S03/"Reduction operators"/"Among the builtin operators, [+]() returns 0 and [*]() returns 1">
+
+is( [*](), 1, "[*]() returns 1");
+is( [+](), 0, "[+]() returns 0");
 
 {
   my ($a, $b);

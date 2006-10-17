@@ -24,7 +24,7 @@ import {-# SOURCE #-} PIL.Repr
 
 import qualified Data.Map as Map
 import qualified Data.Seq as Seq
-import qualified Data.FastPackedString as Str
+import qualified Data.ByteString as Str
 
 {-| 
 
@@ -40,6 +40,12 @@ See Also:
 -}
 
 -- | Natives are "unboxed" runtime-allocated values.
+--
+data NativeError
+    = EFoo {
+        f_blah :: !ErrorFoo
+    }
+
 data Native
     = NError    !NativeError
 --------------------------------- Singulars
@@ -104,7 +110,7 @@ type NativeBit = Bool
 type NativeInt = Int
 type NativeNum = Float
 type NativeError = Exception
-type NativeStr = Str.FastString
+type NativeStr = Str.ByteString
 type NativeSeq = SeqOf Native
 type NativeMap = Map.Map NativeStr Native
 

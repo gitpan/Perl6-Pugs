@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
 plan 3;
+
+# L<S29/"List"/"=item map">
 
 my @foo = [1, 2, 3].map:{ [100+$_, 200+$_] };
 # @foo should be: [ [101,201], [102,202], [103,203] ]

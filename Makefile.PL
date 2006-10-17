@@ -17,7 +17,6 @@ Build System Overview
 
 =cut
 
-
 use 5.006;
 use strict;
 use warnings;
@@ -27,6 +26,7 @@ use File::Spec;
 use File::Copy;
 use File::Basename;
 use FindBin;
+use ExtUtils::Embed;
 BEGIN { chdir $FindBin::RealBin };
 use inc::Module::Install;
 use lib 'inc';
@@ -66,10 +66,15 @@ author          ('Audrey Tang <cpan@audreyt.org>');
 license         ('perl');
 install_script  ($pugs);
 install_script  (glob('script/*'));
+install_script  ('util/prove6');
 recommends      ('Perl6::Bible');
 recommends      ('Inline');
 recommends      ('Filter::Simple');
+recommends      ('LWP::Simple');
+recommends      ('LWP');
 build_requires  ('ExtUtils::MakeMaker' => 6.15);
+build_requires  ('FindBin');
+build_requires  ('File::Path');
 include         ('Module::Install::Makefile::Name');
 include         ('Module::Install::Makefile::Version');
 build_subdirs   (map fixpaths($_), grep {
@@ -96,17 +101,21 @@ clean_files     (map fixpaths($_),
     (map {"$_/*.hpp"} @srcdirs),
     "pugs$Config{_exe}", "pil$Config{_exe}",
     "src/gen_prelude$Config{_exe}",
-    "Setup$Config{_exe}", qw(
+    "Setup$Config{_exe}", "util/ghc-pkg-wrapper$Config{_exe}",
+    "util/runcompiler$Config{_exe}", qw(
     src/Pugs/pugs_config.h src/Pugs/Config.hs blib6 dist
     src/Pugs/Prelude.hs src/Pugs/CodeGen/PIR/Prelude.hs test.log
     src/Pugs/Embed/Parrot.hs src/Pugs/Embed/Parrot_hsc.*
-    src/Pugs/Run/Perl5_stub.*
+    src/Pugs/*/*_stub.*
+    util/ghc-pkg-wrapper.hs util/ghc-pkg-wrapper.hi util/ghc-pkg-wrapper.o
+    util/runcompiler.hs util/runcompiler.hi util/runcompiler.o
     temp-ex* unlink-test* Prelude Pugs.cabal Setup.hi Setup.o
     .setup-config .installed-pkg-config
     temp-test.*.*-out tempfile.*.* create_this_file create_this_file2
     third-party/*/*.hi third-party/*/*.o
     third-party/*/dist
-    )
+    ),
+    object_files("src/Pugs", "src/Pugs/*", "src/Pugs/*/*"),
 );
 
 set_postamble   ();
@@ -123,11 +132,15 @@ print @warn;
 
 print << ".";
 *** Enter '$Config{make}' to build Pugs.  If compilation is too slow,
-    consider using '$Config{make} unoptimized' instead.
+    consider using '$Config{make} fast' instead.
 
 .
 
 ################################################################################
+sub object_files  {
+    map { ("$_/*.o", "$_/*.hi") } @_;
+}
+
 sub set_postamble {
     my @srcfiles = map { glob("$_/*.*hs") } @srcdirs;
     push @srcfiles, map { glob("$_/*.*hs-boot") } @srcdirs;
@@ -136,31 +149,84 @@ sub set_postamble {
     my ($ghc, $ghc_version, $ghc_flags, $ghc_pkg) = assert_ghc();
     my $hsc2hs = $ENV{HSC2HS};
     my $setup = File::Spec->catfile(".", "Setup$Config{_exe}");
+    my $ghc_wrapper = File::Spec->catfile(".", "util", "runcompiler$Config{_exe}");
+    my $ghc_pkg_wrapper = File::Spec->catfile(".", "util", "ghc-pkg-wrapper$Config{_exe}");
+    my $config_path = File::Spec->catfile(cwd(), 'third-party', 'installed', 'packages.conf');
 
     if (!$hsc2hs) {
         $hsc2hs = $ghc;
         $hsc2hs =~ s{(.*)ghc}{$1hsc2hs};
     }
 
-    unlink("Setup$Config{_exe}");
-    unlink("Setup.o");
-    unlink("Setup.hi");
-    my $rv = system($ghc, '--make', '-o' => $setup, 'Setup.lhs');
-    unless (-s "Setup$Config{_exe}") {
-        die << ".";
-*** Building Setup$Config{_exe} failed (exit code $rv)
-    Please check your GHC and Cabal installation.
-.
-    }
+    preprocess(
+            File::Spec->catfile('util', 'runcompiler.hs.in'),
+            File::Spec->catfile('util', 'runcompiler.hs'),
+            CONFIG_PATH => $config_path,
+            GHC => $ghc,
+            GHC_PKG => $ghc_pkg,
+    );
+    preprocess(
+            File::Spec->catfile('util', 'ghc-pkg-wrapper.hs.in'),
+            File::Spec->catfile('util', 'ghc-pkg-wrapper.hs'),
+            CONFIG_PATH => $config_path,
+            GHC => $ghc,
+            GHC_PKG => $ghc_pkg,
+    );
+
+    # set up install path for third-party modules
+    mkdir File::Spec->catdir('third-party', 'installed');
+
+    compile_hs($ghc, 'Setup', $setup);
+    compile_hs($ghc, File::Spec->catfile('util', 'ghc-pkg-wrapper'), $ghc_pkg_wrapper);
+    compile_hs($ghc, File::Spec->catfile('util', 'runcompiler'), $ghc_wrapper);
 
     # Add GHC to PATH
     local $ENV{PATH} = dirname($ghc) . $Config{path_sep} . $ENV{PATH};
+
+    if (not try_compile
+        ( "import Control.Monad.RWS\n"
+        . "main = let (x, (), ()) = runRWS (return ()) () () in return x\n"
+        , $ghc, qw(-hide-all-packages -package mtl -package base)
+        ),
+    ) {
+        # We are missing mtl somehow, likely because GHC 6.6's extra pkg is not there
+        die <<'EOD';
+*** Could not load the "mtl" package in your GHC installation.
+
+    This is likely because the "extralibs" of GHC 6.6 was not built along
+    with the base GHC distribution.
+
+    To install extra libraries, extract both "-src" and "-src-extralibs"
+    distributions from http://haskell.org/ghc/download_ghc_66.html in the
+    same directory, then cd into ghc-6.6/ and build GHC from there.
+EOD
+    }
+
+    my $native_fps;
+
+    if (try_compile("import Data.ByteString (useAsCStringLen)\n"
+            ."main :: IO ()\n"
+            ."main = main\n", $ghc, qw(-hide-all-packages -package base))) {
+        # We have native ByteString; dummy the fps out
+        $native_fps = 1;
+        copy "third-party/fps/fps.cabal.dummy" => "third-party/fps/pugs-fps.cabal";
+        unlink "third-party/fps/fps.cabal"; # legacy
+    } else {
+        # Use bundled ByteString - unregister user-fps installed by earlier Pugs
+        system($ghc_pkg, qw( --user unregister fps ));
+        copy "third-party/fps/fps.cabal.in" => "third-party/fps/pugs-fps.cabal";
+        unlink "third-party/fps/fps.cabal"; # legacy
+    }
+
+    $ghc = $ghc_wrapper;
+    $ghc_pkg = $ghc_pkg_wrapper;
 
     my $heap;
 
     # Win32 GHC is a memory hog.  We need to provide it with a memory sty.
     # We still use the option from config.yml if available.
 
+    # XXX - This is no longer needed for GHC 6.6!
     if ($Config{osname} eq 'cygwin' or $Config{osname} eq 'MSWin32') {
         $heap = WIN32_GHC_HEAPSIZE;
     }
@@ -170,29 +236,25 @@ sub set_postamble {
     # $ghc_flags .= ' -dcore-lint';
     # $ghc_flags .= " -keep-tmp-files";
 
-    if (has_ghc_package('plugins')
-        and  try_compile("import System.Eval\n"
-                        ."main :: IO ()\n"
-                        .'main = (eval_ "return ()" [] [] [] [] :: IO (Either [String] (Maybe ()))) >> return ()', $ghc, '-package', 'plugins')) {
-        $ghc_flags .= ' -package plugins -DPUGS_HAVE_HSPLUGINS ';
-    } else {
-        push @warn, << '.';
+    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bhaskell\b/i) {
+        if (has_ghc_package('plugins')
+            and  try_compile("import System.Eval\n"
+                            ."main :: IO ()\n"
+                            .'main = (eval_ "return ()" [] [] [] [] :: IO (Either [String] (Maybe ()))) >> return ()', $ghc, '-package', 'plugins')) {
+            $ghc_flags .= ' -package plugins -DPUGS_HAVE_HSPLUGINS ';
+        }
+        else {
+            push @warn, << '.';
 *** Inline Haskell support disabled.  If you want dynamic loading
     of haskell modules, please install the hs-plugins library:
         http://www.cse.unsw.edu.au/~dons/hs-plugins/
     Remember to "make register" after "make install" for hs-plugins!
 
 .
+        }
     }
 
-    if ($ghc_version =~ /^6.4(?:.0)?$/) {
-      push @warn, << '.';
-*** Readline support disabled.  If you want readline support,
-    please upgrade to GHC 6.4.1 or later.
-
-.
-    }
-    elsif (has_ghc_package('readline') 
+    if (has_ghc_package('readline') 
         and  try_compile("import System.Console.Readline\n"
                         ."main :: IO ()\n"
                         ."main = do\n"
@@ -217,40 +279,93 @@ sub set_postamble {
     my $o = sub { map { substr($_, 0, -1) . 'o' } @_ };
 
     my $pcre_c    = "src/pcre/pcre.c";
-    my @cbits_c   = glob("src/cbits/*.c");
-    my @syck_c    = glob("src/syck/*.c");
     my ($pcre)    = $o->($pcre_c);
-    my @cbits     = $o->(@cbits_c);
-    my @syck      = $o->(@syck_c);
 
-    my @prereqs = ($pcre, @syck, @cbits);
+    my @prereqs = ($pcre);
     my @derived_srcfiles = qw< src/Pugs/Embed/Parrot.hs src/Pugs/pugs_config.h src/Pugs/pugs_version.h src/Pugs/Config.hs src/Pugs/Prelude.hs src/Pugs/CodeGen/PIR/Prelude.hs >;
 
     my $embed_flags = "";
     my $hsc2hs_flags = "";
     my $ccdlflags = "";
 
-    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bperl5\b/i  and !($Config{cc} eq 'cl') )  {
-        push @prereqs, "src/perl5/p5embed.o"; # XXX
+    # [-!]perl5 does not work with the \bFLAG\b convention used in this file.
+    # It should be removed, or the convention, and code, fixed.
+    # Went in 2006-08-30.  Depreciated 2006-09-11.
+    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /[-!]perl5\b/i) {
+        push @warn,  << '.';
+*** PUGS_EMBED flags "-perl5" and "!perl5" are depreciated and buggy.
+    Please use "noperl5" instead.
+
+.
+    }
+    if (!$ENV{PUGS_EMBED} or $ENV{PUGS_EMBED} !~ /(?:[-!]|\bno)perl5\b/i) {
+        $ENV{PUGS_EMBED} .= " perl5 ";
+        #push @prereqs, "src/perl5/p5embed.o"; # XXX
         # $ghc_output .= " src/perl5/p5embed.o ";
-        $ghc_flags .= " -DPUGS_HAVE_PERL5 ";
-        my $flags = "$Config{ccflags} $Config{ccdlflags}";
+        $embed_flags .= " -DPUGS_HAVE_PERL5 -isrc/perl5 ";
+        my $flags = "$Config{ccflags} $Config{ccdlflags} ";
         if ($flags =~ /\S/) {
             $flags =~ s{([\\"'])}{\\$1}g;
-            $ccdlflags .= (/^-D/ ? ' -optc' : ' -optl') . qq["$_" ]
-              for split /\s+/, $flags;
+            my @flags = grep { length $_ } split /\s+/, $flags;
+            if ($^O eq 'MSWin32') {
+                if ($Config{libperl} =~ /lib(\w+)\.a/) {
+                    $embed_flags .= " -optl-l$1 ";
+                }
+                elsif (defined &Win32::BuildNumber) {
+                    # We are on ActivePerl -- Kluge massively!
+
+                    no warnings 'once';
+                    our %MY_CONFIG = %Config;
+                    *Config = *MY_CONFIG;
+                    *Config::Config = *MY_CONFIG;
+                    *ExtUtils::MM_Win32::Config = *MY_CONFIG;
+                    *ExtUtils::MM_Unix::Config = *MY_CONFIG;
+
+                    $Config{ccflags} =~ s/-libpath:"?(.*?)"? //g;
+                    $Config{ccdlflags} =~ s/-libpath:"?(.*?)"? //g;
+                    $Config{lddlflags} =~ s/-libpath:"?(.*?)"? //g;
+                    $Config{ldflags} =~ s/-libpath:"?(.*?)"? //g or die "ldflags: $Config{ldflags} does not contain -libpath:";
+
+                    my $lib = "$1/$Config{libperl}";
+                    $embed_flags .= " -optl\"$lib\" ";
+
+                    $flags = "$Config{ccflags} $Config{ccdlflags}";
+                    $flags =~ s{([\\"'])}{\\$1}g;
+                    @flags = grep { length $_ } split /\s+/, $flags;
+                }
+                else {
+                    warn "Unrecognized libperl shared library: $Config{libperl}, proceeding anyway...\n";
+                }
+
+                $ccdlflags .= (/^-[DIL]/ ? ' -optc' : ' -optl') . qq["$_" ] for @flags;
+                $embed_flags .= " -optc-Ddirent=DIRENT";
+            }
+            else {
+                $embed_flags .= " -optc$_" for grep length, split(/\s+/, ccopts());
+                $embed_flags .= " -optl$_" for grep length, split(/\s+/, ldopts());
+
+            }
+
+            $embed_flags .= " $_" for grep { /-[DIL]/ } split(/\s+/, ccopts());
+            $embed_flags .= " $_" for grep { /-[DIL]/ } split(/\s+/, ldopts());
+
+            if ($Config{osname} eq 'cygwin') {
+                my $cygpath = sub {
+                    my $path = `cygpath @_`;
+                    chomp $path;
+                    $path =~ s{\\}{/}g;
+                    return $path;
+                };
+                $embed_flags =~ s{(/usr/\S+)}{$cygpath->($1)}eg;
+                $embed_flags =~ s{/cygdrive/(\w)/}{$1:/}g;
+                #warn "** Cygwin embedding flags: embed_flags\n";
+            }
         }
-    }
-    elsif( $ENV{PUGS_EMBED} and $Config{cc} eq 'cl' and $^O =~ /Win32/ )   {
-        $ENV{PUGS_EMBED} =~ s/\bperl5\b//g;
-        push @warn, << '.'
-*** Perl 5 embedding disabled on Win32 systems.
-.
     }
     else {
         push @warn, << '.';
 *** Perl 5 embedding disabled.  If you want Perl 5 support, please set the
-    PUGS_EMBED environment variable to contain "perl5".
+    PUGS_EMBED environment variable to not contain "noperl5".
 
 .
     }
@@ -266,20 +381,6 @@ sub set_postamble {
     # Respect CC setting
     my $cc = $ENV{CC} || 'gcc';
     $ghc_flags .= " -pgmc $cc " unless $cc eq 'gcc';
-
-    # GHC 6.4.1, OS X / Tiger and gcc4.0 doesn't work together. complain.
-    if ($Config{osname} eq "darwin") {
-      my $gcc_version = `$cc -v 2>&1`;
-      my $os_version = `uname -r`;
-      if ($ghc_version =~ /^6.4(?:.0)?$/ and $gcc_version =~ /\b4.0.0\b/ && $os_version =~ /^8./) {
-         die <<EOD;
-*** GHC 6.4.0 cannot work with GCC 4.0 on Mac OS X.
-    Please download the GHC 6.4.1 installer from http://haskell.org/ghc/.
-    (Alternatively, use "sudo gcc_select 3.3" to pick an earlier version
-     of GCC, or set the CC environment variable to "/usr/bin/gcc-3.3".)
-EOD
-      }
-    }
 
     if ($Config{cf_by} eq 'Debian Project' and $ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bperl5\b/i) {
         # Is it safe to remove 'Debian Project' above, to test on all platforms?
@@ -301,7 +402,7 @@ EOD
             die <<EOD;
 *** Could not find libperl.so in: $Config{libpth} $Config{libsdirs}
     Solutions include:
-        * Remove perl5 from PUGS_EMBED
+        * Add noperl5 to PUGS_EMBED
 $message
 EOD
         }
@@ -350,6 +451,7 @@ EOD
         my $rpath_blib = parrot_config($base, $parrot_config, 'rpath_blib');
         my $build_dir = parrot_config($base, $parrot_config, 'top_builddir', 'build_dir');
         my $is_shared = parrot_config($base, $parrot_config, 'parrot_is_shared');
+        my $parrot_libdir = parrot_config($base, $parrot_config, 'lib_dir');
 
         # Convert flags to -optc-*,etc, to pass through ghc. c/ompiler l/inker
         $ldflags =~ s/(^|\s)-/$1-optl-/g;
@@ -360,8 +462,11 @@ EOD
         $rpath_blib =~ s/(^|\s)-/$1-optl-/g;
 
         $embed_flags .= " -I$base/include -L$base/lib -L$base/blib/lib -DPUGS_HAVE_PARROT -L/usr/local/lib $ldflags ";
-        $ghc_output .= " -lparrot $libs $icuflags ";
-        my $config = "$build_dir/src/install_config$Config{_o}";
+        $embed_flags .= " -lparrot $libs $icuflags ";
+        my $config = $parrot_libdir."/parrot/config/install_config$Config{_o}";
+        $config = $parrot_libdir."/parrot/config/parrot_config$Config{_o}" unless -e $config;
+        $config = $parrot_libdir."/parrot/config/null_config$Config{_o}" unless -e $config;
+        $config = "$build_dir/src/install_config$Config{_o}" unless -e $config;
         $config = "$build_dir/src/parrot_config$Config{_o}" unless -e $config;
         $config = "$build_dir/src/null_config$Config{_o}" unless -e $config;
 
@@ -372,33 +477,40 @@ EOD
         * Place a built Parrot source tree under $build_dir.
 EOD
 
-        $ghc_output .= " $config ";
-        $ccdlflags .= " $rpath_blib ";
+        $embed_flags .= " $config ";
+        $embed_flags .= " $rpath_blib " if -d $build_dir;
 
         # parrot include paths for hsc2hs
         $hsc2hs_flags .= " -DPUGS_HAVE_PARROT -I$base/include ";
-    }
-    else {
-        push @warn, << '.';
-*** Parrot linking disabled; external 'parrot' executable will be used for
-    Rules support -- please make sure that the executable is available in
-    your PATH.  If you want to link against Parrot, set the PUGS_EMBED
-    environment variable to contain 'parrot', the PARROT_PATH environment
-    variable to the path of a built parrot tree, then run Makefile.PL again.
 
+        push @warn, << ".";
+*** Embedded 'parrot' enabled.  You can use it for Perl 6 regex support by
+    setting the PUGS_REGEX_ENGINE environment variable to "PGE" at runtime.
 .
     }
+    else {
+        my $whichparrot = can_run('parrot');
 
-    #if ( try_compile("main :: IO ()\nmain = return ()", $ghc, "-lz") ) {
-    #    $ghc_flags .= ' -DUSE_ZLIB -lz ';
-    #}
+        if ($whichparrot) {
+            push @warn, << ".";
+*** External 'parrot' executable found in your PATH at:
 
-    $hsc2hs_flags .= " -Isrc/syck "; # for Data.Yaml
+        $whichparrot
+
+    You can use it for Perl 6 regex support by setting the
+    PUGS_REGEX_ENGINE environment variable to "PGE" at runtime.
+
+    If you want to link against Parrot, set the PUGS_EMBED environment
+    variable to contain 'parrot', the PARROT_PATH environment variable to
+    the path of a built parrot tree, then run Makefile.PL again.
+
+.
+        }
+    }
 
     my $config = get_pugs_config();
     my $is_win32 = ($^O =~ /MSWin|mingw|cygwin/i);
-    my $threaded = (!$is_win32 and try_compile("main :: IO ()\nmain = return ()", $ghc, "-threaded"))
-        ? '-threaded' : '';
+    my $threaded = (try_compile_and_run("main :: IO ()\nmain = return ()", $ghc, "-threaded")) ? '-threaded' : '';
 
     if ($threaded and $ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /\bperl5\b/ and !$Config{usethreads}) {
         push @warn, << '.';
@@ -409,6 +521,13 @@ EOD
 
         $threaded = '';
     }
+    if ($threaded && $ENV{PUGS_NO_THREADS}) {
+        push @warn, << '.';
+*** Thread support disabled due to explicit request in PUGS_NO_THREADS.
+
+.
+        $threaded = '';
+    }
 
     # As of now, Test::TAP::HTMLMatrix is the key dependency for smokes,
     # so we need only check for that.
@@ -416,8 +535,8 @@ EOD
 *** You do not appear to have a Smoke Kit installed. You can still build
     Pugs and even run `make test', but you won't be able to run the more
     modern `make smoke' target to produce nice graphs and send them to the
-    public smoke server. Installing Bundle::Pugs::SmokeKit from CPAN will
-    bring in the necessary dependencies.
+    public smoke server. Installing Task::Smoke from CPAN will bring in
+    the necessary dependencies.
 
 .
     # XXX - hsplugins doesn't build with profiles
@@ -428,7 +547,7 @@ EOD
     my $emit = sub {
         my $o = shift;
         my $c = substr($o, 0, -1) . 'c';
-        return "$o : $c\n\t$ghc $threaded $ghc_flags -no-link -no-hs-main -O -o $o $c\n";
+        return "$o : $c\n\t$ghc $threaded $embed_flags $ghc_flags -no-link -no-hs-main -O -o $o $c\n";
     };
 
     mkdir 'dist';
@@ -451,15 +570,47 @@ EOD
 
     my $setup_flags = "--prefix=\$(DESTDIR) --with-hc-pkg=$ghc_pkg --with-hsc2hs=$hsc2hs --ghc --with-compiler=$ghc";
 
+    my $svn_entries = '';
+
+    if (-d '.svn') {
+        $svn_entries = File::Spec->catfile('.svn', 'entries');
+    }
+    #$svn_entries = 'force_run';
+
+    # logic for Judy:
+
+=begin NOJUDY
+
+    if ($Config{osname} ne 'MSWin32') {
+        warn "Configuring Judy...\n";
+        chdir "third-party/judy/Judy-1.0.3";
+        copy('src/Judy.h', '../../HsJudy');
+        system("./configure") unless -e "config.status" and -e "Makefile";
+        chdir "../../..";
+    }
+
+    my $judyclean;
+    if ($Config{osname} eq 'MSWin32') {
+        $judyclean = 'cd third-party\judy\Judy-1.0.3\src && '.
+            'nmake /nologo /F Makefile.win32 clean';
+    } else {
+        my $make = $Config{make};
+
+        # Judy at this moment wants GNU make.
+        $make = 'gmake' unless `$make --version` =~ /GNU/;
+
+        $judyclean = "cd third-party/judy/Judy-1.0.3 \&\& $make clean \&\& perl cleanmore.pl";
+    }
+
+=end NOJUDY
+=cut
+
     postamble(fixpaths(<< "."));
 $config_h : lib/Perl6/Pugs.pm util/config_h.pl
 	\$(PERL) util/config_h.pl "$ghc $ghc_flags"
 
-$version_h : .svn/entries util/version_h.pl
+$version_h :
 	\$(PERL) util/version_h.pl $version_h
-
-.svn/entries :
-	\$(NOOP)
 
 @{[join("\n", map {$emit->($_)} grep { /\.o$/ } @prereqs)]}
 
@@ -467,7 +618,7 @@ src/Pugs/Config.hs : util/PugsConfig.pm
 	\$(PERL) -Iutil -MPugsConfig -e "PugsConfig->write_config_module" > src/Pugs/Config.hs
 
 src/gen_prelude$Config{_exe} : src/gen_prelude.hs
-	$ghc -O0 -o src/gen_prelude$Config{_exe} src/gen_prelude.hs
+	$ghc -O0 --make -o src/gen_prelude$Config{_exe} src/gen_prelude.hs
 
 src/Pugs/CodeGen/PIR/Prelude.hs : src/gen_prelude$Config{_exe} src/perl6/Prelude/PIR.pm
 	\@\$(PERL) -e "mkdir q-src/Pugs/CodeGen/PIR-"
@@ -535,8 +686,17 @@ dist/doc/html :
 
 pugs_requirements : src/Emit/PIR/Instances.hs src/Pugs/AST/Internals/Instances.hs src/Pugs/PIL1/Instances.hs src/Pugs/PIL2/Instances.hs src/Pugs/Config.hs src/Pugs/CodeGen/PIR/Prelude.hs @srcfiles $version_h $config_h config.yml src/perl6/Prelude.pm src/Pugs/Prelude.hs
 
+prof :: profiled
+
+fastprof :: unoptimised-profiled
+
+unoptimized-profiled :: unoptimised-profiled
+
+unoptimised-profiled :: pugs_requirements
+	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_pkg $ghc_version $setup --make -O0 -auto-all -prof $threaded $profiled_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
+
 profiled :: pugs_requirements
-	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_version $setup --make -O -auto-all -prof $threaded $profiled_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
+	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_pkg $ghc_version $setup --make -O -auto-all -prof $threaded $profiled_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
 
 pugs.prof :: profiled
 	find t -type f | grep -v D | grep -v R | grep -v pugsrun | ./pugs +RTS -p -RTS -e 'my sub exit {}; for =\$\$*IN -> \$\$t is copy { \$\$t .= chomp; require \$\$t }'
@@ -544,15 +704,17 @@ pugs.prof :: profiled
 optimised :: optimized
 
 optimized :: pugs_requirements
-	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_version $setup --make -O $threaded $ghc_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
+	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_pkg $ghc_version $setup --make -O $threaded $ghc_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
+
+fast :: unoptimized
 
 unoptimised :: unoptimized
 
 unoptimized :: pugs_requirements
-	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_version $setup --make -O0 $threaded $ghc_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
+	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_pkg $ghc_version $setup --make -O0 $threaded $ghc_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
 
 $pugs : pugs_requirements
-	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_version $setup --make __optimization__ $threaded $ghc_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
+	\$(PERL) util/build_pugs.pl _+SETUP $setup_flags _-SETUP _+GHC $version $ghc $ghc_pkg $ghc_version $setup --make __optimization__ $threaded $ghc_flags $ccdlflags $embed_flags $ghc_output _-GHC _+GEN_PRELUDE --pugs $thispugs
 
 
 pirtest : test-pir
@@ -580,10 +742,12 @@ blib6/lib/Test.pm.yml :: ext/Test/lib/Test.pm
 	\$(NOECHO) \$(ECHO) "Precompiling Test.pm..."
 	$thispugs -CParse-YAML ext/Test/lib/Test.pm > blib6/lib/Test.pm.yml 
 
-upload-smoke : smoke.html
-	\$(PERL) util/smokeserv/smokeserv-client.pl smoke.html
+upload-smoke : smoke.yml
+	\$(PERL) util/smokeserv/smokeserv-client.pl smoke.html smoke.yml
 
-smoke.html :
+smoke-upload : upload-smoke
+
+smoke.yml :
 	\$(PERL) util/run-smoke.pl . smoke.html
 
 smoke : smoke-pugs
@@ -607,14 +771,21 @@ smoke-perl5 : $pugs util/run-smoke.pl all
 
 
 ghci : @prereqs @derived_srcfiles
-	$ghc $ghc_flags $ghc_output --make -O0 -fglasgow-exts -L. -idist/build -Ldist/build -idist/build/src -Ldist/build/src -isrc src/Prereqs.hs @prereqs
-	$ghc $ghc_flags $ghc_output --interactive -fglasgow-exts -L. -idist/build -Ldist/build -idist/build/src -Ldist/build/src -isrc src/Main.hs @prereqs
+	$ghc @{[ dethread_flags($ghc_flags) ]} $ghc_output -DPUGS_UNDER_GHCI -no-link --make -O0 -fglasgow-exts -L. -idist/build -Ldist/build -idist/build/src -Ldist/build/src -isrc src/Prereqs.hs @prereqs
+	\@\$(RM_RF) src/Pugs/*/*_stub.*
+	$ghc @{[ dethread_flags($ghc_flags) ]} $ghc_output -DPUGS_UNDER_GHCI --interactive -fglasgow-exts -L. -idist/build -Ldist/build -idist/build/src -Ldist/build/src -isrc src/Main.hs @prereqs
 
-pil$Config{_exe} : $config_h $pcre @cbits @srcfiles src/PIL/Native/Bootstrap.hs src/PIL/Native/Syntax.hs
-	$ghc $ghc_flags --make -fglasgow-exts -H0 -isrc -isrc/cbits -Isrc -Isrc/cbits -L. -fno-warn-name-shadowing -o pil$Config{_exe} -main-is PIL.main src/PIL.hs $pcre @cbits
+ctags : @prereqs @derived_srcfiles
+	echo ":ctags" | $ghc $ghc_flags $ghc_output --interactive -osuf moose -hisuf miise -fglasgow-exts -L. -idist/build -Ldist/build -idist/build/src -Ldist/build/src -isrc src/Main.hs @prereqs
+        
+etags : @prereqs @derived_srcfiles
+	echo ":etags" | $ghc $ghc_flags $ghc_output --interactive -osuf moose -hisuf miise -fglasgow-exts -L. -idist/build -Ldist/build -idist/build/src -Ldist/build/src -isrc src/Main.hs @prereqs
+
+pil$Config{_exe} : $config_h $pcre @srcfiles src/PIL/Native/Bootstrap.hs src/PIL/Native/Syntax.hs
+	$ghc $ghc_flags --make -fglasgow-exts -H0 -isrc -Isrc -L. -fno-warn-name-shadowing -o pil$Config{_exe} -main-is PIL.main src/PIL.hs $pcre
 
 pili : pil$Config{_exe}
-	$ghc --interactive -fglasgow-exts -isrc -isrc/cbits -Isrc -Isrc/cbits -L. -static -fno-warn-name-shadowing src/PIL.hs $pcre @cbits
+	$ghc --interactive -fglasgow-exts -isrc -Isrc -L. -static -fno-warn-name-shadowing src/PIL.hs $pcre
 
 tags : @srcfiles
 	$hasktags -c @{[ grep { !/PIL/ } @srcfiles ]}
@@ -639,11 +810,14 @@ build_perl5 ::
 ")]}
 
 clean ::
+	\@\$(RM_RF) third-party/installed
 @{[for_perl5("
 	-cd __DIR__ && \$(TEST_F) \$(FIRST_MAKEFILE) && \$(MAKE) clean
 ")]}
 
 realclean ::
+	\@\$(RM_RF) third-party/installed
+
 @{[for_perl5("
 	-cd __DIR__ && \$(TEST_F) \$(FIRST_MAKEFILE) && \$(MAKE) realclean
 ")]}
@@ -687,7 +861,7 @@ sub for_perl5 {
         -e "$dir/Makefile.PL" or next;
 
         # Skip XS modules for now
-        next if glob("$dir/*.xs") or glob("$dir/*.i");
+        next if glob("$dir/*.xs") or glob("$dir/*.i") or $dir =~ /-\d+/;
 
         my $this = $cmd;
         $this =~ s{__DIR__}{$dir}g;
@@ -696,7 +870,11 @@ sub for_perl5 {
     return join("\n", @cmds);
 }
 
-sub try_compile_and_run { try_compile(@_, 'run') }
+our $do_run;
+sub try_compile_and_run {
+    local $do_run = 1;
+    try_compile(@_);
+}
 
 sub try_compile {
     my $code = shift;
@@ -717,6 +895,10 @@ sub try_compile {
     };
 
     my $ok = -s "$temp.exe";
+
+    if ($do_run) {
+        $ok = 0 unless system(abs_path("$temp.exe")) == 0;
+    }
 
     unlink("$temp.exe");
     unlink("$temp.hs");
@@ -754,4 +936,46 @@ sub which {
         return $full_name if -e $full_name;
     }
     return undef;    
+}
+
+sub preprocess {
+    my ($infile, $outfile, %substitutions) = @_;
+
+    open IN, '<', $infile or die "failed to open $infile ($!)";
+    open OUT, '>', $outfile or die "failed to open $outfile ($!)";
+
+    if ($Config{osname} eq 'cygwin') {
+        s{^/cygdrive/(\w)/}{$1:/} for values %substitutions;
+    }
+
+    while (<IN>) {
+        while (my ($pat, $subst) = each(%substitutions)) {
+            $subst =~ s{\\}{\\\\}g;
+            s/__${pat}__/$subst/g
+        }
+        print OUT $_;
+    }
+
+    close OUT;
+    close IN;
+}
+
+sub compile_hs {
+    my ($ghc, $prefix, $out) = @_;
+
+    unlink($prefix . $_) for (
+        $Config{_exe},
+        '.o',
+        '.hi',
+    );
+
+    my $rv = system($ghc, '--make', '-o' => $out,
+        (-e $prefix. '.hs') ? $prefix.'.hs' : $prefix.'.lhs'
+    );
+    unless (-s $out) {
+        die << ".";
+*** Building Setup$Config{_exe} failed (exit code $rv)
+    Please check your GHC and Cabal installation.
+.
+    }
 }

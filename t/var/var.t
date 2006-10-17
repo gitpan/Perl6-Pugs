@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 35;
+plan 33;
 
 # L<S02/"Names" /names are reserved in the first position/>
 ok !eval('module MY;     1'), "MY is an out of scope name";
@@ -29,12 +28,10 @@ ok eval('state $x; state $x; 1'), 'it is legal to declare $x twice in the same s
   is $a, 1, 'get regular $a (1)';
 
   {
-    is $a, 1, 'get regular $a (2)';
     my $a = 2;
     is $a, 2, 'get new regular $a (1)';
 
     {
-      is $a, 2, 'get new regular $a (2)';
       my $a = 3;
 
       is $a,               3, 'get very new regular $a';

@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -11,7 +10,7 @@ These tests derived from comments in L<"http://use.perl.org/~autrijus/journal/23
 
 =cut
 
-plan 30;
+plan 33;
 
 my $world = "World";
 my @list  = (1,2);
@@ -35,6 +34,7 @@ is("&func_w_args("foo","bar"))", '[foo][bar])', '"&func_w_args(...)" should inte
 # L<S02/"Literals" /"In order to interpolate the result of a method call">
 is("$world.chars()", '5', 'method calls with parens should interpolate');
 is("$world.chars", 'World.chars', 'method calls without parens should not interpolate');
+is("$world.reverse.chars()", '5', 'cascade of argumentless methods, last ending in paren');
 is("$world.substr(0,1)", 'W', 'method calls with parens and args should interpolate');
 
 # Single quotes
@@ -52,14 +52,14 @@ is(qq{a{chr 98}c}, 'abc', "curly brace delimiters don't interfere with closure i
 # Quoting constructs
 # The next test will always succeed, but if there's a bug it probably
 # won't compile.
-is(q0"abc\\d\\'\/", q0"abc\\d\\'\/", "raw quotation works");
-is(q1"abc\\d\"\'\/", q0|abc\d"\'\/|, "single quotation works"); #"
-is(q2"abc\\d\"\'\/", q0|abc\d"'/|, "double quotation works"); #"
-is(qa"$world @list[] %hash{}", q0"$world 1 2 %hash{}", "only interpolate array");
+is(qn"abc\\d\\'\/", qn"abc\\d\\'\/", "raw quotation works");
+is(q"abc\\d\"\'\/", qn|abc\d"\'\/|, "single quotation works"); #"
+is(qq"abc\\d\"\'\/", qn|abc\d"'/|, "double quotation works"); #"
+is(qa"$world @list[] %hash{}", qn"$world 1 2 %hash{}", "only interpolate array");
 is(qb"$world \\\"\n\t", "\$world \\\"\n\t", "only interpolate backslash");
 is('$world \qq[@list[]] %hash{}', '$world 1 2 %hash{}', "interpolate quoting constructs in ''");
 
-is(" \d[111] \d[107] ", ' o k ', "\\d[] respects whitespaces around it")
+is(" \d[111] \d[107] ", ' o k ', "\\d[] respects whitespaces around it");
 
 # L<S02/"Literals" /any of these by separating the numbers/>
 is("x  \x[41,42,43]  x",     "x  ABC  x",  "\\x[] allows multiple chars (1)");

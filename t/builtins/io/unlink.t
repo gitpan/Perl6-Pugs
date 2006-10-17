@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
 plan 6;
+
+# L<S16/"Filehandles, files, and directories"/"unlink">
 
 sub nonce() { ".$*PID." ~ int rand 1000 }
 

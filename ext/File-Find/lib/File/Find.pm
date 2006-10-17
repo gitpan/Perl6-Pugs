@@ -1,6 +1,7 @@
+use v6-alpha;
+
 module File::Find-6.0.0;
 
-use v6;
 use File::Spec;
 
 has Int   $.debug;
@@ -13,7 +14,7 @@ has Code  $.wanted_file;
 submethod BUILD { $.debug = 0 }
 
 method find ( $self: :@dirs, :$wanted_dir, :$wanted_file ) {
-    my @start    = @dirs        || @{$.dirs};
+    my @start    = @dirs        || @.dirs;
     my $wdir_cb  = $wanted_dir  || $.wanted_dir  || sub { 1 };
     my $wfile_cb = $wanted_file || $.wanted_file || sub { 1 };
     for @start -> $dir {
@@ -45,6 +46,8 @@ method find ( $self: :@dirs, :$wanted_dir, :$wanted_file ) {
                 else { say "  -d $abs" if $.debug }
             }
         }
+	$dh.closedir;
+	undefine $dh;
     }
     return $.results;
 }

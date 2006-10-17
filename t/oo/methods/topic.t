@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # L<A12/"Declaration of Methods" /methods do not set the topic now/>

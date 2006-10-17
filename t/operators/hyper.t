@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =pod
@@ -9,7 +8,7 @@ use Test;
 
 =cut
 
-plan 38;
+plan 52;
 
 { # binary infix
         my @r;
@@ -155,6 +154,69 @@ plan 38;
         is(~@r, ~@e, :todo);
 };
 
+{ # distribution for unary prefix
+        my @r;
+        @r = -« ([1, 2], [3, [4, 5]]);
+        my @e = ([-1, -2], [-3, [-4, -5]]);
+        is_deeply(~@r, ~@e, "distribution for unary prefix");
+
+        @r = -<< ([1, 2], [3, [4, 5]]);
+        @e = ([-1, -2], [-3, [-4, -5]]);
+        is_deeply(~@r, ~@e, "distribution for unary prefix, ASCII");
+};
+
+{ # distribution for unary postfix autoincrement
+        my @r;
+        @r = ([1, 2], [3, [4, 5]]);
+        try { @r »++ };
+        my @e = ([2, 3], [4, [5, 6]]);
+        is_deeply(~@r, ~@e, "distribution for unary postfix autoincr", :todo);
+
+        @r = ([1, 2], [3, [4, 5]]);
+        try { @r >>++ };
+        @e = ([2, 3], [4, [5, 6]]);
+        is_deeply(~@r, ~@e, "distribution for unary postfix autoincr, ASCII", :todo);
+};
+
+{ # distribution for binary infix
+        my @r;
+        @r = (1, 2, [3, 4]) »+« (4, 5, [6, 7]);
+        my @e = (5, 7, [9, 11]);
+        is_deeply(~@r, ~@e,
+                  "distribution for binary infix, same shape");
+
+				
+        @r = (1, 2, [3, 4]) >>+<< (4, 5, [6, 7]);
+        @e = (5, 7, [9, 11]);
+        is_deeply(~@r, ~@e,
+                  "distribution for binary infix, same shape, ASCII",
+                 );
+
+        @r = (1, 2, [3, 4]) »+« (5, 6, 7);
+        @e = (6, 8, [10, 11]);
+        is_deeply(~@r, ~@e,
+                  "distribution for binary infix, dimension upgrade",
+                 );
+
+        @r = (1, 2, [3, 4]) >>+<< (5, 6, 7);
+        @e = (6, 8, [10, 11]);
+        is_deeply(~@r, ~@e,
+                  "distribution for binary infix, dimension upgrade, ASCII",
+                 );
+
+        @r = ([1, 2], 3) »+« (4, [5, 6]);
+        @e = ([5, 6], [8, 9]);
+        is_deeply(~@r, ~@e,
+                  "distribution for binary infix, S03 cross-upgrade",
+                 );
+
+        @r = ([1, 2], 3) >>+<< (4, [5, 6]);
+        @e = ([5, 6], [8, 9]);
+        is_deeply(~@r, ~@e,
+                  "distribution for binary infix, S03 cross-upgrade, ASCII",
+                 );
+};
+
 { # regression test, ensure that hyper works on arrays
         my @r1;
         my @r2;
@@ -168,16 +230,20 @@ plan 38;
 };
 
 
-{ # mixed hyper and reduce metaops
-    is ~([+]<< ([1,2,3], [4,5,6])), "6 15", "mixed hyper and reduce metaop ([+]<<) works";
+# mixed hyper and reduce metaops -
+# this unveils a spec bug as << recurses into arrays and [+] never gets applied,
+# so we disable the entire chunk for now.
+=todo unspecced
 
+    is ~([+]<< ([1,2,3], [4,5,6])), "6 15", "mixed hyper and reduce metaop ([+]<<) works";
     ## XXX: Test for [+]<<<< - This is unspecced, commenting it out
     #is ~([+]<<<< ([[1,2],[3,4]],[[5,6],[7,8]])), "3 7 11 15",
     #  "mixed double hyper and reduce metaop ([+]<<<<) works";
 
     is ~([+]« [1,2,3], [4,5,6]), "6 15",
       "mixed Unicode hyper and reduce metaop ([+]«) works";
-}
+
+=cut
 
 { # hyper dereferencing
     my @array = (
@@ -191,4 +257,19 @@ plan 38;
 
     my $part = join '', eval '@array[0,1]>>.<key>';
     is($part, 'valval', 'hyper-dereference an array slice',:todo);
+}
+
+{ # junction hyper -- regression?
+    my @a = 1..3;
+    my @b = 4..6;
+    ok eval('@a »|« @b; 1'), '»|« hyperjunction evals', :todo<feature>;
+    ok eval('@a >>|<< @b; 1'), '>>|<< hyperjunction evals, ASCII',
+        :todo<feature>;
+    ok eval('@a »&« @b; 1'), '»&« hyperjunction evals', :todo<feature>;
+    ok eval('@a >>&<< @b; 1'), '»&« hyperjunction evals, ASCII',
+        :todo<feature>;
+    is eval('(@a »|« @b).perl'), (1|4,2|5,3|6).perl,
+        '»|« returns correct values', :todo<feature>;
+    is eval('(@a »&« @b).perl'), (1&4,2&5,3&6).perl,
+        '»&« returns correct values', :todo<feature>;
 }

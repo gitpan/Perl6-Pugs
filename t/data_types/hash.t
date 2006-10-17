@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -9,7 +8,7 @@ Hash tests
 
 =cut
 
-plan 55;
+plan 58;
 
 # basic lvalue assignment
 
@@ -143,11 +142,11 @@ is(%hash10<1>, 2, "assignment of pointy qw to hash");
 
 sub test1{
     my %sane = hash ('a'=>'b');
-    is(%sane.ref,'Hash','%sane is a Hash');
+    is(%sane.WHAT,'Hash','%sane is a Hash');
 }
 
 sub test2 (Hash %hash) returns Void{
-    is(%hash.ref,'Hash','%hash is a Hash');
+    is(%hash.WHAT,'Hash','%hash is a Hash');
 }
 
 my %h = hash (a => 'b');
@@ -165,3 +164,16 @@ test2 %h;
 #
 my %dupl = (a => 1, b => 2, a => 3);
 is %dupl<a>, 3, "hash creation with duplicate keys works correctly";
+
+# Moved from t/xx-uncategorized/hashes-segfault.t
+# Caused some versions of pugs to segfault
+my %hash = %(zip('a'..'d';1..4));
+my $i = %hash.elems; # segfaults
+is $i, 4, "%hash.elems works";
+
+$i = 0;
+$i++ for %hash; # segfaults
+is $i, 4, "for %hash works";
+
+try{ @%(a => <b>)<a> };
+ok( $!, "doesn't really make sense, but shouldn't segfault, either ($!)");

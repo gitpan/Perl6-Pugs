@@ -1,10 +1,9 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 18;
-force_todo 1..12;
+force_todo 1,2,4,5,7,9,11;
 
 if $?PUGS_BACKEND ne "BACKEND_PUGS" {
   skip_rest "PIL2JS and PIL-Run do not support eval() yet.";
@@ -18,10 +17,9 @@ my @tests = (
 );
 
 for @tests -> $mod, $expected_ret {
-  state $i = 1;
 
   my @strings = (
-    "use ::$mod",
+    "use $mod",
     "require '{ $mod.split("::").join("/") ~ ".pm" }'",
   );
 
@@ -30,11 +28,11 @@ for @tests -> $mod, $expected_ret {
     my $retval = try { eval $str };
 
     ok defined($retval) && $retval != -1 && $expected_ret($retval),
-      "require or use's return value was correct ({$i++})";
+      "require or use's return value was correct ({$str})";
     # XXX: Keys of %*INC not yet fully decided (module name? module object?),
     # IIRC.
     ok defined(%*INC{$mod}) && %*INC{$mod} != -1 && $expected_ret(%*INC{$mod}),
-      "\%*INC was updated correctly ({$i++})";
+      "\%*INC was updated correctly ({$str})";
   }
 }
 

@@ -45,7 +45,7 @@
 
 ;;; Commentary:
 
-;; $Id: cperl-mode.el 255 2006-06-26 13:05:14Z ss5 $
+;; $Id: cperl-mode.el 266 2006-09-06 09:36:40Z ss5 $
 
 ;;; If your Emacs does not default to `cperl-mode' on Perl files:
 ;;; To use this mode put the following into
@@ -1449,6 +1449,13 @@
 ;;; Perl/Regexp menu:		3 new entries for `cperl-next-interpolated-REx'
 ;;; `cperl-praise':		Mention finded interpolated RExen.
 
+;;; After 5.19:
+;;; `cperl-init-faces':		Highlight %$foo, @$foo too.
+;;; `cperl-short-docs':		Better docs for system, exec
+;;; `cperl-find-pods-heres':	Better detect << after print {FH} <<EOF etc.
+;;;				Would not find HERE-doc ended by EOF without NL
+;;; `cperl-short-docs':		Correct not-doubled \-escapes
+
 ;;; Perl6 changes for Pugs by Steffen Schwigon (http://renormalist.net)
 ;;;
 ;;; Modified to understand Perl6 syntax.
@@ -1457,36 +1464,34 @@
 ;;;  New variable `cperl-use-v6' that switches between Perl5/Perl6
 ;;;  syntax.
 ;;;
-;;;  Simple heuristics to automatically recognize Perl6
+;;;  Simple heuristics to automatically activate Perl6 specific syntax
 ;;;   * search for "use v6" or "class ..." near beginning of file
 ;;;   * file suffix .p6
 ;;;
 ;;;  Highlighting new keywords/builtins:
-;;;    class
-;;;    has
-;;;    state
-;;;    does
-;;;    say
-;;;    rx
-;;;    any, all, one, none
-;;;    returns, of
+;;;    class,
+;;;    has, state, does,
+;;;    say,
+;;;    rx,
+;;;    any, all, one, none,
+;;;    returns, of,
 ;;;    multi/proto sub method,
-;;;    given, when, default, loop
-;;;    gather, take, taken
-;;;    try
-;;;    err
-;;;    zip, uniq, reduce, sum, max, min, kv, pairs, type, pick
-;;;    "bit" "int" "str" "num" "ref" "bool" "Bit" "Int" "Str" "Num" "Ref"
-;;;    "Complex" "Exception" "Seq" "Range" "Set" "Junction" "Pair" "Mapping" "Signature" "Capture"
-;;;    "Bool" "Array" "Hash" "IO" "Code" "Routine" "Sub" "Method" "Submethod"
-;;;    "Macro" "Rule" "Block" "Bare" "Parametric" "Package" "Module" "Class"
-;;;    "Object" "Grammar" "List" "Lazy" "Eager" 
+;;;    given, when, default, loop,
+;;;    gather, take, taken,
+;;;    coro, yield,
+;;;    try, err,
+;;;    zip, uniq, reduce, sum, max, min, kv, pairs, type, pick,
+;;;    "bit" "int" "str" "num" "ref" "bool" "Bit" "Int" "Str" "Num" "Ref",
+;;;    "Complex" "Exception" "Seq" "Range" "Set" "Junction" "Pair" "Mapping" "Signature" "Capture",
+;;;    "Bool" "Array" "Hash" "IO" "Code" "Routine" "Sub" "Method" "Submethod",
+;;;    "Macro" "Rule" "Block" "Bare" "Parametric" "Package" "Module" "Class",
+;;;    "Object" "Grammar" "List" "Lazy" "Eager",
 ;;;    "Real" "Scalar" "int8" "Socket"
 ;;;
 ;;;  Indentation:
 ;;;    recognize sub traits (returns Type, is rw, etc.)
 ;;;    recognize more special blocks:
-;;;      FIRST, ENTER, LEAVE, KEEP, UNDO, NEXT,
+;;;      START, ENTER, LEAVE, KEEP, UNDO, FIRST, NEXT,
 ;;;      LAST, PRE, POST, CATCH, CONTROL,
 ;;;      given, when, default, gather, loop
 ;;;
@@ -1535,6 +1540,9 @@
       (defvar gud-perldb-history)
       (defvar font-lock-background-mode) ; not in Emacs
       (defvar font-lock-display-type)	; ditto
+      (defvar paren-backwards-message)	; Not in newer XEmacs?
+      (defvar vc-rcs-header)		; likewise?
+      (defvar vc-sccs-header)		; likewise?
       (or (fboundp 'defgroup)
 	  (defmacro defgroup (name val doc &rest arr)
 	    nil))
@@ -2964,7 +2972,7 @@ the last)."
 	    cperl-white-and-comment-rex ; 4 = pre-package-name
 	       "\\([a-zA-Z_0-9:']+\\)\\)?\\)" ; 5 = package-name
        "\\|"
-          "[ \t]*\\(\\(multi\\|proto\\)[ \t]+\\)?\\(sub\\|method\\|submethod\\)" ; ss5
+          "[ \t]*\\(\\(multi\\|proto\\)[ \t]*\\)?\\(coro\\|sub\\|method\\|submethod\\)?" ; ss5
 	  (cperl-after-sub-regexp 'named nil) ; 11=name 14=proto 17=attr-start
 	  cperl-maybe-white-and-comment-rex	; 18=pre-block
    "\\|"
@@ -4580,7 +4588,7 @@ and closing parentheses and brackets."
 			       (and (eq (preceding-char) ?b)
 				    (progn
 				      (forward-sexp -1)
-				      (looking-at "\\(sub\\|method\\)\\>")))) ; ss5
+				      (looking-at "\\(coro\\|sub\\|method\\|submethod\\)\\>")))) ; ss5
 			      (setq old-indent
 				    (nth 1
 					 (parse-partial-sexp
@@ -5269,10 +5277,10 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 	       (concat
 		"\\|"
 		;; 1+6+2=9 extra () before this:
-        (if (not cperl-use-v6) ; ss5
-            "\\<\\(q[wxqr]?\\|[msy]\\|tr\\)\\>" ; QUOTED CONSTRUCT - Perl5
-          "\\<\\(q[wxqr]?\\|[y]\\|tr\\)\\>" ; QUOTED CONSTRUCT - Perl6
-          )
+		(if (not cperl-use-v6) ; ss5
+		    "\\<\\(q[wxqr]?\\|[msy]\\|tr\\)\\>" ; QUOTED CONSTRUCT - Perl5
+		  "\\<\\(q[wxq]?\\)\\>" ; QUOTED CONSTRUCT - Perl6
+		  )
 		"\\|"
 		;; 1+6+2+1=10 extra () before this:
 		"\\([?/<]\\)"	; /blah/ or ?blah? or <file*glob>
@@ -5300,7 +5308,7 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 		"\\\\\\(['`\"($]\\)"	; BACKWACKED something-hairy
 		;; 1+6+2+1+1+6+1+1+1+1=21 extra () before this: ; ss5
 		"\\|"
-		"\\<\\(\\(rx\\|[ms]\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\)\\>:?")            ; ss5: rx
+		"\\<\\(\\(rx\\|[msy]\\|tr\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\|Perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\)\\>:?")            ; ss5: rx
 		;; 1+6+2+1+1+6+1+1+1+1+7=28 extra () before this: ; ss5
 	     ""))))
     (unwind-protect
@@ -5492,7 +5500,7 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 						(progn
 						  (forward-sexp -2)
 						  (not
-						   (looking-at "print\\>")))
+						   (looking-at "\\(printf?\\|system\\|exec\\|sort\\)\\>")))
 						(error t)))))))
 				   (error nil))) ; func(<<EOF)
 			       (and (not (match-beginning 6)) ; Empty
@@ -5522,7 +5530,8 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 		  ;; some hook of fontification, and max is random
 		  (or (and (re-search-forward (concat "^" qtag "$")
 					      stop-point 'toend)
-			   (eq (following-char) ?\n))
+			   ;;;(eq (following-char) ?\n) ; XXXX WHY???
+			   )
 		    (progn		; Pretend we matched at the end
 		      (goto-char (point-max))
 		      (re-search-forward "\\'")
@@ -5851,7 +5860,7 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 			    (and cperl-fontify-m-as-s
 				 (or
 				  ;; (string-match "^\\(m\\|qr\\)$" argument)    ; ss5
-				  (string-match "^\\(\\(rx\\|[ms]\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\)$" argument)           ; ss5: rx
+				  (string-match "^\\(\\(rx\\|[msy]\\|tr\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\|Perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\)$" argument)           ; ss5: rx
 				  (and (eq 0 (length argument))
 				       (not (eq ?\< (char-after b)))))))
 			(progn
@@ -6367,7 +6376,7 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 			  ;; ss5: don't misinterpret modifier params as regex delimiters
 			  (if (and (save-excursion
 						 (forward-char -6)
-						 (looking-at ":perl5"))
+						 (looking-at ":\\(perl5\\|Perl5\\|P5\\)"))
 					   (looking-at "<[a-zA-Z]+>"))
 				  (progn
 					(search-forward ">" nil t)
@@ -6483,7 +6492,7 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 						(and cperl-fontify-m-as-s
 							 (or
 							  ;; (string-match "^\\(m\\|qr\\)$" argument)    ; ss5
-							  (string-match "^\\(\\(qr\\|rx\\|[ms]\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\)$" argument) ; ss5: rx
+							  (string-match "^\\(\\(qr\\|rx\\|[msy]\\|tr\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\|Perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\)$" argument) ; ss5: rx
 							  (and (eq 0 (length argument))
 								   (not (eq ?\< (char-after b)))))))
 					(progn
@@ -6914,7 +6923,7 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 	     (backward-sexp)
 	     ;; sub {BLK}, print {BLK} $data, but NOT `bless', `return', `tr'
 	     (or (and (looking-at "[a-zA-Z0-9_:]+[ \t\n\f]*[{#]") ; Method call syntax
-		      (not (looking-at "\\(bless\\|return\\|\\(\\(rx\\|[ms]\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\):?\\)")) ;; ss5 23.06.2006
+		      (not (looking-at "\\(bless\\|return\\|\\(\\(rx\\|[msy]\\|tr\\)\\s *\\(:\\([igcpw]\\|ignorecase\\|global\\|continue\\|pos\\|once\\|words\\|bytes\\|codes\\|graphs\\|langs\\|\\|[0-9]+\\(st\\|nd\\|rd\\|th\\|x\\)\\|ov\\|overlap\\|ex\\|exhaustive\\|rw\\|P5\\|perl5\\|Perl5\\(<[a-zA-Z]+>\\)?\\|nth\\(([0-9]+)\\)?\\|x\\(([0-9]+)\\)?\\)\\s *\\)*\\):?\\)")) ;; ss5 23.06.2006
 		      (not (looking-at "\\$[a-zA-Z0-9_]+"))) ; ss5: todo: why? (topics before blockstart?); even better [$@%]?
 		 ;; sub bless::foo {}
 		 (progn
@@ -6922,7 +6931,7 @@ the sections using `cperl-pod-head-face', `cperl-pod-face',
 		   (and (eq (preceding-char) ?b)
 			(progn
 			  (forward-sexp -1)
-			  (looking-at "\\(sub\\|method\\)[ \t\n\f#]"))))))) ; ss5
+			  (looking-at "\\(coro\\|sub\\|method\\|submethod\\)[ \t\n\f#]"))))))) ; ss5
       (if cperl-use-v6
 	  (progn ; ss5: "if/elsif/unless/while/until/given/when/for/loop" without parens; just look at beginning of line
 	    (beginning-of-line)
@@ -6956,7 +6965,7 @@ statement would start; thus the block in ${func()} does not count."
 		   (save-excursion
 		    (forward-sexp -1)
 		    ;; else {}     but not    else::func {}
-		    (or (and (looking-at "\\(else\\|class\\|\\|continue\\|grep\\|map\\|gather\\|async\\|atomically\\|given\\|when\\|default\\|loop\\|for\\|BEGIN\\|END\\|CHECK\\|INIT\\|FIRST\\|ENTER\\|LEAVE\\|KEEP\\|UNDO\\|NEXT\\|LAST\\|PRE\\|POST\\|CATCH\\|CONTROL\\|\\(\\(multi\\|proto\\)[ \t]+\\)?\\(sub\\|method\\|submethod\\)\\)\\>")
+		    (or (and (looking-at "\\(else\\|class\\|\\|continue\\|grep\\|map\\|gather\\|async\\|atomically\\|given\\|when\\|default\\|loop\\|for\\|BEGIN\\|END\\|CHECK\\|INIT\\|START\\|FIRST\\|ENTER\\|LEAVE\\|KEEP\\|UNDO\\|NEXT\\|LAST\\|PRE\\|POST\\|CATCH\\|CONTROL\\|\\(\\(multi\\|proto\\)[ \t]*\\)?\\(coro\\|sub\\|method\\|submethod\\)?\\)\\>")
 			     (not (looking-at "\\(\\sw\\|_\\)+::")))
 			;; sub f {}
 			(progn
@@ -6964,7 +6973,7 @@ statement would start; thus the block in ${func()} does not count."
 			  (and (eq (preceding-char) ?b)
 			       (progn
 				 (forward-sexp -1)
-				 (looking-at "\\(sub\\|method\\)[ \t\n\f#]")))))) ; ss5
+				 (looking-at "\\(coro\\|sub\\|method\\|submethod\\)[ \t\n\f#]")))))) ; ss5
 		   (save-excursion ; ss5: return Type {} / is rw {} / is cached {} / ...
 		     (forward-sexp -2)
 		     (looking-at "\\(returns\\|of\\|is\\|does[ \t]\\(rw\\|cached\\|signature\\|parsed\\|inline\\|tighter\\|looser\\|equiv\\|export\\)\\|will[ \t]do\\)\\>")))
@@ -6973,7 +6982,7 @@ statement would start; thus the block in ${func()} does not count."
 	      (save-excursion ; ss5: "if/elsif/unless/while/until/given/when/for/loop" without parens; just look at beginning of line
 		;; ss5: todo: correct in P5? Then use-v6'ify!
 		(beginning-of-line)
-		(looking-at "\\s *}?\\s *\\(\\(els\\(e\\s +\\|\\)\\)?if\\|un\\(less\\|til\\)\\|class\\|gather\\|async\\|atomically\\|given\\|wh\\(ile\\|en\\)\\|loop\\|for\\|\\(\\(multi\\|proto\\)[ \t]+\\)?\\(sub\\|method\\|submethod\\)\\)\\>"))))
+		(looking-at "\\s *}?\\s *\\(\\(els\\(e\\s +\\|\\)\\)?if\\|un\\(less\\|til\\)\\|class\\|gather\\|async\\|atomically\\|given\\|wh\\(ile\\|en\\)\\|loop\\|for\\|\\(\\(multi\\|proto\\)[ \t]*\\)?\\(coro\\|sub\\|method\\|submethod\\)?\\)\\>"))))
       (error nil))))
 
 (defun cperl-after-expr-p (&optional lim chars test)
@@ -7033,7 +7042,9 @@ CHARS is a string that contains good characters to have before us (however,
 	(while (and (or (not lim)
 			(> (point) lim))
 		    (not (cperl-after-expr-p lim)))
-	  (forward-sexp -1)))
+	  (forward-sexp -1)
+	  ;; May be after $, @, $# etc of a variable
+	  (skip-chars-backward "$@%#")))
     (error nil)))
 
 (defun cperl-at-end-of-expr (&optional lim)
@@ -7772,10 +7783,10 @@ indentation and initial hashes.  Behaves usually outside of comment."
              "foreach" "continue" "exit" "die" "last" "loop" "goto" "next"
              "redo" "return" "local" "exec" "sub" "do" "dump" "use" "our" "state"
              "require" "package" "eval" "my" "BEGIN" "END" "CHECK"
-             "INIT" "FIRST" "ENTER" "LEAVE" "KEEP"
+             "INIT" "START" "FIRST" "ENTER" "LEAVE" "KEEP"
              "UNDO" "NEXT" "LAST" "PRE" "POST" "CATCH" "CONTROL"
              "given" "when" "default" "has" "returns" "of" "is" "does"
-             "\\(\\(multi\\|proto\\)[ \t]+\\)?\\(sub\\)?\\(method\\)?"
+             "\\(\\(multi\\|proto\\)[ \t]*\\)?\\(coro\\|sub\\|method\\|submethod\\)?"
              "class" "try")
 	       "\\|")			; Flow control
 	      "\\)\\>") 2)		; was "\\)[ \n\t;():,\|&]"
@@ -7874,7 +7885,7 @@ indentation and initial hashes.  Behaves usually outside of comment."
 	     (concat
 	      "\\(^\\|[^$@%&\\]\\)\\<\\("
 	      ;; "AUTOLOAD" "BEGIN" "CHECK" "DESTROY" "END" "INIT" "__END__" "async" "atomically" "chomp"
-	      ;; "chop" "class" "defined" "delete" "do" "each" "else" "elsif"
+	      ;; "chop" "class" "coro" "defined" "delete" "do" "each" "else" "elsif"
 	      ;; "eval" "exists" "for" "foreach" "format" "gather" "goto"
 	      ;; "grep" "has" "if" "keys" "kv" "last" "local" "loop" "map" "my" "next"
 	      ;; "no" "our" "pairs" "package" "pop" "pos" "pick" "print" "printf" "push"
@@ -7882,7 +7893,7 @@ indentation and initial hashes.  Behaves usually outside of comment."
 	      ;; "sort" "splice" "split" "study" "state" "sum" "take" "type" "sub" "tie" "tr"
 	      ;; "undef" "uniq" "unless" "unshift" "untie" "until" "uniq" "use"
 	      ;; "while" "y" "zip"
-	      "AUTOLOAD\\|BEGIN\\|CHECK\\|a\\(sync\\|tomically\\)\\|c\\(lass\\|ho\\(p\\|mp\\)\\)\\|d\\(e\\(fined\\|lete\\)\\|"
+	      "AUTOLOAD\\|BEGIN\\|CHECK\\|a\\(sync\\|tomically\\)\\|c\\(lass\\|ho\\(p\\|mp\\)\\|oro\\)\\|d\\(e\\(fined\\|lete\\)\\|"
 	      "o\\)\\|DESTROY\\|e\\(ach\\|val\\|xists\\|ls\\(e\\|if\\)\\)\\|"
 	      "END\\|for\\(\\|each\\|mat\\)\\|g\\(ather\\|rep\\|oto\\)\\|has\\|INIT\\|if\\|k\\(eys\\|v\\)\\|"
 	      "l\\(ast\\|o\\(cal\\|op\\)\\)\\|m\\(a\\(p\\|x\\)\\|in\\|y\\)\\|n\\(ext\\|o\\)\\|our\\|"
@@ -7902,7 +7913,7 @@ indentation and initial hashes.  Behaves usually outside of comment."
 	    ;; This highlights declarations and definitions differenty.
 	    ;; We do not try to highlight in the case of attributes:
 	    ;; it is already done by `cperl-find-pods-heres'
-	    (list (concat "\\<\\(\\(multi\\|proto\\)[ \t]+\\)?\\(sub\\)?\\(method\\)?" ; ss5: multi|proto sub methods
+	    (list (concat "\\<\\(\\(multi\\|proto\\)[ \t]*\\)?\\(coro\\|sub\\|method\\|submethod\\)?" ; ss5: multi|proto sub methods
 			  cperl-white-and-comment-rex ; whitespace/comments
 			  "\\([^ \n\t{;()]+\\)" ; 5=name (assume non-anonymous)
 			  "\\("
@@ -7912,7 +7923,7 @@ indentation and initial hashes.  Behaves usually outside of comment."
 			    "\\(returns[ \t]+.*\\)?" ; ss5: returns
 			  cperl-maybe-white-and-comment-rex ; whitespace/comments?
 			  "[{;]")
-		  6 (if cperl-font-lock-multiline
+		  5 (if cperl-font-lock-multiline
 			'(if (eq (char-after (cperl-1- (match-end 0))) ?\{ )
 			     'font-lock-function-name-face
 			   'font-lock-variable-name-face)
@@ -7953,7 +7964,7 @@ indentation and initial hashes.  Behaves usually outside of comment."
             ;;; '("\\([@%]\\|\\$#\\)\\(\\sw+\\)"
             ;;;  (2 (cons font-lock-variable-name-face '(underline))))
 	    (cond ((featurep 'font-lock-extra)
-		   '("^[ \t]*\\(has\\|my\\|local\\|our\\)[ \t]*\\(([ \t]*\\)?\\([$@%*][a-zA-Z0-9_:]+\\)\\([ \t]*,\\)?"
+		   '("^[ \t]*\\(has\\|my\\|local\\|our\\|state\\)[ \t]*\\(([ \t]*\\)?\\([$@%*][a-zA-Z0-9_:]+\\)\\([ \t]*,\\)?"
 		     (3 font-lock-variable-name-face)
 		     (4 '(another 4 nil
 				  ("\\=[ \t]*,[ \t]*\\([$@%*][a-zA-Z0-9_:]+\\)\\([ \t]*,\\)?"
@@ -8010,9 +8021,9 @@ indentation and initial hashes.  Behaves usually outside of comment."
 				   'syntax-type 'multiline))
 				(setq cperl-font-lock-multiline-start nil))))
 			(3 font-lock-variable-name-face)))))
-		  (t '("^[ \t{}]*\\(has\\|my\\|local\\|our\\)[ \t]*\\(([ \t]*\\)?\\([$@%*][a-zA-Z0-9_:]+\\)"
+		  (t '("^[ \t{}]*\\(has\\|my\\|local\\|our\\|state\\)[ \t]*\\(([ \t]*\\)?\\([$@%*][a-zA-Z0-9_:]+\\)"
 		       3 font-lock-variable-name-face)))
-	    '("\\<for\\(each\\)?\\([ \t]+\\(has\\|my\\|local\\|our\\)\\)?[ \t]*\\(\\$[a-zA-Z_][a-zA-Z_0-9]*\\)[ \t]*("
+	    '("\\<for\\(each\\)?\\([ \t]+\\(has\\|my\\|local\\|our\\|state\\)\\)?[ \t]*\\(\\$[a-zA-Z_][a-zA-Z_0-9]*\\)[ \t]*("
 	      4 font-lock-variable-name-face)))
       (if (not cperl-use-v6)
           (setq
@@ -8037,6 +8048,12 @@ indentation and initial hashes.  Behaves usually outside of comment."
                            cperl-hash-face
                          cperl-array-face) ; arrays and hashes
                      font-lock-variable-name-face)) ; Just to put something
+		  ("\\(@\\|\\$#\\)\\(\\$+\\([a-zA-Z_:][a-zA-Z0-9_:]*\\|[^ \t\n]\\)\\)"
+		   (1 cperl-array-face)
+		   (2 font-lock-variable-name-face))
+		  ("\\(%\\)\\(\\$+\\([a-zA-Z_:][a-zA-Z0-9_:]*\\|[^ \t\n]\\)\\)"
+		   (1 cperl-hash-face)
+		   (2 font-lock-variable-name-face))
                   ;;("\\([smy]\\|tr\\)\\([^a-z_A-Z0-9]\\)\\(\\([^\n\\]*||\\)\\)\\2")
 		       ;;; Too much noise from \s* @s[ and friends
                   ;;("\\(\\<\\([msy]\\|tr\\)[ \t]*\\([^ \t\na-zA-Z0-9_]\\)\\|\\(/\\)\\)"
@@ -8055,12 +8072,12 @@ indentation and initial hashes.  Behaves usually outside of comment."
                (and (string< "21.1.10" emacs-version)
                     (string< emacs-version "21.1.2")))
               '(
-                ("\\(\\([@%]\\|\$#\\)[a-zA-Z_:.^*+?=!][a-zA-Z0-9_:]*\\)" 1
+                ("\\(\\([@%]\\|\$#\\)[a-zA-Z_:.^*+?=!][a-zA-Z0-9_:]*\\)" 1 ; ss5: Twigils %.name %:name %^name, %*name, %+name, %?name, %=name, %!name
                  (if (eq (char-after (match-beginning 2)) ?%)
                      cperl-hash-face
                    cperl-array-face)
                  t)                   ; arrays and hashes
-				("\\(\\([$@]+\\)[a-zA-Z_:.^*+?=!][a-zA-Z0-9_:]*\\)\\([[{]\\)"
+				("\\(\\([$@]+\\)[a-zA-Z_:.^*+?=!][a-zA-Z0-9_:]*\\)\\([[{]\\)" ; ss5: Twigils %.name %:name %^name, %*name, %+name, %?name, %=name, %!name
 				 1
 				 (if (= (- (match-end 2) (match-beginning 2)) 1)
 					 (if (eq (char-after (match-beginning 3)) ?{)
@@ -9714,8 +9731,8 @@ $~	The name of the current report format.
 \\  Creates reference to what follows, like \$var, or quotes non-\w in strings.
 \\0	Octal char, e.g. \\033.
 \\E	Case modification terminator.  See \\Q, \\L, and \\U.
-\\L	Lowercase until \\E .  See also \l, lc.
-\\U	Upcase until \\E .  See also \u, uc.
+\\L	Lowercase until \\E .  See also \\l, lc.
+\\U	Upcase until \\E .  See also \\u, uc.
 \\Q	Quote metacharacters until \\E .  See also quotemeta.
 \\a	Alarm character (octal 007).
 \\b	Backspace character (octal 010).
@@ -9777,7 +9794,7 @@ endservent
 eof[([FILEHANDLE])]
 ... eq ...	String equality.
 eval(EXPR) or eval { BLOCK }
-exec(LIST)
+exec([TRUENAME] ARGV0, ARGVs)     or     exec(SHELL_COMMAND_LINE)
 exit(EXPR)
 exp(EXPR)
 fcntl(FILEHANDLE,FUNCTION,SCALAR)
@@ -9913,7 +9930,7 @@ substr(EXPR,OFFSET[,LEN])
 symlink(OLDFILE,NEWFILE)
 syscall(LIST)
 sysread(FILEHANDLE,SCALAR,LENGTH[,OFFSET])
-system(LIST)
+system([TRUENAME] ARGV0 [,ARGV])     or     system(SHELL_COMMAND_LINE)
 syswrite(FILEHANDLE,SCALAR,LENGTH[,OFFSET])
 tell[(FILEHANDLE)]
 telldir(DIRHANDLE)
@@ -10350,6 +10367,8 @@ We suppose that the regexp is scanned already."
     (goto-char pre-if)
     (forward-sexp 2)
     (forward-sexp -1)
+    ;; May be after $, @, $# etc of a variable
+    (skip-chars-backward "$@%#")
     (setq pre-A (point))
     (cperl-forward-to-end-of-expr)
     (setq post-A (point))
@@ -10951,7 +10970,7 @@ do extra unwind via `cperl-unwind-to-safe'."
 	  (cperl-fontify-syntaxically to)))))
 
 (defvar cperl-version
-  (let ((v  "Revision: 5.19-Pugs "))
+  (let ((v  "Revision: 5.20-Pugs "))
     (string-match ":\\s *\\([-0-9a-z.]+\\)" v)
     (substring v (match-beginning 1) (match-end 1)))
   "Version of IZ-supported CPerl package this file is based on.")

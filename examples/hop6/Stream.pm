@@ -12,9 +12,9 @@
 #package Stream;
 
 # use base Exporter;
-# @EXPORT_OK = qw(node head tail drop upto upfrom show promise
+# @EXPORT_OK =   <node head tail drop upto upfrom show promise
 #                 filter transform merge list_to_stream cutsort
-#                 iterate_function cut_loops);
+#                 iterate_function cut_loops>;
 # 
 # %EXPORT_TAGS = ('all' => \@EXPORT_OK);
 
@@ -44,7 +44,7 @@ sub show(Array $s is copy, Int $n? is copy) {
   my $ret = '';
   while $s && (!defined($n) || $n-- > 0) {
     ## XXX - what's $" these days?
-    $ret ~= "{@{head($s)}}" ~ ' ';
+    $ret ~= "@(head($s)) ";
     $s = tail($s);
   }
   return $ret;

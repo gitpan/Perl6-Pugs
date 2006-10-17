@@ -1,5 +1,5 @@
 
-use v6;
+use v6-alpha;
 
 role Array--Perl6;
 
@@ -10,17 +10,17 @@ does List;
 
 
 
-&Array::pop<Array> := &Array::splice<Array>.assuming(:offset(-1) :length(1));
+&Array::pop:(Array) := &Array::splice:(Array).assuming(:offset(-1) :length(1));
 
 multi sub Array::pop () returns Scalar {
     pop @CALLER::_;
 }
 
- multi sub Array::push (@array is rw : *@values) returns Int {
+ multi sub Array::push (@array is rw ; *@values) returns Int {
    Array::splice(@array, @array.elems, 0, @values);
    @array.elems;
  }
- &Array::shift<Array> := &Array::splice<Array>.assuming(:offset(0) :length(1));
+ &Array::shift:(Array) := &Array::splice:(Array).assuming(:offset(0) :length(1));
 
  multi sub Array::shift () returns Scalar {
    Array::shift @CALLER::_;
@@ -30,14 +30,14 @@ multi sub Array::pop () returns Scalar {
                                    Int ?$length,
                                        *@values
                                 ) returns List is rw
- multi sub Array::unshift (@array is rw : *@values) returns Int {
+ multi sub Array::unshift (@array is rw ; *@values) returns Int {
    Array::splice(@array, 0, 0, @values);
    @array.elems;
  }
 
- multi sub Array::grep (@values :      Code *&test  ) returns Lazy
+ multi sub Array::grep (@values ;      Code *&test  ) returns Lazy
  multi sub Array::grep (@values,   MatchTest $test  ) returns Lazy
- multi sub  Perl6::List::grep (MatchTest $test :   *@values) returns Lazy {
+ multi sub  Perl6::List::grep (MatchTest $test ;   *@values) returns Lazy {
    gather {
      for @values -> $x {
        take $x if $x ~~ $test;
@@ -45,17 +45,17 @@ multi sub Array::pop () returns Scalar {
    }
  }
  multi sub Array::join (@values,   Str $delimiter) returns Str
- multi sub  Perl6::List::join (Str $delimiter : *@values) returns Str {
+ multi sub  Perl6::List::join (Str $delimiter ; *@values) returns Str {
    my $str = ~@values[0];
    for 1..@values.end {
      $str ~= $delimiter ~ @values[$_];
    }
    $str;
  }
- &join<> := &join<Str>.assuming:delimiter(' ');
+ &join := &join:(Str).assuming:delimiter(' ');
 
  multi sub Array::map (@values,   Code $expression) returns Lazy 
- multi sub  Perl6::List::map (Code $expression : *@values) returns Lazy {
+ multi sub  Perl6::List::map (Code $expression ; *@values) returns Lazy {
    gather {
      while @values {
        take $expression
@@ -63,11 +63,11 @@ multi sub Array::pop () returns Scalar {
      }
    }
  }
- multi sub Array::reduce (@values : Code *&expression) returns Scalar
- multi sub  Perl6::List::reduce (Code $expression : *@values) returns Scalar {
+ multi sub Array::reduce (@values ; Code *&expression) returns Scalar
+ multi sub  Perl6::List::reduce (Code $expression ; *@values) returns Scalar {
    my $res;
    for @values -> $cur {
-        FIRST {$res = $cur; next;}
+     FIRST {$res = $cur; next;}
      $res = &$expression($res, $cur);
    }
    $res;
@@ -83,7 +83,7 @@ multi sub Array::pop () returns Scalar {
  }
 
  multi sub Array::reverse (   @values) returns Lazy|Str {
- multi sub  Perl6::List::reverse (: *@values) returns Lazy|Str {
+ multi sub  Perl6::List::reverse (; *@values) returns Lazy|Str {
    given want {
      when List {
        gather {
@@ -103,27 +103,27 @@ multi sub Array::pop () returns Scalar {
 
  multi sub Array::sort(                 @values is rw,
                                               *&by
-                              :           Bit +$inplace
+                              ;           Bit :$inplace
                              ) returns Array
 
  multi sub Array::sort(                 @values is rw,
                                 SortCriterion  @by
-                              :           Bit +$inplace
+                              ;           Bit :$inplace
                              ) returns Array
 
  multi sub Array::sort(                 @values is rw
-                              : SortCriterion +$by = &infix:<cmp>,
-                                          Bit +$inplace
+                              ; SortCriterion :$by = &infix:<cmp>,
+                                          Bit :$inplace
                              ) returns Array
 
  multi sub  Perl6::List::sort(  SortCriterion  @by
-                              :               *@values
+                              ;               *@values
                              ) returns List
 
- multi sub  Perl6::List::sort(: SortCriterion  $by = &infix:<cmp>,
+ multi sub  Perl6::List::sort(; SortCriterion  $by = &infix:<cmp>,
                                               *@values
                              ) returns List
- multi sub Perl6::Lists::zip (: Array *@lists, Bit +$shortest) returns Lazy {
+ multi sub Perl6::Lists::zip (; Array *@lists, Bit :$shortest) returns Lazy {
    gather {
      while $shortest ?? all (@lists) !! any(@lists) {
        for @lists -> @list {

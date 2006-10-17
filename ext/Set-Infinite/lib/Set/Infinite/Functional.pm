@@ -1,4 +1,4 @@
-use v6;
+use v6-alpha;
 
 use Span;
 
@@ -66,12 +66,12 @@ method union ($self: Set::Infinite::Functional $set )
     # TODO - optimize; invert loop order, since the new span is usually "after"
     my @tmp;
     my @res;
-    my @a = *@.spans, *$set.spans;
+    my @a = @.spans, $set.spans.[];
     @a = @a.sort:{ $^a.compare( $^b ) };
     # say "union ", @a.map:{ $_.stringify }.join(":");
     @res[0] = shift @a
         if @a;
-    while( @a ) {
+    while @a {
         my $elem = shift @a;
         @tmp = @res[-1].union( $elem );
         # say "span union ", @tmp.map:{ $_.stringify }.join(":");

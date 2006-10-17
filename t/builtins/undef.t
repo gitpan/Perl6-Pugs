@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -23,7 +22,7 @@ perl6-specific tests.
 #   
 #   Larry
 
-plan 72;
+plan 74;
 
 our $GLOBAL;
 
@@ -96,10 +95,10 @@ ok(!defined(undef), "undef is not defined");
     sub a_sub { "møøse" }
 
     ok(defined(&a_sub), "defined sub");
-    eval_ok('defined(%«$?PACKAGE\::»<&a_sub>)', "defined sub (symbol table)", :todo<parsefail>);
+    ok(eval('defined(%«$?PACKAGE\::»<&a_sub>)'), "defined sub (symbol table)", :todo<parsefail>);
 
-    eval_ok('!defined(&a_subwoofer)', "undefined sub",:todo<feature>);
-    eval_ok('!defined(%«$?PACKAGE\::»<&a_subwoofer>)', "undefined sub (symbol table)", :todo<feature>);
+    ok(eval('!defined(&a_subwoofer)'), "undefined sub",:todo<feature>);
+    ok(eval('!defined(%«$?PACKAGE\::»<&a_subwoofer>)'), "undefined sub (symbol table)", :todo<feature>);
 }
 
 # TODO: find a read-only value to try and assign to, since we don't
@@ -175,28 +174,29 @@ Perl6-specific tests
     ok(try { !defined($an_ary.pop) }, "comes to shove");
 
     my Hash $a_hash;
+
     ok(!defined($a_hash), "my Hash");
     ok(try { !defined($a_hash<blergh>) }, "my Hash subscript - undef");
     ok(try { !defined($a_hash<blergh>) }, "my Hash subscript - undef, no autovivification happened");
-    try { $a_hash<blergh> = 1 };
-    ok(try { defined($a_hash.delete("blergh")) }, "delete", :todo<bug>);
-    ok(try { !defined($a_hash.delete("blergh")) }, " - once only");
 
-    eval '
-        class Dog {};
-        my Dog $spot;
-    ';
+    $a_hash<blergh> = 1;
+    ok(defined($a_hash.delete('blergh')), "delete");
+    ok(!defined($a_hash.delete("blergh")), " - once only");
 
-    ok(eval('!defined $spot'), "Unelaborated mutt", :todo);
-    eval '$spot .= .new();';
-    ok(eval('defined $spot'), " - now real", :todo);
+    class Dog {};
+    my Dog $spot;
+
+    ok(!defined($spot), "Unelaborated mutt");
+    $spot .= new;
+    ok(defined $spot, " - now real");
 }
 
 # rules
 # TODO. refer to S05
-# L<S05/"Hypothetical variables" /backtracks past the closure/>
+# L<S05/Match objects/"they will all be undefined" closure
+#                                 "let keyword">
 
-if(!eval('("a" ~~ /a/)')) {
+if !eval('("a" ~~ /a/)') {
   skip 8, "skipped tests - rules support appears to be missing";
 }
 else {
@@ -294,11 +294,11 @@ flunk("FIXME (autoload tests)", :todo<parsefail>);
 #        AUTOMETHDEF   { %::«{'&' ~ $_}» = { "automethdef" } }
 #    }
 #
-#    is(ref $AutoMechanic::scalar0,    "Scalar", "autoload - scalar");
-#    is(ref @AutoMechanic::array0,     "Array",  "autoload - array");
-#    is(ref %AutoMechanic::hash,       "Hash",   "autoload - hash");
-#    is(ref &AutoMechanic::sub0,       "Code",   "autoload - sub");
-#    is(ref AutoMechanic.can("meth0"), "Code",   "autoload - meth");
+#    is(WHAT $AutoMechanic::scalar0,    "Scalar", "autoload - scalar");
+#    is(WHAT @AutoMechanic::array0,     "Array",  "autoload - array");
+#    is(WHAT %AutoMechanic::hash,       "Hash",   "autoload - hash");
+#    is(WHAT &AutoMechanic::sub0,       "Code",   "autoload - sub");
+#    is(WHAT AutoMechanic.can("meth0"), "Code",   "autoload - meth");
 #
 #    is($AutoMechanic::scalar, "autoscalardef",            "autoloaddef - scalar");
 #    is(~@AutoMechanic::ary,   ~("autoarraydef".split(""), "autoloaddef - array");
@@ -314,3 +314,10 @@ is((undef) * 2, 0, 'undef * 2');
 is(2 * (undef), 0, '2 * undef');
 is((undef) xx 2, [undef, undef], 'undef xx 2');
 is((undef) * (undef), 0, 'undef * undef');
+
+# L<http://colabti.de/irclogger/irclogger_log/perl6?date=2006-09-12,Tue&sel=145#l186>
+# See log above.  From IRC, TimToady says that both of these
+# should be false.  (At time of writing, @(undef,) is true.)
+is ?(@(undef,)), Bool::False, '?(@(undef,)) is false', :todo<feature>,
+    :depends<@() imposing context and not [] constructor>;
+is ?(list(undef,)), Bool::False, '?(@(undef,)) is false';

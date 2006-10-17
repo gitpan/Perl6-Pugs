@@ -127,7 +127,7 @@ sub JS::Root::rx_core_(%mods, Str $pat, Str $qo, Str $qc) is primitive {
       my $m = $string ~~ $rx;
       return $m if !$m;
       my @a = @$m; # XXX Error: Can't use "[object Object]" as a generic reference!
-      @a = map {$_[0]}, @$m if @{@a[0]};
+      @a = map {$_[0]}, @$m if @(@a[0]);
       unshift(@a,undef); # 1-based.
       @a[$nth_keys];
     };
@@ -219,7 +219,7 @@ method JS::Root::matcher (Rul $rule:) {
   JS::inline('(function (rul) { return rul.matcher })')($rule);
 }
 for <ok from to str subpos subnamed> -> $attr {
-  Pugs::Internals::eval "method JS::Root::$attr (Match \$match:) \{
+  Pugs::Internals::eval_perl6 "method JS::Root::$attr (Match \$match:) \{
     JS::inline('(function (match) \{ return match.$attr \})')(\$match);
   \}";
 }
@@ -228,13 +228,13 @@ for <ok from to str subpos subnamed> -> $attr {
 sub PIL2JS::Internals::Hacks::postcircumfix_for_match_objects (
   Match $match, Int *@idxs
 ) is primitive {
-  $match.subpos[*@idxs];
+  $match.subpos[@idxs];
 }
 
 sub PIL2JS::Internals::Hacks::init_match_postcircumfix_method () is primitive {
   JS::inline('(function () {
     PIL2JS.addmethod(
-      _3amain_3a_3aMatch,
+      _3aMain_3a_3aMatch,
       "postcircumfix:[]",
       _26PIL2JS_3a_3aInternals_3a_3aHacks_3a_3apostcircumfix_for_match_objects
     );

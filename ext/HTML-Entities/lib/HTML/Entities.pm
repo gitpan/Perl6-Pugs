@@ -1,8 +1,8 @@
+use v6-alpha;
 module HTML::Entities-0.2;
-use v6;
 
-#@EXPORT = qw(encode_entities decode_entities _decode_entities);
-#@EXPORT_OK = qw(%entity_to_char %char_to_entity encode_entities_numeric);
+#@EXPORT = <encode_entities decode_entities _decode_entities>;
+#@EXPORT_OK = <%entity_to_char %char_to_entity encode_entities_numeric>;
 
 my %entity_to_char = (
  # Some normal chars that have special meaning in SGML context
@@ -79,7 +79,7 @@ my %entity_to_char = (
  # Some extra Latin 1 chars that are listed in the HTML3.2 draft (21-May-96)
     "copy"     => '©',  # copyright sign
     "reg"      => '®',  # registered sign
-    "nbsp"     => "\240", # non breaking space
+    "nbsp"     => "\o240", # non breaking space
 
  # Additional ISO-8859/1 entities listed in rfc1866 (section 14)
     "iexcl"    => '¡',
@@ -280,7 +280,7 @@ for 0 .. 255 -> $ascii_val {
     %char_to_entity{~chr($ascii_val)} //= "&#$ascii_val;";
 }
 
-multi sub decode_entities($string is rw) is export
+multi decode_entities(Str $string is rw) is export
 {
     my $result = $string;
     
@@ -293,12 +293,12 @@ multi sub decode_entities($string is rw) is export
     return $result;
 }
 
-multi sub decode_entities(*@strings is rw) is export
+multi decode_entities(Str @strings is rw) is export
 {
     @strings.map: -> $string is copy { decode_entities($string); };
 }
 
-multi sub decode_entities(@strings is rw) is export
+multi decode_entities(Str *@strings is rw) is export
 {
     @strings.map: -> $string is copy { decode_entities($string); };
 }
@@ -374,7 +374,7 @@ HTML::Entities - Encode or decode strings with HTML entities
 
  $a = "V&aring;re norske tegn b&oslash;r &#230res";
  decode_entities($a);
- encode_entities($a, "\200-\377");
+ encode_entities($a, "\o200-\o377");
 
 For example, this:
 
@@ -457,8 +457,8 @@ example, C<escape_entities("r\xF4le")> returns "r&ocirc;le", but
 C<escape_entities_numeric("r\xF4le")> returns "r&#xF4;le".
 
 This routine is I<not> exported by default.  But you can always
-export it with C<use HTML::Entities qw(encode_entities_numeric);>
-or even C<use HTML::Entities qw(:DEFAULT encode_entities_numeric);>
+export it with C<<use HTML::Entities <encode_entities_numeric>;>>
+or even C<<use HTML::Entities <:DEFAULT encode_entities_numeric>;>>
 
 =back
 

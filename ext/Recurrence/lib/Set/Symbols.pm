@@ -1,8 +1,8 @@
-use v6;
+use v6-alpha;
 
 role Set::Symbols;
 
-=for LATER
+=begin LATER
 
 # parsefail :(
 
@@ -62,7 +62,7 @@ multi sub *infix:<%> (Set $one, Set $two) {
 
 # what will be used for stringify?
 method prefix:<~> ($self) returns Str {
-    ./stringify
+    self.stringify
 }
 
 # removed - spans can be numerically compared

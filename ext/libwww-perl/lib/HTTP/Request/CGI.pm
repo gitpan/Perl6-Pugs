@@ -1,5 +1,4 @@
-#!/usr/bin/pugs
-use v6;
+use v6-alpha;
 
 use URI;
 use URI::Escape <uri_unescape>;

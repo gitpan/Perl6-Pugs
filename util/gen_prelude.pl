@@ -100,12 +100,26 @@ sub gen_source {
     my($target) = @_;
     open my $ofh, ">", $target or die "open: $target: $!";
 
+    my @import_lines;
     {
         my $prelude = shift @{ $Config{precompile} };
         warn "*** warning: Prelude.pm should probably be the first --include\n"
             unless $prelude =~ /Prelude/;
         open my $ifh, $prelude or die "open: $prelude: $!";
-        print $ofh $_ while <$ifh>;
+        while (<$ifh>) {
+            if (/^\s*use (?!v6\b)(\S+)/) {
+                push @import_lines, $_;
+                my $file = $1;
+                my $dir = "ext/$1/lib";
+                $dir =~ s{::}{-}g;
+                $file =~ s{::}{/}g;
+                my $pathname = "$dir/$file.pm";
+                die "Cannot find $pathname" unless -e $pathname;
+                push @{ $Config{precompile} ||= [] }, $pathname;
+                next;
+            }
+            print $ofh $_;
+        }
     }
 
     # manhandle the rest of the inlined modules.
@@ -129,10 +143,11 @@ sub gen_source {
         print $ofh $program;
 
         print STDERR ", $module" if $Config{verbose};
-        $module =~ s#::#/#g;
-        print $ofh "\n};\n%*INC<${module}.pm> = '<precompiled>';\n\n";
+        #$module =~ s#::#/#g;
+        print $ofh "\n};\nBEGIN { %*INC<${module}> = '<precompiled>' };\n\n";
         # (the need for a semicolon in "};" is probably a bug.)
     }
+    # print $ofh @import_lines;
     print STDERR "... " if $Config{verbose};
 }
 
@@ -149,16 +164,32 @@ sub precomp {
     gen_source($TEMP_PRELUDE);
     $ENV{PUGS_COMPILE_PRELUDE} = 1;
 
-    my ($rh, $wh, $lines);
-    my $pid = open2($rh, $wh, $Config{pugs}, -C => 'Parse-YAML', $TEMP_PRELUDE);
-    $lines += print OUT while <$rh>;
-    #my $program = do { local $/; <$rh> };
-    waitpid($pid, 0);
+    close OUT;
 
-    exit 1 unless length $lines;
+    my $output = '';
+    if ($Config{output}) {
+        $output = "> $Config{output}";
+    }
+
+    warn("$Config{pugs} -Iext/Math-Basic/lib -C Parse-YAML $TEMP_PRELUDE $output\n");
+    system("$Config{pugs} -Iext/Math-Basic/lib -C Parse-YAML $TEMP_PRELUDE $output");
+
+    if ($Config{output}) {
+        open IN, '<:crlf', $Config{output} or die "No output found";
+        my @lines = <IN> or do {
+            close IN;
+            unlink $Config{output};
+            die "Output is empty";
+        };
+        close IN;
+        open OUT, '>:raw', $Config{output} or die "Cannot write back to output";
+        print OUT @lines;
+        close OUT;
+    }
 
     die "Pugs ".(($?&255)?"killed by signal $?"
          :"exited with error code ".($?>>8)) if $?;
+
     print STDERR "done.\n" if $Config{verbose};
 }
 

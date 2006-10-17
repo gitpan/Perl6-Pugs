@@ -1,7 +1,7 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
 
 module Pugs.Prim.List (
-    op0Zip, op1Pick, op1Sum,
+    op0Zip, op0Cat, op0Each, op0RoundRobin, op1Pick, op1Sum,
     op1Min, op1Max, op1Uniq,
     op2ReduceL, op2Reduce, op2Grep, op2Map, op2Join,
     sortByM,
@@ -16,8 +16,17 @@ import qualified Data.Set as Set
 import Pugs.Prim.Numeric
 import Pugs.Prim.Lifts
 
+op0Cat :: [Val] -> Eval Val
+op0Cat = fmap (VList . concat) . mapM fromVal
+
 op0Zip :: [Val] -> Eval Val
-op0Zip = fmap (VList . concat . op0Zip') . mapM fromVal
+op0Zip = fmap (VList . fmap VList . op0Zip') . mapM fromVal
+
+op0Each :: [Val] -> Eval Val
+op0Each = fmap (VList . concat . op0Zip') . mapM fromVal
+
+op0RoundRobin :: [Val] -> Eval Val
+op0RoundRobin = fmap (VList . fst . partition defined . concat . op0Zip') . mapM fromVal
 
 op0Zip' :: [[Val]] -> [[Val]]
 op0Zip' lists | all null lists = []
@@ -54,10 +63,10 @@ op1Sum list = do
     foldM (op2Numeric (+)) undef vals
 
 op1Min :: Val -> Eval Val
-op1Min v = op1MinMax (== False) v
+op1Min v = op1MinMax not v
 
 op1Max :: Val -> Eval Val
-op1Max v = op1MinMax (== True) v
+op1Max v = op1MinMax id v
 
 -- min_or_max is a function which negates truth/falsehood.
 -- This is necessary as op1MinMax should cope with min() as well as max().
@@ -81,7 +90,7 @@ op1MinMax min_or_max v = do
     -- The min or max of an empty list is undef.
     op1MinMax' _ _ [] = return undef
     -- We have to supply our own comparator...
-    op1MinMax' _ Nothing valList = foldM default_compare (head valList) valList
+    op1MinMax' _ Nothing valList = foldM default_compare (head valList) (tail valList)
     -- or use the one of the user
     op1MinMax' min_or_max (Just subVal) valList = do
           sub <- fromVal subVal
@@ -96,7 +105,7 @@ op1MinMax min_or_max v = do
               --    0 ==> a == b
               --   +1 ==> a > b
               -- We call min_or_max so we can work for both min() and max().
-              return $ if min_or_max (int > (0::VInt)) then a else b) (head valList) valList
+              return $ if min_or_max (int > (0::VInt)) then a else b) (head valList) (tail valList)
     -- This is the default comparision function, which will be used if the user
     -- hasn't specified a own comparision function.
     default_compare a b = do
@@ -159,44 +168,47 @@ op2ReduceL :: Bool -> Val -> Val -> Eval Val
 op2ReduceL keep sub@(VCode _) list = op2ReduceL keep list sub
 op2ReduceL keep list sub = do
     code <- fromVal sub
-    op2Reduce keep list $ VCode code{ subAssoc = "left" }
+    op2Reduce keep list $ VCode code{ subAssoc = A_left }
 
 op2Reduce :: Bool -> Val -> Val -> Eval Val
-op2Reduce keep sub@(VCode _) list = op2Reduce keep list sub
+op2Reduce keep sub@VCode{} list = op2Reduce keep list sub
 op2Reduce keep list sub = do
     code <- fromVal sub
     args <- fromVal list
+    if null args then identityVal (subName code) else do
     -- cxt  <- asks envContext
-    let (reduceM, reduceMn) = if keep then (scanM, scanMn) else (foldM, foldMn)
     let arity = length $ subParams code
-    if arity < 2 then fail "Cannot reduce() using a unary or nullary function." else do
-    -- n is the number of *additional* arguments to be passed to the sub.
-    -- Ex.: reduce { $^a + $^b       }, ...   # n = 1
-    -- Ex.: reduce { $^a + $^b + $^c }, ...   # n = 2
-    let n = arity - 1
-    -- Break on empty list.
-    if null args then return undef else do
-    let doFold xs = do
-        evl <- asks envEval
-        local (\e -> e{ envContext = cxtItemAny }) $ do
-            evl (App (Val sub) Nothing (map Val xs))
-    case subAssoc code of
-        "right" -> do
-            let args' = reverse args
-            reduceMn args' n (doFold . reverse)
-        "chain" -> if arity /= 2            -- FIXME: incorrect for scans
-            then fail
-                "When reducing using a chain-associative sub,\nthe sub must take exactly two arguments."
-            else callCC $ \esc -> do
-                let doFold' x y = do
-                    val <- doFold [x, y]
-                    case val of
-                        VBool False -> esc val
-                        _           -> return y
-                reduceM doFold' (head args) (tail args)
-                return $ VBool True
-        "non"   -> fail $ "Cannot reduce over non-associativity"
-        _       -> reduceMn args n doFold -- "left", "pre"
+        (reduceM, reduceMn) = if keep then (scanM, scanMn) else (foldM, foldMn)
+    if subAssoc code == A_list
+        then asks envEval >>= \evl -> evl $ App (Val $ VCode code{ subParams = length args `replicate` head (subParams code)}) Nothing (map Val args)
+        else do
+            when (arity < 2) $ fail "Cannot reduce() using a unary or nullary function."
+            -- n is the number of *additional* arguments to be passed to the sub.
+            -- Ex.: reduce { $^a + $^b       }, ...   # n = 1
+            -- Ex.: reduce { $^a + $^b + $^c }, ...   # n = 2
+            let n = arity - 1
+            -- Break on empty list.
+            let doFold xs = do
+                evl <- asks envEval
+                local (\e -> e{ envContext = cxtItemAny }) $ do
+                    evl (App (Val sub) Nothing (map Val xs))
+            case subAssoc code of
+                A_right -> do
+                    let args' = reverse args
+                    reduceMn args' n (doFold . reverse)
+                A_chain -> if arity /= 2            -- FIXME: incorrect for scans
+                    then fail
+                        "When reducing using a chain-associative sub,\nthe sub must take exactly two arguments."
+                    else catchT $ \esc -> do
+                        let doFold' x y = do
+                            val <- doFold [x, y]
+                            case val of
+                                VBool False -> esc val
+                                _           -> return y
+                        reduceM doFold' (head args) (tail args)
+                        return $ VBool True
+                A_non   -> fail $ "Cannot reduce over non-associativity"
+                _       -> reduceMn args n doFold -- "left", "pre"
     where
     -- This is a generalized foldM.
     -- It takes an input list (from which the first elem will be used as start
@@ -214,10 +226,69 @@ op2Reduce keep list sub = do
             fqx  <- f q x
             rest <- fromVal =<< scanM f fqx xs
             return $ VList (q:rest)
+    identityVal name = case nameStr of
+        "**"    -> _1
+        "*"     -> _1
+        "/"     -> _fail
+        "%"     -> _fail
+        "x"     -> _fail
+        "xx"    -> _fail
+        "+&"    -> _neg1
+        "+<"    -> _fail
+        "+>"    -> _fail
+        "~&"    -> _fail
+        "~<"    -> _fail
+        "~>"    -> _fail
+        "+"     -> _0
+        "-"     -> _0
+        "~"     -> _''
+        "+|"    -> _0
+        "+^"    -> _0
+        "~|"    -> _''
+        "~^"    -> _''
+        "&"     -> _junc JAll
+        "|"     -> _junc JAny
+        "^"     -> _junc JOne
+        "!="    -> _false
+        "=="    -> _true
+        "<"     -> _true
+        "<="    -> _true
+        ">"     -> _true
+        ">="    -> _true
+        "~~"    -> _true
+        "eq"    -> _true
+        "ne"    -> _false
+        "lt"    -> _true
+        "le"    -> _true
+        "gt"    -> _true
+        "ge"    -> _true
+        "=:="   -> _true
+        "==="   -> _true
+        "eqv"   -> _true
+        "&&"    -> _true
+        "||"    -> _false
+        "^^"    -> _false
+        ","     -> _list
+        "Y"     -> _list
+     -- "\xA5"      -> _list
+        "\xC2\xA5"  -> _list
+        ('!':_) -> _false
+        _           -> _undef
+        where
+        nameStr = cast name
+        _0      = return (VInt 0)
+        _1      = return (VInt 1)
+        _undef  = return undef
+        _false  = return (VBool False)
+        _true   = return (VBool True)
+        _list   = return (VList [])
+        _neg1   = return (VInt $ -1)
+        _junc   = \jtyp -> return . VJunc $ MkJunc jtyp Set.empty Set.empty
+        _''     = return (VStr "")
+        _fail   = fail $ "reduce is nonsensical for " ++ cast name
 
 op2Grep :: Val -> Val -> Eval Val
 op2Grep sub@(VCode _) list = op2Grep list sub
-op2Grep (VList [v@(VRef _)]) sub = op2Grep v sub
 op2Grep list sub = do
     args <- fromVal list
     vals <- (`filterM` args) $ \x -> do
@@ -229,10 +300,9 @@ op2Grep list sub = do
 
 op2Map :: Val -> Val -> Eval Val
 op2Map sub@(VCode _) list = op2Map list sub
-op2Map (VList [v@(VRef _)]) sub = op2Map v sub
 op2Map list sub = do
     args  <- fromVal list
-    arity <- fmap length $ (fromVal sub >>= return . subParams)
+    arity <- fmap (length . subParams) (fromVal sub)
     evl  <- asks envEval
     vals <- mapMn args arity $ \x -> do
         rv  <- local (\e -> e{ envContext = cxtSlurpyAny }) $ do
@@ -269,13 +339,13 @@ list2LoL n list
     | otherwise        = fail "Invalid arguments to internal function list2LoL passed."
 
 op2Join :: Val -> Val -> Eval Val
-op2Join (VList [x@(VRef _)]) y = op2Join x y
+-- op2Join (VList [x@(VRef _)]) y = op2Join x y
 op2Join x y = do
-    (strVal, listVal) <- ifValTypeIsa x "Scalar"
-        (return (x, y))
+    (strVal, valList) <- ifValTypeIsa x "Scalar"
+        (return (x, (VRef (arrayRef (listVal y)))))
         (return (y, x))
     str     <- fromVal strVal
-    ref     <- fromVal listVal
+    ref     <- fromVal valList
     list    <- readRef ref
     strList <- fromVals list
     return . VStr . concat . intersperse str $ strList
@@ -315,6 +385,8 @@ op1HyperPrefix sub x
     doHyper x
         | VRef x' <- x
         = doHyper =<< readRef x'
+        | VList{} <- x
+        = op1HyperPrefix sub x
         | otherwise
         = enterEvalContext cxtItemAny $ App (Val $ VCode sub) Nothing [Val x]
     hyperList []     = return []
@@ -343,7 +415,19 @@ op2Hyper sub x y
     | otherwise
     = fail "Hyper OP only works on lists"
     where
-    doHyper x y = enterEvalContext cxtItemAny $ App (Val $ VCode sub) Nothing [Val x, Val y]
+    doHyper x y 
+        | VRef x' <- x, VRef y' <- y
+        = join $ liftM2 doHyper (readRef x') (readRef y')
+        | VRef x' <- x
+        = (flip doHyper $ y) =<< readRef x'
+        | VRef y' <- y
+        = doHyper x =<< readRef y'
+        | VList{} <- x
+        = op2Hyper sub x y
+        | VList{} <- y
+        = op2Hyper sub x y
+        | otherwise
+        = enterEvalContext cxtItemAny $ App (Val $ VCode sub) Nothing [Val x, Val y]
     hyperLists [] [] = return []
     hyperLists xs [] = return xs
     hyperLists [] ys = return ys

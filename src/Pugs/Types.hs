@@ -1,5 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -funbox-strict-fields #-}
-
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -funbox-strict-fields -fallow-overlapping-instances #-} 
 {-|
     Implementation Types.
 
@@ -21,8 +20,6 @@ module Pugs.Types
     typeOfCxt, isSlurpyCxt, isItemCxt, isVoidCxt,
     enumCxt, cxtEnum,
 
-    Var, 
-
     VStr, VBool, VInt, VRat, VNum, VComplex, VHandle, VSocket,
     VThread(..),
 
@@ -31,27 +28,44 @@ module Pugs.Types
 -}
 where
 import Pugs.Internals
-import qualified Data.Map as Map
+import Data.Bits (shiftL)
+import qualified Data.HashTable as H
+import qualified Data.IntMap as IntMap
 import qualified Data.ByteString.Char8 as Buf
 
-type Buf = Buf.ByteString
-
 data Type
-    = MkType !Buf         -- ^ A regular type
+    = MkType !ID         -- ^ A regular type
     | TypeOr  !Type !Type -- ^ The disjunction (|) of two types
     | TypeAnd !Type !Type -- ^ The conjunction (&) of two types
-    deriving (Eq, Ord, Typeable)
+    deriving (Eq, Ord, Typeable, Data)
+
+instance ((:>:) ByteString) Type where
+    cast (MkType x) = cast x
+    cast (TypeOr t1 t2)  = cast t1 +++ __"|" +++ cast t2
+    cast (TypeAnd t1 t2) = cast t1 +++ __"&" +++ cast t2
+
+instance ((:>:) Type) ByteString where
+    cast = MkType . cast
+
+instance ((:>:) Type) Pkg where
+    cast = cast . (cast :: Pkg -> ByteString)
+
+instance ((:>:) Pkg) Type where
+    cast = cast . (cast :: Type -> ByteString)
 
 instance Show Type where
     show t = "(mkType \"" ++ showType t ++ "\")"
 
 showType :: Type -> String
-showType (MkType typ)    = Buf.unpack typ
+showType (MkType typ)    = cast typ
 showType (TypeOr t1 t2)  = showType t1 ++ "|" ++ showType t2
 showType (TypeAnd t1 t2) = showType t1 ++ "&" ++ showType t2
 
-type ClassTree = Tree Type
+newtype ClassTree = MkClassTree (Tree Type)
+    deriving (Eq, Ord, Typeable)
 
+instance Show ClassTree where
+    show t = "{ClassTree:" ++ show (countTree t) ++ "}"
 
 data Cxt = CxtVoid         -- ^ Context that isn't expecting any values
          | CxtItem !Type   -- ^ Context expecting a value of the specified type
@@ -129,10 +143,398 @@ mkType str
     | (t1, (_:t2)) <- span (/= '&') str
     = TypeAnd (mkType t1) (mkType t2)
     | otherwise
-    = MkType (Buf.pack str)
+    = MkType (cast str)
 
--- | Variable name.
-type Var   = String
+data Var = MkVar
+    { v_name    :: !ID
+    , v_sigil   :: !VarSigil
+    , v_twigil  :: !VarTwigil
+    , v_categ   :: !VarCateg
+    , v_package :: !Pkg
+    , v_meta    :: !VarMeta
+    }
+    deriving (Eq, Ord, Typeable, Data)
+
+-- | a dummy scalar, used for example as the invocant
+-- in the signature :( $ : $x, $y ).
+varNullScalar :: Var
+varNullScalar = MkVar
+    { v_name    = nullID
+    , v_sigil   = SScalar
+    , v_twigil  = TNil
+    , v_categ   = CNil
+    , v_package = MkPkg []
+    , v_meta    = MNil
+    }
+
+-- | the topical variable $_
+varTopic :: Var
+varTopic = cast "$_"
+
+data VarMeta
+    = MNil
+    | MFold             -- [+]
+    | MScan             -- [\+]
+--  | MFoldPost         -- [+]<<
+--  | MScanPost         -- [\+]<<
+    | MPre              -- >>+
+    | MPost             -- +<<
+    | MHyper            -- >>+<<
+    | MHyperFold        -- [>>+<<]
+--  | MHyperFoldPost    -- [>>+<<]<<
+    | MHyperScan        -- [\>>+<<]
+--  | MHyperScanPost    -- [\>>+<<]<<
+    deriving (Show, Enum, Eq, Ord, Typeable, Data, Read)
+
+isQualifiedVar :: Var -> Bool
+isQualifiedVar MkVar{ v_package = MkPkg [] } = False
+isQualifiedVar _ = True
+
+dropVarPkg :: ByteString -> Var -> Maybe Var
+dropVarPkg buf var@MkVar{ v_package = MkPkg ps }
+    | (p:_) <- ps, p == buf = Just var{ v_package = MkPkg (tail ps) }
+    | otherwise             = Nothing
+
+-- | Package name, composed of multiple parts.
+newtype Pkg = MkPkg [ByteString]
+    deriving (Eq, Ord, Typeable, Data)
+
+instance Show Pkg where
+    show pkg = cast (cast pkg :: ByteString)
+
+instance ((:>:) ByteString) Pkg where
+    cast (MkPkg ns) = Buf.join (__"::") ns
+
+instance Show Var where
+    showsPrec _ var = ('"':) . showsVar var . ('"':)
+
+showsVar :: Var -> String -> String
+showsVar MkVar
+    { v_sigil   = sig
+    , v_twigil  = twi
+    , v_package = pkg@(MkPkg ns)
+    , v_categ   = cat
+    , v_name    = name
+    , v_meta    = meta
+    } = showsPrec 0 sig . showsPrec 0 twi . showPkg . showCateg . showsMeta meta showName
+    where
+    showName = ((++) (cast name))
+    showCateg = case cat of
+        CNil    -> id
+        _       -> drop 2 . showsPrec 0 cat . (':':)
+    showPkg = if null ns
+        then id
+        else showsPrec 0 pkg . (\x -> (':':':':x))
+
+showsMeta :: VarMeta -> (String -> String) -> String -> String
+showsMeta MNil              f x = f x
+showsMeta MFold             f x = ('[':f (']':x))
+showsMeta MScan             f x = ('[':'\\':f (']':x))
+--showsMeta MFoldPost         f x = ('[':f (']':'<':'<':x))
+--showsMeta MScanPost         f x = ('[':'\\':f (']':'<':'<':x))
+showsMeta MPre              f x = ('>':'>':f x)
+showsMeta MPost             f x = f ('<':'<':x)
+showsMeta MHyper            f x = ('>':'>':f ('<':'<':x))
+showsMeta MHyperFold        f x = ('[':'>':'>':f ('<':'<':']':x))
+--showsMeta MHyperFoldPost    f x = ('[':'>':'>':f ('<':'<':']':'<':'<':x))
+showsMeta MHyperScan        f x = ('[':'\\':'>':'>':f ('<':'<':']':x))
+--showsMeta MHyperScanPost    f x = ('[':'\\':'>':'>':f ('<':'<':']':'<':'<':x))
+
+instance ((:>:) String) Var where
+    cast var = showsVar var ""
+
+instance ((:>:) String) Pkg where
+    cast = cast . (cast :: Pkg -> ByteString)
+
+data VarCateg
+    = CNil
+    | C_prefix_circumfix_meta_operator
+    | C_infix_circumfix_meta_operator
+    | C_prefix_postfix_meta_operator
+    | C_postfix_prefix_meta_operator
+    | C_infix_postfix_meta_operator
+    | C_statement_modifier
+    | C_statement_control
+    | C_scope_declarator
+    | C_trait_auxiliary
+    | C_trait_verb
+    | C_regex_mod_external
+    | C_regex_mod_internal
+    | C_regex_assertion
+    | C_regex_backslash
+    | C_regex_metachar
+    | C_postcircumfix
+    | C_circumfix
+    | C_postfix
+    | C_infix
+    | C_prefix
+    | C_quote
+    | C_term
+    deriving (Show, Enum, Eq, Ord, Typeable, Data, Read)
+
+data VarSigil = SScalar | SArray | SHash | SType | SCode | SRegex | SCodeMulti | SArrayMulti
+    deriving (Enum, Eq, Ord, Typeable, Data)
+
+data VarTwigil = TNil | TAttribute | TPrivate | TImplicit | TMagical | TDoc
+    | TGlobal -- XXX WRONG!
+    deriving (Enum, Eq, Ord, Typeable, Data)
+
+isSigilChar :: Char -> Bool
+isSigilChar '$' = True
+isSigilChar '@' = True
+isSigilChar '%' = True
+isSigilChar '&' = True
+isSigilChar '<' = True -- XXX wrong
+isSigilChar ':' = True
+isSigilChar _   = False
+
+instance Show VarSigil where
+    showsPrec _ sig = case sig of
+        SScalar     -> ('$':)
+        SArray      -> ('@':)
+        SHash       -> ('%':)
+        SCode       -> ('&':)
+        SRegex      -> ('<':)
+        SType       -> \x -> (':':':':x)
+        SCodeMulti  -> \x -> ('&':'&':x)
+        SArrayMulti -> \x -> ('@':'@':x)
+
+instance Show VarTwigil where
+    showsPrec _ twi = case twi of
+        TNil        -> id
+        TAttribute  -> ('.':)
+        TPrivate    -> ('!':)
+        TImplicit   -> ('^':)
+        TMagical    -> ('?':)
+        TDoc        -> ('=':)
+        TGlobal     -> ('*':)
+
+instance ((:>:) (Maybe VarCateg)) ByteString where
+    cast buf = case reads ('C':'_':cast buf) of
+        ((x, _):_)  -> Just x
+        _           -> Nothing
+
+instance ((:>:) VarCateg) ByteString where
+    -- XXX slow
+    cast buf = case reads ('C':'_':cast buf) of
+        ((x, _):_)  -> x
+        _           -> internalError $ "Invalid grammatical category: " ++ show buf
+
+instance ((:>:) VarSigil) Char where
+    cast '$'    = SScalar
+    cast '@'    = SArray
+    cast '%'    = SHash
+    cast '&'    = SCode
+    cast '<'    = SRegex
+    cast ':'    = SType
+    cast x      = internalError $ "Invalid sigil " ++ show x
+
+instance ((:>:) VarSigil) ByteString where
+    cast name
+        | name == __"$"     = SScalar
+        | name == __"@"     = SArray
+        | name == __"%"     = SHash
+        | name == __"&"     = SCode
+        | name == __"<"     = SRegex
+        | name == __":"     = SType
+        | name == __"::"    = SType
+        | name == __"&&"    = SCodeMulti
+        | name == __"@@"    = SArrayMulti
+        | otherwise         = internalError $ "Invalid sigil " ++ show name
+
+{-|
+Transform an operator name, for example @&infix:\<+\>@ or @&prefix:«[+]»@, 
+into its internal name (@&infix:+@ and @&prefix:[+]@ respectively).
+-}
+instance ((:>:) Var) String where
+    cast = cast . (cast :: String -> ByteString)
+
+emptyPkg :: Pkg
+emptyPkg = MkPkg []
+
+-- globalPkg :: Pkg
+-- globalPkg = MkPkg [__"GLOBAL"]
+
+mainPkg :: Pkg
+mainPkg = MkPkg [__"Main"]
+
+callerPkg :: Pkg
+callerPkg = MkPkg [__"CALLER"]
+
+outerPkg :: Pkg
+outerPkg = MkPkg [__"OUTER"]
+
+contextPkg :: Pkg
+contextPkg = MkPkg [__"ENV"] -- XXX wrong
+
+nextPkg :: Pkg
+nextPkg = MkPkg [__"NEXT"] -- XXX noncanonical
+
+toGlobalVar :: Var -> Var
+toGlobalVar var = var{ v_twigil = TGlobal }
+
+isGlobalVar :: Var -> Bool
+isGlobalVar MkVar{ v_twigil = TGlobal } = True
+isGlobalVar MkVar{ v_twigil = TDoc }    = True -- XXX noncanonical
+isGlobalVar _                           = False
+
+instance ((:>:) Var) ByteString where
+    cast x = unsafePerformIO (bufToVar x)
+
+{-# NOINLINE _BufToVar #-}
+_BufToVar :: H.HashTable ByteString Var
+_BufToVar = unsafePerformIO hashNew
+
+bufToVar :: ByteString -> IO Var
+bufToVar buf = do
+    a' <- H.lookup _BufToVar buf
+    maybe (do
+        let a = doBufToVar buf
+        H.insert _BufToVar buf a
+        return a) return a'
+
+doBufToVar :: ByteString -> Var
+doBufToVar buf = MkVar
+    { v_sigil   = sig'
+    , v_twigil  = twi
+    , v_package = pkg
+    , v_categ   = cat
+    , v_meta    = meta
+    , v_name    = cast name
+    }
+    where
+    (sig, afterSig) = Buf.span isSigilChar buf
+    sig' = if Buf.null sig then internalError $ "Sigilless var: " ++ show buf else cast sig
+    len = Buf.length afterSig
+    (twi, (pkg, (cat, afterCat)))
+        | len == 0 = (TNil, (emptyPkg, (CNil, afterSig)))
+        | len == 1 = case Buf.head afterSig of
+            '!' -> (TGlobal, (emptyPkg, (CNil, afterSig)))  -- XXX $! always global - WRONG
+            '/' -> (TGlobal, (emptyPkg, (CNil, afterSig)))  -- XXX $/ always global - WRONG
+            _   -> (TNil, (emptyPkg, (CNil, afterSig)))
+        | otherwise = case Buf.head afterSig of
+            '.' -> (TAttribute, toPkg afterTwi)
+            '^' -> (TImplicit, toPkg afterTwi)
+            '?' -> (TMagical, toPkg afterTwi)
+            '!' -> (TPrivate, toPkg afterTwi)
+            '=' -> (TDoc, toPkg afterTwi)
+--          '*' -> (TNil, (globalPkg, Buf.tail afterSig))
+            '*' -> (TGlobal, toPkg afterTwi)
+            '+' -> (TNil, (contextPkg, snd afterTwi))
+            _   -> (TNil, toPkg (tokenPkg afterSig))
+    afterTwi = tokenPkg (Buf.tail afterSig)
+    toPkg (pkg, rest) = (MkPkg pkg, rest)
+    tokenPkg :: ByteString -> ([ByteString], (VarCateg, ByteString))
+    tokenPkg str = case Buf.elemIndex ':' str of
+        Just idx1 -> case Buf.findSubstring (__"::") str of
+            Nothing  -> ([], (cast (Buf.take idx1 str), Buf.drop (succ idx1) str))
+            Just 0   -> tokenPkg (Buf.drop 2 str) -- $::x is the same as $x
+            Just idx
+                | idx == idx1 -> case cast (Buf.take idx1 str) of
+                    -- &infix::= should parse as infix:<:=>, not infix::<=>
+                    Just cat -> ([], (cat, Buf.drop (succ idx1) str))
+                    -- &Infix::= should parse as Infix::<=>, not Infix:<:=>
+                    _        -> let (rest, final) = tokenPkg (Buf.drop (idx + 2) str) in
+                        ((Buf.take idx str:rest), final)
+                | otherwise -> ([], (cast (Buf.take idx1 str), Buf.drop (succ idx1) str))
+        _ -> ([], (CNil, str))
+    (name, meta)
+        | C_postfix <- cat, __"\187" `Buf.isPrefixOf` afterCat
+        = (Buf.drop 2 afterCat, MPre)
+        | C_postfix <- cat, __">>" `Buf.isPrefixOf` afterCat
+        = (Buf.drop 2 afterCat, MPre)
+        | C_infix <- cat
+        , __"\187" `Buf.isPrefixOf` afterCat
+        , __"\171" `Buf.isSuffixOf` afterCat
+        = (Buf.drop 2 (dropEnd 2 afterCat), MHyper)
+        | C_infix <- cat
+        , __">>" `Buf.isPrefixOf` afterCat
+        , __"<<" `Buf.isSuffixOf` afterCat 
+        = (Buf.drop 2 (dropEnd 2 afterCat), MHyper)
+        | C_prefix <- cat
+        , __"[\\" `Buf.isPrefixOf` afterCat
+        , ']' <- Buf.last afterCat
+        = case Buf.drop 2 (Buf.init afterCat) of
+            maybeHyper | __">>" `Buf.isPrefixOf` maybeHyper
+                       , __"<<" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperScan)
+            maybeHyper | __"\187" `Buf.isPrefixOf` maybeHyper
+                       , __"\171" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperScan)
+            other -> (other, MScan)
+        | C_prefix <- cat
+        , '[' <- Buf.head afterCat
+        , ']' <- Buf.last afterCat
+        = case Buf.tail (Buf.init afterCat) of
+            maybeHyper | __">>" `Buf.isPrefixOf` maybeHyper
+                       , __"<<" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperFold)
+            maybeHyper | __"\187" `Buf.isPrefixOf` maybeHyper
+                       , __"\171" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperFold)
+            other -> (other, MFold)
+        -- XXX - massive cut-n-paste!
+        {-
+        | C_prefix <- cat
+        , __"[\\" `Buf.isPrefixOf` afterCat
+        , __"]\171" `Buf.isSuffixOf` afterCat || __"]<<" `Buf.isSuffixOf` afterCat
+        = case Buf.drop 2 (dropEnd 3 afterCat) of
+            maybeHyper | __">>" `Buf.isPrefixOf` maybeHyper
+                       , __"<<" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperScanPost)
+            maybeHyper | __"\187" `Buf.isPrefixOf` maybeHyper
+                       , __"\171" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperScanPost)
+            other -> (other, MScanPost)
+        | C_prefix <- cat
+        , '[' <- Buf.head afterCat
+        , __"]\171" `Buf.isSuffixOf` afterCat || __"]<<" `Buf.isSuffixOf` afterCat
+        = case Buf.tail (dropEnd 3 afterCat) of
+            maybeHyper | __">>" `Buf.isPrefixOf` maybeHyper
+                       , __"<<" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperFoldPost)
+            maybeHyper | __"\187" `Buf.isPrefixOf` maybeHyper
+                       , __"\171" `Buf.isSuffixOf` maybeHyper 
+                -> (Buf.drop 2 (dropEnd 2 maybeHyper), MHyperFoldPost)
+            other -> (other, MFoldPost)
+        -}
+        | C_prefix <- cat, __"\171" `Buf.isSuffixOf` afterCat
+        = (dropEnd 2 afterCat, MPost)
+        | C_prefix <- cat, __"<<" `Buf.isSuffixOf` afterCat
+        = (dropEnd 2 afterCat, MPost)
+        | otherwise
+        = (afterCat, MNil)
+
+instance ((:>:) Pkg) ByteString where
+    cast = MkPkg . filter (not . Buf.null) . Buf.splitWith (== ':')
+
+instance ((:>:) Pkg) String where
+    cast = cast . (cast :: String -> ByteString)
+
+instance ((:>:) ID) Pkg where
+    cast = cast . (cast :: Pkg -> ByteString)
+
+instance ((:>:) Type) ID where
+    cast = cast . (cast :: ID -> ByteString)
+
+possiblyFixOperatorName :: Var -> Var
+possiblyFixOperatorName var@MkVar{ v_categ = CNil } = var
+possiblyFixOperatorName var@MkVar{ v_sigil = sig, v_name = name }
+    | sig /= SCode, sig /= SCodeMulti = var
+    | __"\171" `Buf.isPrefixOf` buf, __"\187" `Buf.isSuffixOf` buf
+    = var{ v_name = cast (dropEnd 2 (Buf.drop 2 buf)) }
+    | __"<<" `Buf.isPrefixOf` buf, __">>" `Buf.isSuffixOf` buf
+    = var{ v_name = cast (dropEnd 2 (Buf.drop 2 buf)) }
+    | Buf.head buf == '<', Buf.last buf == '>', buf /= __"<=>"
+    = var{ v_name = cast (Buf.init (Buf.tail buf)) }
+    | otherwise
+    = var
+    where
+    buf = cast name
+
+dropEnd :: Int -> ByteString -> ByteString
+dropEnd i buf = Buf.take (Buf.length buf - i) buf
+
 -- | Uses Haskell's underlying representation for strings.
 type VStr  = String
 -- | Uses Haskell's underlying representation for booleans.
@@ -185,8 +587,8 @@ This is used by 'deltaType' to ensure that incompatible types are always
 further apart than compatible types.
 -}
 countTree :: ClassTree -> Int
-countTree (Node _ []) = 1
-countTree (Node _ cs) = 1 + sum (map countTree cs)
+countTree (MkClassTree (Node _ [])) = 1
+countTree (MkClassTree (Node _ cs)) = 1 + sum (map (countTree . MkClassTree) cs)
 
 {-|
 Find the \'difference\' between two types in the given class tree (for MMD
@@ -285,13 +687,12 @@ isaType' = junctivate (||) (&&) $ \tree base target ->
 
 {-|
 Compute the \'distance\' between two types by applying 'findList' to each of
-them, and passing the resulting type chains to 'compareList'.
-
+/bin/bash: line 1: :1: command not found
 See 'compareList' for further details.
 -}
 distanceType :: ClassTree -> Type -> Type -> Int
-distanceType tree base@(MkType b) target@(MkType t) = 
-    Map.findWithDefault (compareList l1 l2) (b, t) initCache
+distanceType (MkClassTree tree) base@(MkType b) target@(MkType t) = 
+    IntMap.findWithDefault (compareList l1 l2) (idKey b `shiftL` 16 + idKey t) initCache
 --  | not (castOk base target)  = 0
 --  | otherwise = compareList l1 l2
     where
@@ -299,16 +700,18 @@ distanceType tree base@(MkType b) target@(MkType t) =
     l2 = findList target tree
 distanceType _ _ _ = error "distanceType: MkType not 'simple'"
 
-initCache :: Map.Map (Buf, Buf) Int
-initCache = Map.fromList leaves
+initCache :: IntMap.IntMap Int
+initCache = IntMap.fromList leaves
     where
-    leaves = [ ((x, y), cachedLookup x y) | x <- initLeaves, y <- initLeaves ]
+    leaves = [ (idKey x `shiftL` 16 + idKey y, cachedLookup x y)
+             | x <- initLeaves, y <- initLeaves
+             ]
     cachedLookup base target = compareList l1 l2
         where
         l1 = findList base rawTree
         l2 = findList target rawTree
 
-initLeaves :: [Buf]
+initLeaves :: [ID]
 initLeaves = flatten rawTree
 
 {-
@@ -346,7 +749,7 @@ compareList l1 l2
     | last l1 `elem` l2 =   length(l2 \\ l1) -- compatible types
     | last l2 `elem` l1 = - length(l1 \\ l2) -- anti-compatible types
     | otherwise = compareList l1 (init l2)
-{-# SPECIALIZE compareList :: [Buf] -> [Buf] -> Int #-}
+{-# SPECIALIZE compareList :: [ID] -> [ID] -> Int #-}
 {-# SPECIALIZE compareList :: [Type] -> [Type] -> Int #-}
 
 {-|
@@ -377,7 +780,7 @@ findList base (Node l cs)
     | otherwise                             = []
     where
     found = map (findList base) cs
-{-# SPECIALIZE findList :: Buf -> Tree Buf -> [Buf] #-}
+{-# SPECIALIZE findList :: ID -> Tree ID -> [ID] #-}
 {-# SPECIALIZE findList :: Type -> Tree Type -> [Type] #-}
 
 {-
@@ -394,18 +797,18 @@ prettyTypes = drawTree $ fmap show initTree
 Add a new \'top-level\' type to the class tree, under @Object@.
 -}
 addNode :: ClassTree -> Type -> ClassTree
-addNode (Node obj [Node any (Node item ns:rest), junc]) typ =
-    Node obj [Node any (Node item ((Node typ []):ns):rest), junc]
+addNode (MkClassTree (Node obj [Node any (Node item ns:rest), junc])) typ =
+    MkClassTree (Node obj [Node any (Node item ((Node typ []):ns):rest), junc])
 addNode _ _ = error "malformed tree"
 
 {-|
 Default class tree, containing all built-in types.
 -}
 initTree :: ClassTree
-initTree = fmap MkType rawTree
+initTree = MkClassTree (fmap MkType rawTree)
 
-rawTree :: Tree Buf
-rawTree = fmap Buf.pack $! Node "Object"
+rawTree :: Tree ID
+rawTree = fmap cast $! Node "Object"
     [ Node "Any"
         [ Node "Item"
             [ Node "List"
@@ -442,11 +845,14 @@ rawTree = fmap Buf.pack $! Node "Object"
                             , Node "Submethod" []  -- why isn't this a node off Method? - mugwump
                             ]
                         , Node "Macro" [] ]
-                    , Node "Block" []
+                    , Node "Block"
+                        [ Node "Loop" [] ]
                     ]
-                , Node "Rul" []
-                , Node "Pugs::Internals::VRule" []
-                , Node "Match" []
+                , Node "Regex" []
+                , Node "Signature" []
+                , Node "Capture"
+                    [ Node "Match" []
+                    ]
                 , Node "Scalar::Const" []
                 , Node "Scalar::Proxy" []
                 , Node "Scalar::Lazy" []

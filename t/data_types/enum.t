@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 29;
+plan 30;
 # L<S12/Enums>
 {
     my %hash; eval '%hash = enum «:Mon(1) Tue Wed Thu Fri Sat Sun»';

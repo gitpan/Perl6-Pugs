@@ -1,8 +1,8 @@
-use v6;
+use v6-alpha;
 
 # Perl6::Value::List - implementation of Perl6 'List' class in Perl6
 
-=for ChangeLog
+=begin ChangeLog
 
 2005-08-10
 * New methods List.flatten(), is_lazy(), from_coro( $sub )
@@ -48,9 +48,9 @@ class Perl6::Value::List {
     has Bool $.is_lazy;
 
     submethod BUILD () {
-        $.cis_infinite   //= sub { &{$.celems}() == Inf },
+        $.cis_infinite   //= sub { &($.celems)() == Inf },
         $.cis_contiguous //= sub { Bool::False }, 
-        $.cstringify     //= sub { &{$.cstart}() ~ '....' ~ &{$.cend}() }, 
+        $.cstringify     //= sub { &($.cstart)() ~ '....' ~ &($.cend)() }, 
         $.is_lazy        //= Bool::True,
         $.celems         //= ( defined $.cstart || defined $.cend ) ?? 
                              sub { Inf } !! 
@@ -59,13 +59,13 @@ class Perl6::Value::List {
         $.cend           //= sub {};    
     }
 
-    method start         () { &{$.cstart}() }  # == shift
-    method end           () { &{$.cend}() }    # == pop
+    method start         () { &($.cstart)() }  # == shift
+    method end           () { &($.cend)() }    # == pop
 
-    method elems         () { &{$.celems}() }
-    method is_infinite   ( $self: ) { &{$.cis_infinite}() }
-    method is_contiguous ( $self: ) { &{$.cis_contiguous}() }
-    method to_str        ( $self: ) { &{$.cstringify}() }
+    method elems         () { &($.celems)() }
+    method is_infinite   ( $self: ) { &($.cis_infinite)() }
+    method is_contiguous ( $self: ) { &($.cis_contiguous)() }
+    method to_str        ( $self: ) { &($.cstringify)() }
     # method clone         ( $self: ) { $self }  --- auto generated
     method to_ref        ( $self: ) { $self }
     method to_bit        ( $self: ) { $self.elems > 0 }
@@ -123,7 +123,7 @@ class Perl6::Value::List {
         my $size = Inf;
         $class.new(
                     cstart =>  sub {
-                                my $r = &{$start}();
+                                my $r = &($start)();
                                 $size = 0 unless defined $r;
                                 return $r;
                             },

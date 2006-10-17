@@ -16,20 +16,20 @@ import Pugs.Lexer (isWordAlpha)
 
 exportSym :: Scope -> String -> Val -> RuleParser ()
 exportSym scope ('&':subname) ref = do
-    rv <- unsafeEvalExp $ Syn "," [Syn "@{}" [Val ref]]
+    rv <- unsafeEvalExp $ Syn "," [App (_Var "&values") (Just (Val ref)) []]
     case rv of
         Val (VList subs) -> do
-            exps <- forM subs $ \val -> do
+            exps <- forM (filter defined subs) $ \val -> do
                 let name    = '&':subname
                     mkMulti = case val of
                         VCode sub | isMulti sub -> ('&':)
                         _                       -> id
-                    mkExp   = Syn ":=" [Var name, Val val]
-                    mkSym   = Sym scope (mkMulti name) mkExp
+                    mkExp   = Syn ":=" [_Var name, Val val]
+                    mkSym   = _Sym scope (mkMulti name) mkExp
                 doExport scope mkSym
             case scope of
                 SMy -> addBlockPad SState 
-                    (foldl unionPads (mkPad []) [ pad | Pad SMy pad _ <- exps ])
+                    (foldl' unionPads (mkPad []) [ pad | Pad SMy pad _ <- exps ])
                 _   -> return () 
         _ -> fail $ "Invalid export list: " ++ show rv
 exportSym scope subname@(sig:_) ref | isWordAlpha sig = do

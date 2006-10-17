@@ -64,6 +64,12 @@ sub set_blib {
       : die "Perl version '$perl_version' is bad. Must be 5 or 6.";
     my $path = File::Spec->catdir($base, $blib);
 
+    if ( basename($Config{make}, $Config{_exe}) =~ /\bdmake\b/ ) {
+        # This is purely for working around sad dmake bug
+        # Which parses C:\work\pugs as C : \work\pugs
+        $path =~ s{^\w:}{}
+    }
+
     $self->makemaker_args->{INST_LIB} =
       File::Spec->catfile($path, "lib");
     $self->makemaker_args->{INST_ARCHLIB} =
@@ -208,13 +214,14 @@ sub assert_ghc {
             } glob(qq/$ghc_root${slash}ghc-*/);
 
             GHC_TEST:
-            for my $ghc_dir (@ghc_choices) {
+            for my $ghc_dir ($ghc_root, sort @ghc_choices) {
                 my $ghc_candidate = qq/${ghc_dir}${slash}bin${slash}ghc.exe/;
-                if ($ghc_version = $test_ghc_ver->($ghc_candidate)) {
+                if (my $ghc_candidate_version = $test_ghc_ver->($ghc_candidate)) {
                     $ghc = $ghc_candidate;
-                    warn "*** Found $ghc\n";
+                    $ghc_version = $ghc_candidate_version;
                 }
             }
+            warn "*** Using GHC version: $ghc ($ghc_version)\n" if $ghc;
         }
     }
 
@@ -224,11 +231,22 @@ sub assert_ghc {
 .
 
     my $ghc_lt_640 = !($ghc_version =~ /^(\d)\.(\d+)/ and $1 >= 6 and $2 >= 4);
+    my $ghc_lt_660 = !($ghc_version =~ /^(\d)\.(\d+)/ and $1 >= 6 and $2 >= 6);
 
     if ($ghc_lt_640 or ($ghc_version =~ /^6.4(?:.0)?$/)) {
         die << ".";
 *** Cannot find GHC 6.4.1 or above from path (we have $ghc_version).
 *** Please install a newer version from http://haskell.org/ghc/.
+.
+    }
+
+    if ($ghc_lt_660) {
+        warn << ".";
+*** Cannot find GHC 6.6 or above from path (we have $ghc_version).
+*** Please note that while Pugs will still compile and work, its
+    performance will be much slower than normal.  The next Pugs
+    release will discontinue support for GHC 6.4.x, so please upgrade
+    to GHC 6.6 at your convenience from http://haskell.org/ghc/.
 .
     }
 
@@ -239,12 +257,6 @@ sub assert_ghc {
     $ghc_flags .= " -fno-warn-name-shadowing ";
     $ghc_flags .= " -I../../src -i../../src "
       if $self->is_extension_build;
-    if ($ENV{PUGS_EMBED} and $ENV{PUGS_EMBED} =~ /perl5/i) {
-#        $ghc_flags .= " -isrc/perl5 -Isrc/perl5 ";
-        $ghc_flags .= " -isrc/perl5 ";
-        $ghc_flags .= join(' ', grep { m{^/} or m{^-[DILl]} or m{^-Wl,-R} }
-                        split (' ', `$^X -MExtUtils::Embed -e ccopts,ldopts`));
-    }
     chomp $ghc_flags;
 
     return ($ghc, $ghc_version, $ghc_flags, $self->assert_ghc_pkg($ghc));
@@ -336,7 +348,19 @@ sub fixpaths {
     my $text = shift;
     my $sep = File::Spec->catdir('');
     $text =~ s{\b/}{$sep}g;
+    $text =~ s/-libpath:"?(.*?)"? //g;
+
+    # Don't let ActivePerl HTMLify our PODs.
+    $text =~ s/pure_all\s+htmlifypods/pure_all/g;
+
     return $text;
+}
+
+# assert_ghc makes a call to EU::MM that litters ghc_flags
+# with threading options.
+sub dethread_flags {
+    my (undef, @args) = @_;
+    map { $_ = join ' ', grep { !/thread/i && $_ ne '-lc' } split ' ' } @args;
 }
 
 1;

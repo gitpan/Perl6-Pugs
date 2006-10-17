@@ -10,14 +10,18 @@ use lib File::Spec->catdir($FindBin::Bin, "..", "inc");
 use PugsBuild::Config;
 
 my $failed = 0;
-for (qw/YAML Test::TAP::Model Test::TAP::HTMLMatrix/) {
+for (qw/YAML Test::TAP::Model Test::TAP::HTMLMatrix Best/) {
     check_prereq($_) or $failed++;
 }
 
 die <<"EOF" if $failed;
 
 You don't seem to have the required modules installed.
-Please install it from the CPAN and try again.
+Please install them from the CPAN and try again.
+
+This can be accomplished in one go by running:
+
+  cpan Task::Smoke
 EOF
 #'
 
@@ -43,8 +47,11 @@ $ENV{HARNESS_PERL}  = "$^X $FindBin::Bin/../perl5/PIL2JS/pugs-smokejs.pl ./pugs 
 # XXX: hack to be identified by smokeserv
 $ENV{HARNESS_PERL}  = "$^X -I/tmp/JSPERL5 $FindBin::Bin/../perl5/PIL2JS/pugs-smokejs.pl ./pugs $optional_args"
     if $ENV{PUGS_RUNTIME} and $ENV{PUGS_RUNTIME} eq 'JSPERL5';
-$ENV{HARNESS_PERL}  = "$^X $FindBin::Bin/../perl5/PIL-Run/pugs-p5.pl"
-    if $ENV{PUGS_RUNTIME} and $ENV{PUGS_RUNTIME} eq 'PERL5';
+if ($ENV{PUGS_RUNTIME} and $ENV{PUGS_RUNTIME} eq 'PERL5') {
+    $ENV{PERL5LIB} = 'blib6/pugs/perl5/lib:blib6/pugs/perl5/arch';
+    $ENV{HARNESS_PERL} = $^X;
+#    $ENV{HARNESS_PERL_SWITCHES} = "blib6/pugs/perl5/lib/v6.pm";
+}
 
 $ENV{PERL6LIB}      = join $Config{path_sep},
         qw<ext/Test/lib blib6/lib>, $ENV{PERL6LIB}||"";
@@ -60,31 +67,51 @@ sub make { return `$Config{make} @_` };
 my $dev_null = File::Spec->devnull;
 
 my $output ;# = svn("up") or die "Could not update pugs tree: $!";
-system($^X, qw(-w ./util/yaml_harness.pl),@yaml_harness_args) == 0 or die "Could not run yaml harness: $!";
-system($^X, qw(-w ./util/testgraph.pl --inlinecss tests.yml), $html_location) == 0 or die "Could not convert .yml to testgraph: $!";
-upload_smoke($html_location);
+my $yml_location = $html_location;
+$yml_location =~ s/(\.html?(\+)?)?$/'.yml'.($2||'')/e;
+
+# Save backups of prior html and yaml
+my @saved_backup;
+for my $file ($html_location, $yml_location) {
+    next unless -f $file;
+    my $newfile = $file;
+    $newfile =~ s/[.](html?|yml)/.last.$1/;
+    rename $file, $newfile
+        or die "Couldn't save backup of $file to $newfile: $!";
+    push @saved_backup, [$file, $newfile];
+}
+
+push @yaml_harness_args, ('--output-file', $yml_location);
+system($^X, qw(-w ./util/yaml_harness.pl),
+            @yaml_harness_args) == 0 or die "Could not run yaml harness: $!";
+system($^X, qw(-w ./util/testgraph.pl), ('--inlinecss', $yml_location), $html_location) == 0 or die "Could not convert .yml to testgraph: $!";
+upload_smoke($html_location, $yml_location);
 if ($smoke_upload) {
   if (defined $smoke_upload_script) {
-    system("$^X $smoke_upload_script $html_location") == 0
+    system($^X => $smoke_upload_script, $html_location, $yml_location) == 0
         or die "Couln't run smoke upload script: $!";
   }
 } else {
-print <<EOF;
+    print <<EOF;
 *** All done! Smoke matrix saved as '$html_location'.
     You may want to submit the report to the public smokeserver:
 
-        $^X $smoke_upload_script $html_location
+        $^X $smoke_upload_script $html_location $yml_location
 
     Or add
         smoke_upload: 1 
     to your config.yml file if you want the reports to be uploaded
     automatically.
 EOF
+
+    for my $filepair (@saved_backup) {
+        print "\n    Your old $filepair->[0] has been saved to $filepair->[1].\n"
+    }
 }
 sub upload_smoke {
-    my ($loc) = @_;
+    my ($html, $yml) = @_;
     return unless defined $ENV{PUGS_SMOKE_UPLOAD};
-    system("$^X $ENV{PUGS_SMOKE_UPLOAD} $loc") == 0 or die "couldn't run user smoke upload command: $!";
+    system("$^X $ENV{PUGS_SMOKE_UPLOAD} $html $yml") == 0 or die "couldn't run user smoke upload command: $!";
 }
 
 sub check_prereq {

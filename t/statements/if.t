@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -100,8 +99,8 @@ is $foo, 1, "die should stop execution immediately.";
 # I'm not sure where this should go
 
 {
-    eval_is(
-        'if( ( my $x = 2 ) == 2 ) { $x; }',
+    is(
+        eval('if ( my $x = 2 ) == 2 { $x; }'),
         2,
         "'my' variable within 'if' conditional");
 }

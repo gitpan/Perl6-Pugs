@@ -1,12 +1,9 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 5;
 
 use Recurrence; pass "(dummy instead of broken use_ok)";
-use Recurrence;   # XXX should not need this
 
 my $universe = Recurrence.new( 
     closure_next =>     sub ( $x is copy ) { 

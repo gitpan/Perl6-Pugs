@@ -1,5 +1,3 @@
-#!/usr/bin/pugs
-
 # -----------------------------------------------
 #  Copyright (C) 2005 by Andras Barthazi
 #  This code is totally free, use it as you want
@@ -7,7 +5,7 @@
 #  !!WARNING!!  UGLY, NON-COMMENTED  !!WARNING!!
 # -----------------------------------------------
 
-use v6;
+use v6-alpha;
 require CGI-0.0.1; set_url_encoding('utf-8');
 require 'General.pl';
 require 'Cookie.pl';

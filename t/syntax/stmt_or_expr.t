@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 2;
@@ -18,7 +17,7 @@ my $y = do {
 
 # L<A04/"RFC 022: Control flow: Builtin switch statement" /the final curly is on a line by itself/>
 
-is($y, 10, "}\\n + 1 are two statements", :todo<bug>);
+is($y, 10, "}\\n + 1 are two statements");
 
 
 

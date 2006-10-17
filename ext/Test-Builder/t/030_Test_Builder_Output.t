@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 3;
@@ -15,7 +13,7 @@ my $tbo = Test::Builder::Output.new(
     error_output => $error_output,    
 );
 
-is( $tbo.ref, ::Test::Builder::Output,
+is( $tbo.WHAT, ::Test::Builder::Output,
     'new() should return a Test::Builder::Output instance' );
 
 $tbo.write('ok 1');

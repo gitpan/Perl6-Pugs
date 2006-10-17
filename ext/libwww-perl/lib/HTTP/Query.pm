@@ -1,5 +1,4 @@
-#!/usr/bin/pugs
-use v6;
+use v6-alpha;
 
 use URI::Escape <uri_unescape>;
 
@@ -47,7 +46,7 @@ class HTTP::Query-0.0.1 {
             $value = uri_unescape($value);
             
             if (%!params.exists($key)) {
-                @{%!params{$key}}.push($value);
+                %!params{$key}.push($value);
             } else {
                 %!params{$key} = [ $value ];
             }

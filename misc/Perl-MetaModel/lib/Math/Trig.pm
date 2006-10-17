@@ -1,5 +1,5 @@
 
-use v6;
+use v6-alpha;
 
 role Math::Trig;
 
@@ -8,11 +8,11 @@ our @trig = q:x:/ sin cos tan asin acos atan sec cosec cotan asec
                   cosech cotanh asech acosech acotanh /;
 
 for @trig -> $func {
-    &$func = multi sub (: Num ?$x = $CALLER::_, +$base)
+    &$func = multi sub (; Num ?$x = $CALLER::_, :$base)
             returns Num { ... };
 }
 
-multi sub atan (Num $x, Num $y : Num +$base) returns Num
+multi sub atan (Num $x, Num $y ; Num :$base) returns Num
     { ... };
 
 multi sub pi is readonly () returns Num

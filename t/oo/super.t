@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 2;
@@ -20,6 +19,6 @@ class Child is Parent
 
 my $child = Child.new;
 
-is( $child.ref, 'Child', 'new() should be SUPER-callable' );
+is( $child.WHAT, 'Child', 'new() should be SUPER-callable' );
 is( $new_count, 1,
     'SUPER should not call itself in the absence of a parent method' );

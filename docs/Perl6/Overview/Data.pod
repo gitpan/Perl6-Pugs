@@ -68,8 +68,8 @@ Perl6::Overview::Data - Data Types
 
     .elems          # Number of elements
     .join($sep)
-    .map: { ... }
-    .grep: { ... }
+    .map:{ ... }
+    .grep:{ ... }
     .pop
     .push($elem)
     .shift
@@ -77,6 +77,7 @@ Perl6::Overview::Data - Data Types
     .reverse
     .sort( { cond }, { cond }, ... )
     .kv            # return index,value pairs
+    .pairs         # return Pair objects instead
     .uniq
     
 =head3 Shapes
@@ -114,7 +115,7 @@ This also means that
     # the comma operator:
     shift (42,23);    # dies
 
-By contast, Array construction by the [] operator, &circumfix:<[ ]>,
+By contrast, Array construction by the [] operator, &circumfix:<[ ]>,
 does create new containers:
 
     [$foo,$bar][0] =:= $foo;  # false
@@ -142,7 +143,7 @@ parens are only for grouping:
     # Perl 6
     sub foo { (1,2,3) }
     my $scalar = foo();  # [1,2,3]
-    my @array  = foo();  # (1,2,2)
+    my @array  = foo();  # (1,2,3)
 
 Also note that list context, i.e. the context supplied by a slurpy array in
 a signature, automatically flattens arrays and hashes (but not scalars
@@ -183,6 +184,7 @@ C<@foo.concat(@bar)> in other languages.))
     .keys
     .values
     .kv                # List of key, value, key, value, ...
+    .pairs             # List of Pair having the same
 
     Shapes: 
 
@@ -191,12 +193,12 @@ C<@foo.concat(@bar)> in other languages.))
     Constructors:
 
     HASH = LIST
-    { PAIR, PAIR, ... }   # anonymous ref
+    { PAIR, PAIR, ... }   # anonymous object
     hash( LIST )
 
 =head2 Pair
 
-    list $foo        # $foo   # ref, so doesn't flatten to $k, $v
+    list $foo        # $foo   # object, so doesn't flatten to $k, $v
         +$foo        # ???
         ~$foo        # ???
         ?$foo        # ???
@@ -289,11 +291,11 @@ Examples:
     #                 1 --> cell 222 --> Num 23,
     #              ]
     # (Changing $grtz still does not have an effect on @array. Changing $foo
-    # (by assignment) does have an effect on @array. Rebinding $foo to some
+    # (by assignment) does have an effect on @array. Re-binding $foo to some
     # other variable causes further assignments to $foo to have no effect on
     # @array again.)
 
-=:= tests whether the cell slots of two containers $a and $b point to the
+C<=:=> tests whether the cell slots of two containers $a and $b point to the
 same cell.
 
     $a = 42;
@@ -306,7 +308,8 @@ same cell.
     $b := $a;
     # '$b' --> $b's container --> cell 42 --> Num 42
 
-=== (formerly eqv) tests whether the values of two cells are identical.
+C<===> tests whether the eternal values of two immutable cells are
+identical; for two mutable cells, it evaluates the same way as C<=:=>.
 
     42 === 42;  # true
 
@@ -315,24 +318,35 @@ same cell.
     $a =:= $b;  # false, of course
     $a === $b;  # true
 
-Method calls always go to the container of a variable, but Scalar (the
-container class of scalar variables) can be thought of as providing an
-appropriate AUTOMETH which redirects most calls to the cell of a container.
-Method calls on arrays and hashes always go the container (of course).
+    (1,2) === (1,2); # true
+    [1,2] === [1,2]; # false
 
-    $dog.bark();   # method call first dispatched to $dog's container,
-                    # then redispatched to $dog's value, i.e. a Dog object.
-    @array.elems;  # method call dispatched to @array's container.
+C<eqv> tests whether current snapshots of the values of two mutable cells
+are identical; for two immutable cells, it evaluates the same way as
+C<===>.
 
-An example of a method on scalar variables which is not redirected to the
-cell is .exists. .exists on scalar containers test, whether the
-container's cell slot is not empty. Example:
+    [1,2] eqv [1,2];  # true
 
-    sub foo ($a?) { $a.exists }
+    my $a = [1,2];
+    my $b = [1,2];
+    $a === $b;  # false, of course
+    $a eqv $b;  # true
+
+Method calls on arrays and hashes go to the container, whereas method
+calls on scalars go to the cell.  
+
+    $dog.bark();   # method call dispatched to $dog's value, i.e. a Dog object.
+    @array.elems;  # method call dispatched to @array's container, an Array object
+
+Using the .VAR postfix macro, you can force a method call to a scalar to
+go to its container.  An example of a method on a scalar is .exists,
+which tests whether the container's cell slot is nonempty:
+
+    sub foo ($a?) { $a.VAR.exists }
     foo();    # false
     foo(42);  # true
 
-(.exists on array and hash containers test whether an element of a given
+.exists on array and hash containers test whether an element of a given
 index/name exists:
 
     my @array = (1,2,3);

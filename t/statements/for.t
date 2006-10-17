@@ -1,20 +1,36 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
 
 Tests the "for" statement
 
-This attemps to test as many variations of the
+This attempts to test as many variations of the
 for statement as possible
 
 L<S04/"The C<for> statement">
 
 =cut
 
-plan 34;
+=begin comment
+
+I'm in the process of smartlinking all the below tests.
+--trey 31 Aug 2006
+
+=cut
+
+plan 41;
+
+## No foreach
+# L<S04/The C<for> statement/"no foreach statement any more">
+{
+    my $times_run = 0;
+    ok (! eval 'foreach 1..10 { $times_run++ }; 1'), "foreach is gone";
+    ok (! eval 'foreach (1..10) { $times_run++}; 1'),
+        "foreach is gone, even with parens";
+    is $times_run, 0, "foreach doesn't work";
+}
 
 ## for with plain old range operator w/out parens
 # L<S04/"The C<for> statement" /in Perl 6, si it always take a list as an argument/>
@@ -29,6 +45,28 @@ is($a, '012345', 'for 0..5 {} works');
 my $b;
 for 0 .. 5 -> $_ { $b = $b ~ $_; };
 is($b, '012345', 'for 0 .. 5 -> {} works');
+
+{
+    my $str;
+    my @a = 1..3;
+    my @b = 4..6;
+    for each(@a; @b) -> $x, $y {
+        $str ~= "($x $y)";
+    }
+    is $str, "(1 4)(2 5)(3 6)", 'for each(@a; @b) -> $x, $y works';
+}
+
+{
+    my $str;
+    my @a = 1..3;
+    my @b = 5..6;
+    eval q{
+        for zip(@a; @b) -> [$x, $y] {
+            $str ~= "($x $y)";
+        }
+    };
+    is $str, "(1 5)(2 4)(3 6)", 'for zip(@a; @b) -> [$x, $y] works', :todo<bug>;
+}
 
 # ... with sub
 
@@ -251,4 +289,16 @@ is( %hash_kv.sort, %kv.sort, 'for %hash.kv -> $key, $val is rw { $val++ }', :tod
    my $sum2 = @array2.map:{ $_.key };
    is( $sum1, $sum2, '$_.key = 1 for @array1;');
 
+}
+
+# rw scalars
+#L<S04/The C<for> statement/implicit parameter to block read/write "by default">
+{
+    my ($a, $b, $c) = 0..2;
+    try { for ($a, $b, $c) { $_++ } };
+    is( [$a,$b,$c], [1,2,3], 'for ($a,$b,$c) { $_++ }');
+
+    ($a, $b, $c) = 0..2;
+    try { for ($a, $b, $c) -> $x is rw { $x++ } };
+    is( [$a,$b,$c], [1,2,3], 'for ($a,$b,$c) -> $x is rw { $x++ }');
 }

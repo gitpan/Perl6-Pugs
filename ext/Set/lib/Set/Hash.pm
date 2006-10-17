@@ -1,5 +1,5 @@
 
-use v6;
+use v6-alpha;
 
 class Set::Hash;
 
@@ -9,7 +9,7 @@ sub set (*@contents) returns Set::Hash is export {
     return $set;
 }
 
-=for LATER
+=begin LATER
 
 # parsefail :(
 
@@ -37,7 +37,7 @@ method members() returns List {
 # to stringify).
 method _stringify ($item) returns Str {
     my $str_item = ~$item;
-    $str_item ~= $item.id()
+    $str_item ~= $item.WHICH()
         if $str_item ~~ rx:perl5/^\<obj\:/; #/#cperl-mode--
     return $str_item;
 }
@@ -116,7 +116,7 @@ method proper_superset($self: Set $other) returns Bool {
 }
 
 method stringify() returns Str {
-    return("set(" ~ $?SELF.members.join(" ") ~ ")");
+    return("set(@.members[])");
 }
 
 
@@ -186,7 +186,7 @@ multi sub *infix:<≠> (Set $one, Set $two) returns Set {
 
 # what will be used for stringify?
 #method prefix:<~> (Set $self) returns Str {
-#    ./stringify
+#    self.stringify
 #}
 
 multi sub *infix:«<» (Set $one, Set $two) returns Set {

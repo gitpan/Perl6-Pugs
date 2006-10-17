@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fno-full-laziness -fno-cse -fno-warn-deprecations #-}
+{-# OPTIONS_GHC -fglasgow-exts -fno-warn-orphans -fno-full-laziness -fno-cse -fno-warn-deprecations -fallow-undecidable-instances -fallow-overlapping-instances -funbox-strict-fields -cpp #-}
 
 {-|
     Internal utilities and library imports.
@@ -19,24 +19,31 @@ module Pugs.Internals (
     module Control.Exception,
     module Control.Monad.Error,
     module Control.Monad.RWS,
+    module Control.Monad.Identity,
     module Data.Array,
     module Data.Bits,
     module Data.Char,
     module Data.Complex,
+    module Data.ByteString,
     module Data.Dynamic,
+    module Data.Generics,
     module Data.Either,
     module Data.FunctorM,
     module Data.IntMap,
+    module Data.IORef,
     module Data.List,
     module Data.Map,
     module Data.Maybe,
     module Data.Ratio,
     module Data.Set,
+    module Data.Seq,
     module Data.Tree,
     module Data.Unique,
     module Data.Word,
     module Debug.Trace,
+    module GHC.Exts,
     module Network,
+    module Numeric,
     module Pugs.Compat,
     module RRegex,
     module RRegex.Syntax,
@@ -52,7 +59,8 @@ module Pugs.Internals (
     module System.Process,
     module System.Random,
     module System.Time,
-    module UTF8,
+    (:>:)(..),
+    (:<:)(..),
     internalError,
     split,
     split_n,
@@ -60,6 +68,7 @@ module Pugs.Internals (
     afterPrefix,
     decodeUTF8,
     encodeUTF8,
+    fromTypeable,
     forM,
     forM_,
     combine,
@@ -67,24 +76,33 @@ module Pugs.Internals (
     inlinePerformIO,
     inlinePerformSTM,
     unsafePerformSTM,
-    possiblyFixOperatorName,
-    maybeM,
+    maybeM, finallyM,
     safeMode,
+    traceM,
     warn,
     die,
+
+    catchIO, evaluateIO,
+
     _GlobalFinalizer,
     unsafeIOToSTM,
+    ID(..), bufToID,
+
+    __, (+++), nullID, addressOf, showAddressOf,
+
+    hashNew, hashList
 ) where
 
-import UTF8
 import Pugs.Compat
 import RRegex
 import RRegex.Syntax
 import Data.Char
 import Data.IORef
-import Data.Dynamic
+import Data.Dynamic hiding (cast)
+import Data.Generics (Data)
 import Data.Array (elems)
 import Network
+import Numeric (showHex)
 import System.Environment (getArgs, withArgs, getProgName)
 import System.Random hiding (split)
 import System.Exit
@@ -101,10 +119,11 @@ import System.IO.Unsafe
 import System.IO.Error (ioeGetErrorString, isUserError)
 import System.Mem
 import System.Mem.Weak
-import System.Directory (Permissions(..), getPermissions, getTemporaryDirectory, createDirectory, removeDirectory, removeFile, getDirectoryContents)
-import Control.Exception (catchJust, errorCalls)
-import Control.Monad.RWS
-import Control.Monad.Error (MonadError(..))
+import System.Directory (Permissions(..), getPermissions, getTemporaryDirectory, createDirectory, removeDirectory, removeFile, getDirectoryContents, getModificationTime)
+import Control.Exception (catchJust, errorCalls, Exception(..))
+import Control.Monad.RWS (MonadIO(..), MonadReader(..), MonadState(..), MonadWriter(..), MonadTrans(..), asks, ReaderT(..), WriterT(..), when, join, liftM, filterM, modify, unless, gets, foldM, guard, liftM2, liftM3, fix, mplus, mappend, mzero, mconcat, msum, censor)
+import Control.Monad.Identity (Identity(..))
+import Control.Monad.Error (MonadError(..), ErrorT(..), Error(..))
 import Control.Concurrent
 import Control.Concurrent.STM
 import Data.Bits hiding (shift)
@@ -114,20 +133,72 @@ import Data.FunctorM
 import Data.List (
     (\\), find, genericLength, insert, sortBy, intersperse,
     partition, group, sort, genericReplicate, isPrefixOf, isSuffixOf,
-    genericTake, genericDrop, unfoldr, nub, nubBy, transpose, delete
+    genericTake, genericDrop, unfoldr, nub, nubBy, transpose, delete, foldl'
     )
 import Data.Unique
 import Data.Ratio
-import Data.Word
+import Data.Word hiding (Word)
 import Data.Complex
+import Data.ByteString (ByteString)
 import Data.Tree
+import qualified Data.Typeable as Typeable
 import Data.Set (Set)
 import Data.Map (Map)
+import Data.Seq (Seq, singleton)
 import Data.IntMap (IntMap)
 import Debug.Trace
 import GHC.Base (realWorld#)
 import GHC.IOBase (IO(..))
 import GHC.Conc (unsafeIOToSTM)
+import GHC.Exts (unsafeCoerce#, Word(W#), Word#)
+import qualified Data.Seq as Seq
+
+import qualified UTF8
+import qualified Data.HashTable as H
+import qualified Foreign as Foreign
+import qualified Control.Exception (catch, evaluate)
+
+--
+-- Nominal subtyping relationship with widening cast.
+-- 
+-- The function "cast" is injective: for distinct values of "b",
+-- it must produce distinct values of "a".
+--
+-- Also, it must work for all values of type "b".
+-- 
+class ((:>:) a) b where
+    {-# SPECIALISE cast :: ID -> ID #-}
+    {-# SPECIALISE cast :: ByteString -> ByteString #-}
+    {-# SPECIALISE cast :: String -> String #-}
+    {-# SPECIALISE cast :: ByteString -> ByteString #-}
+    {-# SPECIALISE cast :: String -> String #-}
+    {-# SPECIALISE cast :: ID -> ByteString #-}
+    {-# SPECIALISE cast :: ID -> String #-}
+    {-# SPECIALISE cast :: ByteString -> ID #-}
+    {-# SPECIALISE cast :: String -> ID #-}
+    cast :: b -> a
+
+class ((:<:) a) b where
+    castBack :: a -> b
+
+instance (b :<: a) => (:>:) a b where
+    cast = castBack
+
+instance (:<:) a a where castBack = id
+
+instance ((:>:) [a]) (Seq a) where cast = Seq.toList
+instance ((:<:) [a]) (Seq a) where castBack = Seq.fromList
+
+-- "return . cast" can be written as "cast"
+instance (Monad m, (a :>: b)) => ((:>:) (m a)) b where cast = return . cast
+
+-- "fmap cast" can be written as "cast"
+instance (Functor f, (a :>: b)) => ((:>:) (f a)) (f b) where cast = fmap cast
+
+fromTypeable :: forall m a b. (Monad m, Typeable a, Typeable b) => a -> m b
+fromTypeable x = case Typeable.cast x of
+    Just y -> return y
+    _      -> fail $ "Cannot cast from " ++ (show $ typeOf x) ++ " to " ++ (show $ typeOf (undefined :: b))
 
 -- Instances.
 instance Show Unique where
@@ -158,6 +229,10 @@ die x y = do
 warn :: (MonadIO m, Show a) => String -> a -> m ()
 warn str val = liftIO $ do
     hPutStrLn stderr $ "*** " ++ str ++ ":\n    " ++ show val
+
+-- | This is just @Debug.Trace.trace@, but allows for cleaner code in do blocks.
+traceM :: Monad m => String -> m ()
+traceM s = trace s $ return ()
 
 split :: (Eq a) => [a] -> [a] -> [[a]]
 split []  _   = internalError "splitting by an empty list"
@@ -192,13 +267,113 @@ afterPrefix (p:ps) (x:xs)
    | p == x = afterPrefix ps xs
    | otherwise = Nothing
 
-encodeUTF8 :: String -> String
-encodeUTF8 = map (chr . fromEnum) . encode
-
+{-# INLINE decodeUTF8 #-}
 decodeUTF8 :: String -> String
-decodeUTF8 str = fst $ decode bytes
-    where
-    bytes = map (toEnum . ord) str
+decodeUTF8 [] = []
+decodeUTF8 (c:cs)
+    | c < '\x80'
+    = let rest = decodeUTF8 cs
+       in seq rest
+          (c:rest)
+decodeUTF8 (c:d:cs)
+    | '\xC0' <= c, c <= '\xDF'
+    , '\x80' <= d, d <= '\xBF'
+    = let rest = decodeUTF8 cs
+       in seq rest
+          ( toEnum ( (fromEnum c `mod` 0x20) * 0x40
+                   + fromEnum d `mod` 0x40
+                   )
+          : rest
+          )
+decodeUTF8 (c:d:e:cs)
+    | '\xE0' <= c, c <= '\xEF'
+    , '\x80' <= d, d <= '\xBF'
+    , '\x80' <= e, e <= '\xBF'
+    = let rest = decodeUTF8 cs
+       in seq rest
+          ( toEnum ( (fromEnum c `mod` 0x10 * 0x1000)
+                   + (fromEnum d `mod` 0x40) * 0x40
+                   + fromEnum e `mod` 0x40
+                   )
+          : rest
+          )
+decodeUTF8 (c:d:e:f:cs)
+    | '\xF0' <= c, c <= '\xF7'
+    , '\x80' <= d, d <= '\xBF'
+    , '\x80' <= e, e <= '\xBF'
+    , '\x80' <= f, f <= '\xBF'
+    = let rest = decodeUTF8 cs
+       in seq rest
+          ( toEnum ( (fromEnum c `mod` 0x10 * 0x40000)
+                   + (fromEnum d `mod` 0x40) * 0x1000
+                   + (fromEnum e `mod` 0x40) * 0x40
+                   + fromEnum f `mod` 0x40
+                   )
+          : rest
+          )
+decodeUTF8 (x:xs) = trace ("decodeUTF8: bad data: " ++ show x) (x:decodeUTF8 xs)
+
+{-# INLINE encodeUTF8 #-}
+encodeUTF8 :: String -> String
+encodeUTF8 [] = []
+-- In the \0 case, we diverge from the Unicode standard to remove any trace
+-- of embedded nulls in our bytestrings, to allow the use of Judy.StrMap
+-- and to make passing CString around easier.  See Java for the same treatment:
+-- http://java.sun.com/j2se/1.5.0/docs/api/java/io/DataInput.html#modified-utf-8
+encodeUTF8 ('\0':cs)
+    = let rest = encodeUTF8 cs
+       in seq rest
+          ('\xC0':'\x80':rest)
+encodeUTF8 (c:cs)
+    | c < '\x80'
+    = let rest = encodeUTF8 cs
+       in seq rest
+          (c:rest)
+    | c < '\x800'
+    = let i     = fromEnum c
+          rest  = encodeUTF8 cs
+       in seq rest
+          ( toEnum (0xC0 + i `div` 0x40)
+          : toEnum (0x80 + i `mod` 0x40)
+          : rest
+          )
+    | c < '\x10000'
+    = let i     = fromEnum c
+          rest  = encodeUTF8 cs
+       in seq rest
+          ( toEnum (0xE0 + i `div` 0x1000)
+          : toEnum (0x80 + (i `div` 0x40) `mod` 0x40)
+          : toEnum (0x80 + i `mod` 0x40)
+          : rest
+          )
+    | otherwise
+    = let i     = fromEnum c
+          rest  = encodeUTF8 cs
+       in seq rest
+          ( toEnum (0xF0 + i `div` 0x40000)
+          : toEnum (0x80 + (i `div` 0x1000) `mod` 0x40)
+          : toEnum (0x80 + (i `div` 0x40) `mod` 0x40)
+          : toEnum (0x80 + i `mod` 0x40)
+          : rest
+          )
+
+catchIO :: IO a -> (Control.Exception.Exception -> IO a) -> IO a
+catchIO = Control.Exception.catch
+
+evaluateIO :: a -> IO a
+evaluateIO = Control.Exception.evaluate
+
+{-# INLINE finallyM #-}
+finallyM :: (Monad m) 
+     => m a     -- ^ The actual action
+     -> m b     -- ^ the finalizer
+     -> m a     -- ^ Result of the actual action
+finallyM ma mb = do
+    r <- ma
+    mb
+    return r
+
+-- On GHC 6.6 we actually want to use the builtin forM and forM_ in Control.Monad
 
 {-|
 Take a list of values, and a monad-producing function, and apply that function
@@ -207,6 +382,7 @@ monad producing a list of the resulting values.
 
 (This is just @mapM@ with the arguments reversed.)
 -}
+{-# INLINE forM #-}
 forM :: (Monad m) 
      => [a]        -- ^ List of values to loop over
      -> (a -> m b) -- ^ The \'body\' of the for loop
@@ -220,6 +396,7 @@ function are discarded.
 
 (This is just @mapM_@ with the arguments reversed.)
 -}
+{-# INLINE forM_ #-}
 forM_ :: (Monad m) 
       => [a]        -- ^ List of values to loop over
       -> (a -> m b) -- ^ The \'body\' of the for loop
@@ -283,36 +460,6 @@ maybeM :: (FunctorM f, Monad m)
 maybeM f m = fmapM m =<< f
 
 {-|
-Transform an operator name, for example @&infix:\<+\>@ or @&prefix:«[+]»@, 
-into its internal name (@&infix:+@ and @&prefix:[+]@ respectively).
--}
-possiblyFixOperatorName :: String -> String
-possiblyFixOperatorName name
-    -- It doesn't matter if we lookup &foo or &*foo.
-    | ('&':'*':rest) <- name = "&*" ++ fixName' rest
-    | ('&':rest)     <- name = "&"  ++ fixName' rest
-    | otherwise      = name
-    where
-    -- We've to strip the <>s for &infix:<...>, &prefix:<...>, and
-    -- &postfix:<...>.
-    -- The other &...:<...> things aren't that simple (e.g. circumfix.).
-    fixName' ('i':'n':'f':'i':'x':':':rest)         = "infix:"   ++ dropBrackets rest
-    fixName' ('p':'r':'e':'f':'i':'x':':':rest)     = "prefix:"  ++ dropBrackets rest
-    fixName' ('p':'o':'s':'t':'f':'i':'x':':':rest) = "postfix:" ++ dropBrackets rest
-    fixName' x                                      = x
-    -- We have to make sure that the last character(s) match the first one(s),
-    -- otherwise 4 <= 4 will stop working.
-    -- Kludge. <=> is ambigious.
-    dropBrackets "<=>" = "<=>"
-    -- «bar» --> bar
-    dropBrackets ('\171':(rest@(_:_)))    = if (last rest) == '\187' then init rest else '\171':rest
-    -- <<bar>> --> bar
-    dropBrackets ('<':'<':(rest@(_:_:_))) = if (last rest) == '>' && (last . init $ rest) == '>' then init . init $ rest else "<<" ++ rest
-    -- <bar> --> bar
-    dropBrackets ('<':(rest@(_:_)))       = if (last rest) == '>' then init rest else '<':rest
-    dropBrackets x                        = x
-
-{-|
 Returns @True@ if the environment variable @PUGS_SAFEMODE@ is set to a
 true value. Most IO primitives are disabled under safe mode.
 -}
@@ -326,3 +473,102 @@ safeMode = case (inlinePerformIO $ getEnv "PUGS_SAFEMODE") of
 {-# NOINLINE _GlobalFinalizer #-}
 _GlobalFinalizer :: IORef (IO ())
 _GlobalFinalizer = unsafePerformIO $ newIORef (return ())
+
+-- XXX - Under GHCI, our global _BufToID table could be refreshed into
+--       nonexistence, so we need to compare IDs based on the actual buffer,
+--       not its unique key.
+data ID = MkID
+#ifdef PUGS_UNDER_GHCI
+    { idBuf :: !ByteString, idKey :: !Int }
+#else
+    { idKey :: !Int, idBuf :: !ByteString }
+#endif
+    deriving (Typeable, Data)
+
+instance Eq ID where
+    MkID x _ == MkID y _ = x == y
+    MkID x _ /= MkID y _ = x /= y
+
+instance Ord ID where
+    compare (MkID x _) (MkID y _) = compare x y
+    MkID x _ <= MkID y _ = x <= y
+    MkID x _ >= MkID y _ = x >= y
+    MkID x _ < MkID y _ = x < y
+    MkID x _ > MkID y _ = x > y
+
+instance Show ID where
+    showsPrec x MkID{ idBuf = buf } = showsPrec x buf
+
+instance Read ID where
+    readsPrec p s = [ (unsafePerformIO (bufToID (UTF8.pack x)), y) | (x, y) <- readsPrec p s]
+
+instance ((:>:) String) ByteString where
+    cast = UTF8.unpack
+instance ((:<:) String) ByteString where
+    castBack = UTF8.pack
+
+{-# NOINLINE nullID #-}
+nullID :: ID
+nullID = cast ""
+
+{-# INLINE __ #-}
+__ :: String -> ByteString
+__ = UTF8.pack
+
+{-# INLINE (+++) #-}
+(+++) :: ByteString -> ByteString -> ByteString
+(+++) = UTF8.append
+
+{-# INLINE hashNew #-}
+hashNew :: IO (H.HashTable ByteString a)
+hashNew = H.new (==) (UTF8.hash)
+
+{-# INLINE hashList #-}
+hashList :: [(ByteString, a)] -> IO (H.HashTable ByteString a)
+hashList = H.fromList (UTF8.hash)
+
+{-# NOINLINE _BufToID #-}
+_BufToID :: H.HashTable ByteString ID
+_BufToID = unsafePerformIO hashNew
+
+{-# NOINLINE _ID_count #-}
+_ID_count :: Foreign.Ptr Int
+_ID_count = unsafePerformIO (Foreign.new 1)
+
+instance ((:>:) ID) String where
+    cast str = let i = unsafePerformIO (bufToID (cast str)) in idKey `seq` i
+
+instance ((:>:) String) ID where
+    cast = cast . idBuf
+
+instance ((:<:) ID) ByteString where
+    castBack = idBuf
+
+instance ((:<:) ByteString) ID where
+    castBack buf = let i = unsafePerformIO (bufToID buf) in idKey i `seq` i
+
+{-# NOINLINE bufToID #-}
+bufToID :: ByteString -> IO ID
+bufToID buf = do
+    a'      <- H.lookup _BufToID buf
+    case a' of
+        Just a  -> do
+            -- hPrint stderr ("HIT", buf, W# (unsafeCoerce# _BufToID))
+            return a
+        _       -> do
+            i <- Foreign.peek _ID_count
+            -- hPrint stderr ("MISS", buf, W# (unsafeCoerce# _BufToID), i)
+            Foreign.poke _ID_count (succ i)
+            let a = MkID{ idKey = i, idBuf = buf }
+            H.insert _BufToID buf a
+            return a
+
+{-# INLINE addressOf #-}
+addressOf :: a -> Word
+addressOf x = W# (unsafeCoerce# x)
+
+{-# INLINE showAddressOf #-}
+showAddressOf :: String -> a -> String
+showAddressOf typ x = addr `seq` ('<' : typ ++ ":0x" ++ showHex addr ">")
+    where
+    addr = addressOf x

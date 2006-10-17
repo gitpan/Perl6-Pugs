@@ -30,9 +30,9 @@ unsafeEvalEnv :: Exp -> RuleParser Env
 unsafeEvalEnv exp = do
     -- pos <- getPosition
     env <- getRuleEnv
-    val <- unsafeEvalExp $ mergeStmts exp (Syn "env" [])
+    val <- unsafeEvalExp $ mergeStmts exp (Syn "continuation" [])
     case val of
-        Val (VControl (ControlEnv env')) ->
+        Val (VControl (ControlContinuation { ccEnv = env' })) ->
             return env'{ envDebug = envDebug env }
         _  -> error $ pretty val
 
@@ -42,12 +42,12 @@ unsafeEvalExp exp = do
     -- clearDynParsers
     env <- getRuleEnv
     let val = unsafePerformIO $ do
-        runEvalIO (env{ envDebug = Nothing }) $ do
+        runEvalIO env $ do
             evl <- asks envEval
             evl exp
     case val of
-        VError _ _  -> error $ pretty (val :: Val)
-        _           -> return $ Val val
+        VError{} -> error $ pretty (val :: Val)
+        _        -> return $ Val val
 
 {-# NOINLINE possiblyApplyMacro #-}
 {-| @possiblyApplyMacro@ takes an @Exp@ containg only an @App@. It then checks
@@ -66,7 +66,7 @@ possiblyApplyMacro app@(App (Var name) invs args) = do
     env <- getRuleEnv
     -- Note that we don't have to clearDynParsers, as we just do a variable
     -- lookup here.
-    subCode <- return $! unsafePerformIO $! runEvalIO (env{ envDebug = Nothing }) $! do
+    subCode <- return $! unsafePerformIO $! runEvalIO env $! do
         res <- findVar name
         maybe (return undef) readRef res
     case subCode of
@@ -92,7 +92,7 @@ possiblyApplyMacro app@(App (Var name) invs args) = do
         return $! fromObject o
     -- A Str should be (re)parsed.
     substMacroResult (Val (VStr code)) = localEnv $ do
-        parseProgram <- gets ruleParseProgram
+        parseProgram <- gets s_parseProgram
         env          <- ask
         pos          <- getPosition
         case envBody (parseProgram env ("MACRO { " ++ show pos ++" }") code) of
@@ -104,4 +104,4 @@ possiblyApplyMacro app@(App (Var name) invs args) = do
         return $! App code Nothing []
     substMacroResult (Val (VUndef)) = return emptyExp
     substMacroResult _ = fail "Macro did not return an AST, a Str or a Code!"
-possiblyApplyMacro _ = fail "possiblyApplyMacro can only be passed a (App ...)."
+possiblyApplyMacro x = return x

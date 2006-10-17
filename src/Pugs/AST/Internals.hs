@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -cpp -fglasgow-exts -fno-warn-orphans -fallow-overlapping-instances -funbox-strict-fields -fallow-undecidable-instances #-}
+{-# OPTIONS_GHC -cpp -fglasgow-exts -fno-warn-orphans -fallow-overlapping-instances -fallow-undecidable-instances #-}
 
 module Pugs.AST.Internals (
     Eval,      -- uses Val, Env, SIO
@@ -9,7 +9,7 @@ module Pugs.AST.Internals (
     Value(..), -- uses Val, Eval
     InitDat(..),
 
-    EvalT(..), ContT(..),
+    EvalT(..), SubAssoc(..),
 
     Pad(..), PadEntry(..), PadMutator, -- uses Var, TVar, VRef
     Param(..), -- uses Cxt, Exp
@@ -20,10 +20,11 @@ module Pugs.AST.Internals (
     VRef(..), -- uses IVar
     VOpaque(..), -- uses Value
     VControl(..), -- uses Env, Eval, Val
+    ControlLoop(..), ControlWhen(..), Frame(..),
     VScalar, -- uses Val
     VPair, -- uses Val
     VList, -- uses Val
-    VSubst, -- uses VRule, Expr
+    VSubst(..),  -- uses VRule, VStr, Exp
     VArray, -- uses Val
     VHash, -- uses VStr, Val
     VThunk(..), -- uses Eval, Val
@@ -49,44 +50,60 @@ module Pugs.AST.Internals (
 
     -- MonadEval(..),
 
-    runEvalSTM, runEvalIO, shiftT, resetT, callCC,
+    transformExp,
+
+    runEvalSTM, runEvalIO, callCC, tryT, resetT, shiftT, catchT,
     undef, defined, tryIO, guardSTM, guardIO, guardIOexcept,
     readRef, writeRef, clearRef, dumpRef, forceRef,
     askGlobal, writeVar, readVar,
-    findSymRef, findSym,
-    ifListContext, ifValTypeIsa, evalValType, fromVal',
+    findSymRef, findSym, valType,
+    ifListContext, ifValTypeIsa, evalValType, fromVal', toVV',
     scalarRef, codeRef, arrayRef, hashRef, thunkRef, pairRef,
     newScalar, newArray, newHash, newHandle, newObject,
     proxyScalar, constScalar, lazyScalar, lazyUndef, constArray,
-    retError, retControl, retEmpty, retIVar, readIVar, writeIVar,
+    retError, retControl, retShift, retShiftEmpty, retEmpty, retIVar, readIVar, writeIVar,
     fromVals, refType,
-    lookupPad, padToList, listToPad,
-    mkPrim, mkSub, showRat, showTrueRat,
-    cxtOfSigil, typeOfSigil,
+    refreshPad, lookupPad, padToList, listToPad,
+    mkPrim, mkSub, mkCode, showRat, showTrueRat,
+    cxtOfSigil, cxtOfSigilVar, typeOfSigil, typeOfSigilVar,
     buildParam, defaultArrayParam, defaultHashParam, defaultScalarParam,
+    paramsToSig,
     emptyExp,
     isSlurpy, envWant,
     extractPlaceholderVars, fromObject, createObject, createObjectRaw,
     doPair, doHash, doArray,
     unwrap, -- Unwrap(..) -- not used in this file, suitable for factoring out
-    newObjectId,
+    newObjectId, runInvokePerl5,
     
+    showVal, errStr, errStrPos, errValPos, enterAtomicEnv, valToBool, envPos', -- for circularity
     expToEvalVal, -- Hack, should be removed once it's figured out how
+
+    newSVval, -- used in Run.Perl5
+
+    DebugInfo, _Sym, _Var -- String -> ByteString constructors
 ) where
+
 import Pugs.Internals
 import Pugs.Types
-import Pugs.Cont hiding (shiftT, resetT)
-import System.IO.Error (try)
 import qualified Data.Set       as Set
 import qualified Data.Map       as Map
-import qualified Data.IntMap    as IntMap
 
+import qualified Data.HashTable    as H
+import GHC.Conc (unsafeIOToSTM)
+
+import Pugs.Cont (callCC)
 import Pugs.Parser.Number
+import Pugs.AST.Eval
+import Pugs.AST.Utils
 import Pugs.AST.Prag
 import Pugs.AST.Pos
 import Pugs.AST.Scope
 import Pugs.AST.SIO
 import Pugs.Embed.Perl5
+import Control.Monad (replicateM)
+import qualified Pugs.Val as Val
+import qualified Data.ByteString.Char8 as Str
+import qualified Data.Seq as Seq
 
 {- <DrIFT> Imports for the DrIFT
 import Pugs.AST.Scope
@@ -98,6 +115,9 @@ import Pugs.Internals
 import Pugs.Embed.Perl5
 import qualified Data.Set       as Set
 import qualified Data.Map       as Map
+import qualified Pugs.Val       as Val
+
+import qualified Data.HashTable    as H
  </DrIFT> -}
  
 #include "../Types/Array.hs"
@@ -110,46 +130,25 @@ import qualified Data.Map       as Map
 #include "../Types/Pair.hs"
 #include "../Types/Object.hs"
 
-errIndex :: Show a => Maybe b -> a -> Eval b
-errIndex (Just v) _ = return v
-errIndex _ idx =
-    retError "Modification of non-creatable array value attempted" idx
 
--- Three outcomes: Has value; can extend; cannot extend
-getIndex :: Int -> Maybe a -> Eval [a] -> Maybe (Eval b) -> Eval a
+catchT :: ((Val -> Eval b) -> Eval Val) -> Eval Val
+catchT action = tryT (action retShift)
 
-getIndex idx def doList _ | idx < 0 = do
-    -- first, check if the list is at least abs(idx) long.
-    list <- doList
-    if null (drop (abs (idx+1)) list)
-        then errIndex def idx
-        else return (list !! (idx `mod` (length list)))
+{-|
+Return the appropriate 'empty' value for the current context -- either
+an empty list ('VList' []), or undef ('VUndef').
+-}
+retEmpty :: Eval Val
+retEmpty = do
+    ifListContext
+        (return $ VList [])
+        (return VUndef)
 
--- now we are all positive; either extend or return
-getIndex idx def doList ext = do
-    list <- doList
-    case drop idx list of
-        [] -> case ext of
-            Just doExt -> do { doExt ; getIndex idx def doList Nothing }
-            Nothing    -> errIndex def idx
-        (a:_) -> return a
-
-getMapIndex :: Int -> Maybe a -> Eval (IntMap a) -> Maybe (Eval b) -> Eval a
-getMapIndex idx def doList _ | idx < 0 = do
-    -- first, check if the list is at least abs(idx) long.
-    list <- doList
-    if IntMap.member (abs (idx+1)) list
-        then return . fromJust
-            $ IntMap.lookup (idx `mod` (IntMap.size list)) list
-        else errIndex def idx
--- now we are all positive; either extend or return
-getMapIndex idx def doList ext = do
-    list <- doList
-    case IntMap.lookup idx list of
-        Just a  -> return a
-        Nothing -> case ext of
-            Just doExt -> do { doExt ; getMapIndex idx def doList Nothing }
-            Nothing    -> errIndex def idx
+evalValType :: Val -> Eval Type
+evalValType (VRef (MkRef (IScalar sv))) = scalar_type sv
+evalValType (VRef r) = return $ refType r
+evalValType (VType t) = return t
+evalValType val = return $ valType val
 
 {-|
 Check whether a 'Val' is of the specified type. Based on the result,
@@ -169,48 +168,40 @@ ifValTypeIsa v typ trueM falseM = do
         else falseM
 
 {-|
-If we are in list context (i.e. 'CxtSlurpy'), then perform the first
-evaluation; otherwise perform the second.
+Collapse a junction value into a single boolean value.
+
+Works by recursively casting the junction members to booleans, then performing
+the actual junction test.
 -}
-ifListContext :: (MonadReader Env m)
-              => m t -- ^ The @then@ case
-              -> m t -- ^ The @else@ case
-              -> m t
-ifListContext trueM falseM = do
-    cxt <- asks envContext
-    case cxt of
-        CxtSlurpy _ -> trueM
-        _           -> falseM
+juncToBool :: VJunc -> Eval Bool
+juncToBool (MkJunc JAny  _  vs) = do
+    bools <- mapM valToBool (Set.elems vs)
+    return . isJust $ find id bools
+juncToBool (MkJunc JAll  _  vs) = do
+    bools <- mapM valToBool (Set.elems vs)
+    return . isNothing $ find not bools
+juncToBool (MkJunc JNone _  vs) = do
+    bools <- mapM valToBool (Set.elems vs)
+    return . isNothing $ find id bools
+juncToBool (MkJunc JOne ds vs) = do
+    bools <- mapM valToBool (Set.elems ds)
+    if isJust (find id bools) then return False else do
+    bools <- mapM valToBool (Set.elems vs)
+    return $ 1 == (length $ filter id bools)
 
-{-|
-Return the appropriate 'empty' value for the current context -- either
-an empty list ('VList' []), or undef ('VUndef').
--}
-retEmpty :: Eval Val
-retEmpty = do
-    ifListContext
-        (return $ VList [])
-        (return VUndef)
+instance Show JuncType where
+    show JAny  = "any"
+    show JAll  = "all"
+    show JNone = "none"
+    show JOne  = "one"
 
-evalValType :: Val -> Eval Type
-evalValType (VRef (MkRef (IScalar sv))) = scalar_type sv
-evalValType (VRef r) = return $ refType r
-evalValType (VType t) = return t
-evalValType val = return $ valType val
-
-fromVal' :: (Value a) => Val -> Eval a
-fromVal' (VRef r) = do
-    v <- readRef r
-    fromVal v
-fromVal' (VList vs) | not $ null [ undefined | VRef _ <- vs ] = do
-    vs <- forM vs $ \v -> case v of { VRef r -> readRef r; _ -> return v }
-    fromVal $ VList vs
-fromVal' (PerlSV sv) = do
-    v <- liftIO $ svToVal sv
-    case v of
-        PerlSV sv'  -> fromSV sv'   -- it was a SV
-        val         -> fromVal val  -- it was a Val
-fromVal' v = doCast v
+instance Show VJunc where
+    show (MkJunc jtype _ set) =
+        (show jtype) ++ "(" ++
+            (foldl (\x y ->
+                if x == "" then show y
+                else x ++ "," ++ show y)
+            "" $ Set.elems set) ++ ")"
 
 {-|
 Typeclass indicating types that can be converted to\/from 'Val's.
@@ -222,6 +213,12 @@ class (Typeable n, Show n, Ord n) => Value n where
     fromVal = fromVal'
     doCast :: Val -> Eval n
 {-    doCast v = castFailM v "default implementation of doCast" -}
+    fromVV :: Val.Val -> Eval n
+    fromVV v = do
+        str <- liftSIO (Val.asStr v)
+        fail $ "Cannot cast from VV (" ++ cast str ++ ") to " ++ errType (undefined :: n)
+    toVV :: n -> Eval Val
+    toVV = toVV' . castV
     fromSV :: PerlSV -> Eval n
     fromSV sv = do
         str <- liftIO $ svToVStr sv
@@ -229,45 +226,67 @@ class (Typeable n, Show n, Ord n) => Value n where
     castV :: n -> Val
     castV x = VOpaque (MkOpaque x) -- error $ "Cannot cast into Val"
 
-errType :: (Typeable a) => a -> String
-errType x = show (typeOf x)
+data VOpaque where
+    MkOpaque :: Value a => !a -> VOpaque
 
-createObject :: VType -> [(VStr, Val)] -> Eval VObject
-createObject typ attrList = do
-    uniq    <- newObjectId
-    createObjectRaw uniq Nothing typ attrList
+fromVal' :: (Value a) => Val -> Eval a
+fromVal' (VRef r) = do
+    v <- readRef r
+    fromVal v
+fromVal' (VList vs) | any isRef vs = do
+    vs <- forM vs $ \v -> case v of { VRef r -> readRef r; _ -> return v }
+    fromVal $ VList vs
+    where
+    isRef VRef{}    = True
+    isRef _         = False
+fromVal' (PerlSV sv) = do
+    v <- liftIO $ svToVal sv
+    case v of
+        PerlSV sv'  -> fromSV sv'   -- it was a SV
+        val         -> fromVal val  -- it was a Val
+fromVal' (VV v) = fromVV v
+fromVal' v = doCast v
+
+toVV' :: Val -> Eval Val
+toVV' VUndef   = return $ VV $ Val.val $ Val.VUndef $ Val.UUndef
+toVV' (VBool v) = return $ VV $ Val.val $ ((cast v) :: Val.PureBit)
+toVV' (VInt v) = return $ VV $ Val.val $ ((cast v) :: Val.PureInt)
+toVV' (VNum v) = return $ VV $ Val.val $ ((cast v) :: Val.PureNum)
+toVV' (VRat v) = return $ VV $ Val.val $ ((cast v) :: Val.PureNum)
+toVV' (VStr v) = return $ VV $ Val.val $ ((cast v) :: Val.PureStr)
+toVV' x = error $ "don't know how to toVV': " ++ show x
+
+
+getArrayIndex :: Int -> Maybe (IVar VScalar) -> Eval IArray -> Maybe (Eval b) -> Eval (IVar VScalar)
+getArrayIndex idx def getArr _ | idx < 0 = do
+    -- first, check if the list is at least abs(idx) long
+    MkIArray iv <- getArr
+    a   <- liftSTM $ readTVar iv
+    let size = a_size a
+    if size > abs (idx+1)
+        then return (IScalar (Seq.index a (idx `mod` size)))
+        else errIndex def idx
+-- now we are all positive; either extend or return
+getArrayIndex idx def getArr ext = do
+    MkIArray iv <- getArr
+    a   <- liftSTM $ readTVar iv
+    let size = a_size a
+    if size > idx
+        then return (IScalar (Seq.index a idx))
+        else case ext of
+            Just doExt -> do { doExt; getArrayIndex idx def getArr Nothing }
+            Nothing    -> errIndex def idx
 
 createObjectRaw :: (MonadSTM m)
     => ObjectId -> Maybe Dynamic -> VType -> [(VStr, Val)] -> m VObject
 createObjectRaw uniq opaq typ attrList = do
-    attrs   <- liftSTM . newTVar . Map.map lazyScalar $ Map.fromList attrList
+    attrs   <- liftSTM . unsafeIOToSTM . H.fromList H.hashString $ map (\(a,b) -> (a, lazyScalar b)) attrList
     return $ MkObject
         { objType   = typ
         , objId     = uniq
         , objAttrs  = attrs
         , objOpaque = opaq
         }
-
-newObjectId :: Eval ObjectId
-newObjectId = do
-    tv <- asks envMaxId
-    liftSTM $ do
-        rv <- readTVar tv
-        writeTVar tv (succ rv)
-        return rv
-        
-fromObject :: forall a. (Typeable a) => VObject -> a
-fromObject obj = case objOpaque obj of
-    Nothing     -> castFail obj "VObject without opaque"
-    Just dyn    -> case fromDynamic dyn of
-        Nothing -> castFail obj "VObject's opaque not valueable"
-        Just x  -> x
-
-castFailM :: forall a b. (Show a, Typeable b) => a -> String -> Eval b
-castFailM v str = fail $ "Cannot cast from " ++ show v ++ " to " ++ errType (undefined :: b) ++ " (" ++ str ++ ")"
-
-castFail :: forall a b. (Show a, Typeable b) => a -> String -> b
-castFail v str = error $ "Cannot cast from " ++ show v ++ " to " ++ errType (undefined :: b) ++ " (" ++ str ++ ")"
 
 instance Value (IVar VScalar) where
     fromVal (VRef (MkRef v@(IScalar _))) = return v
@@ -335,55 +354,63 @@ instance Value VObject where
 
 instance Value VHash where
     fromVal (VObject o) = do
-        attrs <- liftSTM $ readTVar (objAttrs o)
-        fmap Map.fromAscList $ forM (Map.assocs $ attrs) $ \(k, ivar) -> do
+        l <- liftIO $ H.toList (objAttrs o)
+        fmap Map.fromList . forM l $ \(k, ivar) -> do
             v <- readIVar ivar
             return (k, v)
+    fromVal VType{} = return Map.empty -- ::Hash<foo>
+    fromVal (VRef r) = fromVal =<< readRef r
     fromVal v = do
         list <- fromVal v
         fmap Map.fromList $ forM list $ \(k, v) -> do
             str <- fromVal k
             return (str, v)
-    doCast v = castFailM v "[VPair]"
+    doCast v = castFailM v "VHash"
 
 instance Value [VPair] where
+    fromVal VUndef = return []
     fromVal v = do
         list <- fromVals v
         doFrom $ concat list
         where
         doFrom :: [Val] -> Eval [VPair]
         doFrom [] = return []
+        doFrom [_] = fail $ "Odd number of elements found where hash expected: " ++ show v
         doFrom (k:v:list) = do
             rest <- doFrom list
             return ((k, v):rest)
-        doFrom [k] = do
-            -- XXX: warn about odd elements?
-            return [(k, undef)]
-    doCast v = castFailM v "[VPair]"
+    doCast v = castFailM v "Hash"
 
 instance Value VCode where
     castV = VCode
     fromSV sv = return $ mkPrim
-        { subName     = "<anon>"
+        { subName     = cast "<anon>"
         , subParams   = [defaultArrayParam]
         , subReturns  = mkType "Scalar::Perl5"
         , subBody     = Prim $ \(args:_) -> do
             svs     <- fromVals args
-            env     <- ask
-            rv      <- liftIO $ do
-                envSV   <- mkVal (VControl $ ControlEnv env)
-                invokePerl5 sv nullSV svs envSV (enumCxt $ envContext env)
-            return $ case rv of
-                [sv]    -> PerlSV sv
-                _       -> VList (map PerlSV rv)
+            runInvokePerl5 sv nullSV svs
         }
     doCast (VCode b) = return b
     doCast (VList [VCode b]) = return b -- XXX Wrong
     doCast v = castFailM v "VCode"
 
+runInvokePerl5 :: PerlSV -> PerlSV -> [PerlSV] -> Eval Val
+runInvokePerl5 sub inv args = do 
+    env     <- ask
+    rv      <- liftIO $ do
+        envSV   <- mkEnv env
+        invokePerl5 sub inv args envSV (enumCxt $ envContext env)
+    case rv of
+        Perl5ReturnValues [x]   -> liftIO $ svToVal x
+        Perl5ReturnValues xs    -> liftIO $ fmap VList (mapM svToVal xs)
+        Perl5ErrorString str    -> fail str
+        Perl5ErrorObject err    -> throwError (PerlSV err)
+
 instance Value VBool where
     castV = VBool
     fromSV sv = liftIO $ svToVBool sv
+    fromVV vv = liftSIO $ fmap cast (Val.asBit vv)
     doCast (VJunc j)   = juncToBool j
     doCast (VMatch m)  = return $ matchOk m
     doCast (VBool b)   = return $ b
@@ -397,30 +424,10 @@ instance Value VBool where
     doCast (VList [])  = return $ False
     doCast _           = return $ True
 
-{-|
-Collapse a junction value into a single boolean value.
-
-Works by recursively casting the junction members to booleans, then performing
-the actual junction test.
--}
-juncToBool :: VJunc -> Eval Bool
-juncToBool (MkJunc JAny  _  vs) = do
-    bools <- mapM fromVal (Set.elems vs)
-    return . isJust $ find id bools
-juncToBool (MkJunc JAll  _  vs) = do
-    bools <- mapM fromVal (Set.elems vs)
-    return . isNothing $ find not bools
-juncToBool (MkJunc JNone _  vs) = do
-    bools <- mapM fromVal (Set.elems vs)
-    return . isNothing $ find id bools
-juncToBool (MkJunc JOne ds vs) = do
-    bools <- mapM fromVal (Set.elems ds)
-    if isJust (find id bools) then return False else do
-    bools <- mapM fromVal (Set.elems vs)
-    return $ 1 == (length $ filter id bools)
 
 instance Value VInt where
     castV = VInt
+    fromVV vv = liftSIO $ fmap cast (Val.asInt vv)
     fromSV sv = liftIO $ svToVInt sv
     doCast (VInt i)     = return $ i
     doCast x            = fmap truncate (fromVal x :: Eval VRat)
@@ -448,6 +455,7 @@ instance Value VRat where
 
 instance Value VNum where
     castV = VNum
+    fromVV vv = liftSIO $ fmap cast (Val.asNum vv)
     fromSV sv = liftIO $ svToVNum sv
     doCast VUndef       = return $ 0
     doCast VType{}      = return $ 0
@@ -479,9 +487,17 @@ instance Value VComplex where
     castV = VComplex
     doCast x            = fmap (:+ 0) (fromVal x :: Eval VNum)
 
+instance Value ID where
+    castV = VStr . cast
+    fromSV sv = fmap cast (liftIO $ svToVStr sv)
+    fromVV vv = liftSIO $ cast (Val.asStr vv)
+    fromVal = fmap (cast :: VStr -> ID) . fromVal
+    doCast = fmap (cast :: VStr -> ID) . doCast
+
 instance Value VStr where
     castV = VStr
     fromSV sv = liftIO $ svToVStr sv
+    fromVV vv = liftSIO $ cast (Val.asStr vv)
     fromVal (VList l)    = return . unwords =<< mapM fromVal l
     fromVal v@(PerlSV _) = fromVal' v
     fromVal VUndef       = return ""
@@ -512,7 +528,7 @@ instance Value VStr where
     doCast (VRat r)      = return $ showRat r
     doCast (VNum n)      = return $ showNum n
     doCast (VList l)     = fmap unwords (mapM fromVal l)
-    doCast (VCode s)     = return $ "<" ++ show (subType s) ++ "(" ++ subName s ++ ")>"
+    doCast (VCode s)     = return $ "<" ++ show (subType s) ++ "(" ++ cast (subName s) ++ ")>"
     doCast (VJunc j)     = return $ show j
     doCast (VThread t)   = return $ takeWhile isDigit $ dropWhile (not . isDigit) $ show t
     doCast (VHandle h)   = return $ "<" ++ "VHandle (" ++ (show h) ++ ">"
@@ -521,52 +537,67 @@ instance Value VStr where
     doCast (VObject o)   = return $ "<obj:" ++ showType (objType o) ++ ">"
     doCast x             = return $ "<" ++ showType (valType x) ++ ">"
 
-showRat :: VRat -> VStr
-showRat r
-    | frac == 0 = s ++ show quot
-    | otherwise = s ++ show quot ++ "." ++ showFrac frac
-    where
-    n = numerator r
-    d = denominator r
-    s = if signum n < 0 then "-" else ""
-    (quot, rem) = quotRem (abs n) d
-    frac :: VInt
-    frac = round ((rem * (10 ^ (40 :: VInt))) % d)
-    showFrac = reverse . dropWhile (== '0') . reverse . pad . show
-    pad x = (replicate (40 - length x) '0') ++ x
-
-showTrueRat :: VRat -> VStr
-showTrueRat r =
-    (show n) ++ "/" ++ (show d)
-    where
-    n = numerator r
-    d = denominator r
-
 
 instance Value [PerlSV] where
     fromVal = fromVals
     doCast v = castFailM v "[PerlSV]"
 
 instance Value PerlSV where
-    fromVal (PerlSV sv) = return sv
-    fromVal (VStr str) = liftIO $ vstrToSV str
-    fromVal (VInt int) = liftIO $ vintToSV int
-    fromVal (VRat int) = liftIO $ vnumToSV int
-    fromVal (VNum int) = liftIO $ vnumToSV int
-    fromVal v = liftIO $ mkValRef v
+    fromVal val = liftIO $ newSVval val
     doCast v = castFailM v "PerlSV"
 
-showNum :: Show a => a -> String
-showNum x
-    | str == "Infinity"
-    = "Inf"
-    | str == "-Infinity"
-    = "-Inf"
-    | (i, ".0") <- break (== '.') str
-    = i -- strip the trailing ".0"
-    | otherwise = str
-    where
-    str = show x
+newSVval :: Val -> IO PerlSV
+newSVval val = case val of
+    PerlSV sv   -> return sv
+    VStr str    -> vstrToSV str
+    VType typ   -> vstrToSV (showType typ)
+    VBool bool  -> vintToSV (fromEnum bool)
+    VInt int    -> vintToSV int
+    VRat rat    -> vnumToSV rat
+    VNum num    -> vnumToSV num
+{-
+    VRef ref@(MkRef (IArray a)) -> case fromTypeable a of
+        Just (MkIArray iv@(I.IntMap fp) _) -> do
+            sv      <- vrefToSV ref
+            sptr    <- newStablePtr fp
+            warn "Fin: SPTR" fp
+            let fin = do
+                    warn "Fin: FPTR" (sptr == sptr)
+                    touchForeignPtr fp
+            modifyIORef _GlobalFinalizer (>> fin)
+            addFinalizer sv fin
+            return sv
+        _ -> vrefToSV ref
+-}
+    VRef ref    -> vrefToSV ref
+    VCode{}     -> mkValRef val "Code"
+    VBlock{}    -> mkValRef val "Code"
+    VHandle{}   -> mkValRef val "Handle"
+    VSocket{}   -> mkValRef val "Socket"
+    VList{}     -> mkValRef val "Array"
+    VUndef      -> svUndef
+    VError{}    -> svUndef
+    _           -> mkValRef val ""
+
+vrefToSV :: VRef -> IO PerlSV
+vrefToSV ref = mkValRef (VRef ref) $ case ref of
+    MkRef IScalar{}   -> "Scalar"
+    MkRef IArray{}    -> "Array"
+    MkRef IHash{}     -> "Hash"
+    MkRef ICode{}     -> "Code"
+    MkRef IHandle{}   -> "Handle"
+    MkRef IRule{}     -> "Rule"
+    MkRef IThunk{}    -> "Thunk"
+    MkRef IPair{}     -> "Pair"
+
+
+instance Value Val.Val where
+    fromVal (VV vv) = return vv
+    fromVal v       = fromVal =<< toVV v
+    fromVV          = return
+    toVV            = return . VV
+    castV           = VV
+    doCast v = castFailM v "VV"
 
 valToStr :: Val -> Eval VStr
 valToStr = fromVal
@@ -574,6 +605,7 @@ valToStr = fromVal
 instance Value VList where
     castV = VList
     fromSV sv = return [PerlSV sv]
+    fromVV = cast . fmap (map VV . cast) . Val.listVal
     fromVal (VRef r) = do
         v <- readRef r
         case v of
@@ -622,7 +654,8 @@ instance Value [Word8] where
 type VScalar = Val
 
 instance Value VScalar where
-    fromSV sv = return $ PerlSV sv
+    fromSV = return . PerlSV
+    fromVV = cast . fmap VV . Val.itemVal
     fromVal (VRef r) = fromVal =<< readRef r
     fromVal v = return v
     doCast v = return v
@@ -632,14 +665,25 @@ intCast :: Num b => Val -> Eval b
 intCast x = fmap fromIntegral (fromVal x :: Eval VInt)
 
 type VList = [Val]
-type VSubst = (VRule, Exp)
+data VSubst
+    = MkSubst
+        { substRegex    :: !VRule
+        , substExp      :: !Exp
+        }
+    | MkTrans
+        { transFrom     :: !VStr
+        , transTo       :: !VStr
+        }
+    deriving (Show, Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
 type VArray = [Val]
 type VHash = Map VStr Val
+
 data VThunk = MkThunk
     { thunkExp  :: Eval Val
     , thunkType :: VType
     }
     deriving (Typeable) {-!derive: YAML_Pos!-}
+
 newtype VProcess = MkProcess (ProcessHandle)
     deriving (Typeable) {-!derive: YAML_Pos!-}
 
@@ -659,7 +703,7 @@ data VRule
                                 --     'Regex' object)
         , rxGlobal    :: !Bool  -- ^ Flag indicating \'global\' (match-all)
         , rxNumSubs   :: !Int   -- ^ The number of subpatterns present.
-            , rxStringify :: !Bool
+        , rxStringify :: !Bool
         , rxRuleStr   :: !String -- ^ The rule string, for user reference.
         , rxAdverbs   :: !Val
         }
@@ -671,6 +715,21 @@ data VRule
         , rxAdverbs   :: !Val
         }
     deriving (Show, Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
+
+showVal :: Val -> String
+showVal = show
+
+errStr :: VStr -> Val
+errStr str = VError (VStr str) []
+
+errStrPos :: VStr -> Pos -> Val
+errStrPos str pos = VError (VStr str) [pos]
+
+errValPos :: Val -> Pos -> Val
+errValPos val pos = VError val [pos]
+
+enterAtomicEnv :: Env -> Env
+enterAtomicEnv env = env{ envAtomic = True }
 
 {-|
 Represents a value.
@@ -707,6 +766,7 @@ data Val
     | VObject   !VObject     -- ^ Object
     | VOpaque   !VOpaque
     | PerlSV    !PerlSV
+    | VV        !Val.Val
     deriving (Show, Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
 
 {-|
@@ -734,60 +794,46 @@ valType (VSocket  _)    = mkType "Socket"
 valType (VThread  _)    = mkType "Thread"
 valType (VProcess _)    = mkType "Process"
 valType (VControl _)    = mkType "Control"
-valType (VRule    _)    = mkType "Pugs::Internals::VRule"
+valType (VRule    _)    = mkType "Regex"
 valType (VSubst   _)    = mkType "Subst"
 valType (VMatch   _)    = mkType "Match"
 valType (VType    t)    = t
 valType (VObject  o)    = objType o
 valType (VOpaque  _)    = mkType "Object"
 valType (PerlSV   _)    = mkType "Scalar::Perl5"
+valType (VV       v)    = mkType (cast $ Val.valMeta v)
+
+valToBool :: Val -> Eval VBool
+valToBool = fromVal
 
 type VBlock = Exp
 data VControl
     = ControlExit  !ExitCode
-    | ControlEnv   !Env
+    | ControlContinuation
+        { ccEnv     :: !Env
+        , ccVal     :: !Val
+        , ccCont    :: !(Val -> Eval Val)
+        }
+    | ControlLoop  !ControlLoop
+    | ControlWhen  !ControlWhen
+    | ControlLeave
+        { leaveType     :: !(SubType -> Bool)
+        , leaveDepth    :: !Int
+        , leaveValue    :: !Val
+        }
 -- \| ControlLeave !(Env -> Eval Bool) !Val
     deriving (Show, Eq, Ord, Typeable) -- don't derive YAML for now
 
-{-|
-Represents a junction value.
+data ControlLoop
+    = LoopNext
+    | LoopRedo
+    | LoopLast
+    deriving (Show, Eq, Ord, Typeable) -- don't derive YAML for now
 
-Note that @VJunc@ is also a pun for a 'Val' constructor /containing/ a 'VJunc'.
--}
-data VJunc = MkJunc
-    { juncType :: !JuncType -- ^ 'JAny', 'JAll', 'JNone' or 'JOne'
-    , juncDup  :: !(Set Val)
-    -- ^ Only used for @one()@ junctions. Contains those values
-    --     that appear more than once (the actual count is
-    --     irrelevant), since matching any of these would
-    --     automatically violate the 'match /only/ one value'
-    --     junctive semantics.
-    , juncSet  :: !(Set Val)
-    -- ^ Set of values that make up the junction. In @one()@
-    --     junctions, contains the set of values that appear exactly
-    --     /once/.
-    } deriving (Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
-
--- | The combining semantics of a junction. See 'VJunc' for more info.
-data JuncType = JAny  -- ^ Matches if /at least one/ member matches
-              | JAll  -- ^ Matches only if /all/ members match
-              | JNone -- ^ Matches only if /no/ members match
-              | JOne  -- ^ Matches if /exactly one/ member matches
-    deriving (Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
-
-instance Show JuncType where
-    show JAny  = "any"
-    show JAll  = "all"
-    show JNone = "none"
-    show JOne  = "one"
-
-instance Show VJunc where
-    show (MkJunc jtype _ set) =
-        (show jtype) ++ "(" ++
-            (foldl (\x y ->
-                if x == "" then show y
-                else x ++ "," ++ show y)
-            "" $ Set.elems set) ++ ")"
+data ControlWhen
+    = WhenContinue
+    | WhenBreak
+    deriving (Show, Eq, Ord, Typeable) -- don't derive YAML for now
 
 {-|
 Each 'VCode' structure has a 'SubType' indicating what \'level\' of
@@ -802,7 +848,7 @@ data SubType = SubMethod    -- ^ Method
              | SubMacro     -- ^ Macro
              | SubRoutine   -- ^ Regular subroutine
              | SubBlock     -- ^ Bare block
-             | SubPointy    -- ^ Pointy sub
+             | SubPointy    -- ^ Pointy block
              | SubPrim      -- ^ Built-in primitive operator (see "Pugs.Prim")
     deriving (Show, Eq, Ord, Typeable) {-!derive: YAML_Pos, JSON, Perl5!-}
 
@@ -813,16 +859,16 @@ isSlurpy param = isSlurpyCxt $ paramContext param
 A formal parameter of a sub (or other callable).
 
 These represent declared parameters; don't confuse them with actual parameter 
-values.
+values, which are henceforth termed "arguments".
 -}
-data Param = MkParam
+data Param = MkOldParam -- "Old" because Pugs.Val.Code defined a new one
     { isInvocant    :: !Bool        -- ^ Is it in invocant slot?
     , isOptional    :: !Bool        -- ^ Is it optional?
     , isNamed       :: !Bool        -- ^ Is it named-only?
     , isLValue      :: !Bool        -- ^ Is it lvalue (i.e. not `is copy`)?
     , isWritable    :: !Bool        -- ^ Is it writable (i.e. `is rw`)?
     , isLazy        :: !Bool        -- ^ Is it call-by-name (short-circuit)?
-    , paramName     :: !String      -- ^ Parameter name
+    , paramName     :: !Var         -- ^ Parameter name
     , paramContext  :: !Cxt         -- ^ Parameter context: slurpiness and type
     , paramDefault  :: !Exp         -- ^ Default expression (to evaluate to)
                                     --     when omitted
@@ -831,6 +877,45 @@ data Param = MkParam
 
 -- | A list of formal parameters.
 type Params     = [Param]
+
+paramToValParam :: Param -> Val.SigParam
+paramToValParam param = ret
+    where 
+    ret = Val.MkParam 
+        { Val.p_variable    = paramName param
+        , Val.p_types       = []
+        , Val.p_constraints = []
+        , Val.p_unpacking   = Nothing
+        , Val.p_default     = Val.MkParamDefault Nothing -- XXX Exp incompatibility
+        , Val.p_label       = v_name $ paramName param  -- XXX sigility
+        , Val.p_slots       = Map.empty
+        , Val.p_hasAccess   = case param of
+                                  MkOldParam { isLValue = True, isWritable = False } -> Val.AccessRO
+                                  MkOldParam { isLValue = True, isWritable = True }  -> Val.AccessRW
+                                  MkOldParam { isLValue = False }                    -> Val.AccessCopy
+        , Val.p_isRef       = Val.p_hasAccess ret == Val.AccessRW
+        , Val.p_isLazy      = isLazy param
+        , Val.p_isContext   = False -- XXX - not yet handled
+        }
+
+paramsToSig :: Params -> Val.Sig
+paramsToSig params = 
+    Val.SigSubSingle
+        { Val.s_requiredPositionalCount =
+            length $ filter (\x -> not (isNamed x) && not (isOptional x)) params
+        , Val.s_requiredNames =
+            Set.fromList $ map (v_name . paramName) $ filter (not . isOptional) params
+        , Val.s_positionalList = map paramToValParam $ filter (not . isNamed) params
+        , Val.s_namedSet = Map.fromList $ 
+            map (\p -> (v_name (paramName p), paramToValParam p)) $ 
+                filter isNamed params
+        , Val.s_slurpyScalarList = []  -- XXX unimplemented
+        , Val.s_slurpyArray   = Nothing  -- XXX ditto
+        , Val.s_slurpyHash    = Nothing  -- XXX yep
+        , Val.s_slurpyCode    = Nothing  -- XXX all right
+        , Val.s_slurpyCapture = Nothing -- this one is okay as it is ;-)
+        }   
+
 {-|
 A list of bindings from formal parameters ('Param') to actual parameter
 expressions ('Exp').
@@ -861,20 +946,35 @@ separate stages, and each of the bindings needs to be checked.
 -}
 type SlurpLimit = [(VInt, Exp)]
 
+data SubAssoc
+    = ANil | AIrrelevantToParsing | A_left | A_right | A_non | A_chain | A_list 
+    deriving (Show, Eq, Ord, Typeable, Data) {-!derive: YAML_Pos, JSON, Perl5 !-}
+
 -- | Represents a sub, method, closure etc. -- basically anything callable.
 data VCode = MkCode
-    { isMulti       :: !Bool        -- ^ Is this a multi sub\/method?
-    , subName       :: !String      -- ^ Name of the closure
-    , subType       :: !SubType     -- ^ Type of the closure
-    , subEnv        :: !(Maybe Env) -- ^ Lexical pad for sub\/method
-    , subAssoc      :: !String      -- ^ Associativity
-    , subParams     :: !Params      -- ^ Parameters list
-    , subBindings   :: !Bindings    -- ^ Currently assumed bindings
-    , subSlurpLimit :: !SlurpLimit  -- ^ Max. number of slurpy arguments
-    , subReturns    :: !Type        -- ^ Return type
-    , subLValue     :: !Bool        -- ^ Is this a lvalue sub?
-    , subBody       :: !Exp         -- ^ Body of the closure
-    , subCont       :: !(Maybe (TVar VThunk)) -- ^ Coroutine re-entry point
+    { isMulti           :: !Bool        -- ^ Is this a multi sub\/method?
+    , subName           :: !ByteString  -- ^ Name of the closure
+    , subType           :: !SubType     -- ^ Type of the closure
+    , subEnv            :: !(Maybe Env) -- ^ Lexical pad for sub\/method
+    , subAssoc          :: !SubAssoc    -- ^ Associativity
+    , subParams         :: !Params      -- ^ Parameters list
+    , subBindings       :: !Bindings    -- ^ Currently assumed bindings
+    , subSlurpLimit     :: !SlurpLimit  -- ^ Max. number of slurpy arguments
+    , subReturns        :: !Type        -- ^ Return type
+    , subLValue         :: !Bool        -- ^ Is this a lvalue sub?
+    , subBody           :: !Exp         -- ^ Body of the closure
+    , subCont           :: !(Maybe (TVar VThunk)) -- ^ Coroutine re-entry point
+    , subPreBlocks      :: [VCode]
+    , subPostBlocks     :: [VCode]
+    , subFirstBlocks    :: [VCode]
+    , subLastBlocks     :: [VCode]
+    , subNextBlocks     :: [VCode]
+    , subKeepBlocks     :: [VCode]
+    , subUndoBlocks     :: [VCode]
+    , subEnterBlocks    :: [VCode]
+    , subLeaveBlocks    :: [VCode]
+    , subControlBlocks  :: [VCode]
+    , subCatchBlocks    :: [VCode]
     }
     deriving (Show, Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
 
@@ -886,10 +986,10 @@ See "Pugs.Prim" for more info.
 mkPrim :: VCode
 mkPrim = MkCode
     { isMulti = True
-    , subName = ""
+    , subName = cast "&"
     , subType = SubPrim
     , subEnv = Nothing
-    , subAssoc = "pre"
+    , subAssoc = ANil
     , subParams = []
     , subBindings = []
     , subSlurpLimit = []
@@ -897,15 +997,26 @@ mkPrim = MkCode
     , subBody = emptyExp
     , subLValue = False
     , subCont = Nothing
+    , subPreBlocks = []
+    , subPostBlocks = []
+    , subFirstBlocks = []
+    , subLastBlocks = []
+    , subNextBlocks = []
+    , subKeepBlocks = []
+    , subUndoBlocks = []
+    , subEnterBlocks = []
+    , subLeaveBlocks = []
+    , subControlBlocks = []
+    , subCatchBlocks = []
     }
 
 mkSub :: VCode
 mkSub = MkCode
     { isMulti = False
-    , subName = ""
+    , subName = cast "&"
     , subType = SubBlock
     , subEnv = Nothing
-    , subAssoc = "pre"
+    , subAssoc = ANil
     , subParams = []
     , subBindings = []
     , subSlurpLimit = []
@@ -913,13 +1024,51 @@ mkSub = MkCode
     , subBody = emptyExp
     , subLValue = False
     , subCont = Nothing
+    , subPreBlocks = []
+    , subPostBlocks = []
+    , subFirstBlocks = []
+    , subLastBlocks = []
+    , subNextBlocks = []
+    , subKeepBlocks = []
+    , subUndoBlocks = []
+    , subEnterBlocks = []
+    , subLeaveBlocks = []
+    , subControlBlocks = []
+    , subCatchBlocks = []
     }
+
+mkCode :: VCode
+mkCode = MkCode
+    { isMulti = False
+    , subName = cast "&"
+    , subType = SubBlock
+    , subEnv = Nothing
+    , subAssoc = ANil
+    , subParams = []
+    , subBindings = []
+    , subSlurpLimit = []
+    , subReturns = anyType
+    , subBody = emptyExp
+    , subLValue = False
+    , subCont = Nothing
+    , subPreBlocks = []
+    , subPostBlocks = []
+    , subFirstBlocks = []
+    , subLastBlocks = []
+    , subNextBlocks = []
+    , subKeepBlocks = []
+    , subUndoBlocks = []
+    , subEnterBlocks = []
+    , subLeaveBlocks = []
+    , subControlBlocks = []
+    , subCatchBlocks = []
+    } 
 
 instance Ord VComplex where
     compare (a :+ ai) (b :+ bi) = compare (a, ai) (b, bi)
 
-instance (Typeable a) => Show (TVar a) where
-    show _ = "<ref>"
+instance Show (TVar a) where
+    show = showAddressOf "ref"
 
 {- Expression annotation
 -}
@@ -961,6 +1110,12 @@ data Exp
     | NonTerm !Pos                      -- ^ Parse error
     deriving (Show, Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
 
+_Sym :: Scope -> String -> Exp -> Exp
+_Sym scope str exp = Sym scope (cast str) exp
+
+_Var :: String -> Exp
+_Var str = Var (possiblyFixOperatorName (cast str))
+
 instance Value Exp where
     {- Val -> Eval Exp -}
     fromVal val = do
@@ -969,7 +1124,32 @@ instance Value Exp where
     {- Exp -> Val -}
     {- castV exp = VObject (createObject (mkType "Code::Exp") [("theexp", exp)]) -}
     doCast v = castFailM v "Exp"
-    
+
+-- Recursively apply a transformation to an Exp structure
+transformExp :: (Monad m) => (Exp -> m Exp) -> Exp -> m Exp
+transformExp f (App a b cs) = do
+    a' <- transformExp f a
+    b' <- case b of
+        Just e -> liftM Just $ transformExp f e
+        Nothing -> return Nothing
+    cs' <- mapM (transformExp f) cs
+    f $ App a' b' cs'
+transformExp f (Syn t es) = f =<< liftM (Syn t) (mapM (transformExp f) es)
+transformExp f (Ann a e) = f =<< liftM (Ann a) (transformExp f e)
+transformExp f (Pad s p e) = f =<< liftM (Pad s p) (transformExp f e)
+transformExp f (Sym s v e) = f =<< liftM (Sym s v) (transformExp f e)
+transformExp f (Stmts e1 e2) = do 
+    e1' <- transformExp f e1
+    e2' <- transformExp f e2
+    f $ Stmts e1' e2'
+transformExp f e = f e
+
+fromObject :: (Typeable a) => VObject -> a
+fromObject obj = case objOpaque obj of
+    Nothing     -> castFail obj "VObject without opaque"
+    Just dyn    -> case fromDynamic dyn of
+        Nothing -> castFail obj "VObject's opaque not valueable"
+        Just x  -> x
 
 {- FIXME: Figure out how to get this working without a monad, and make it castV -}
 expToEvalVal :: Exp -> Eval Val
@@ -977,24 +1157,10 @@ expToEvalVal exp = do
     obj <- createObject (mkType "Code::Exp") []
     return $ VObject obj{ objOpaque = Just $ toDyn exp }
 
-
-
-class Unwrap a where
-    {-|
-    Unwrap a nested expression, throwing away wrappers (such as 'Cxt' or
-    'Pos' to get at the more interesting expression underneath. Works both
-    on individual 'Exp's, and elementwise on ['Exp']s.
-    -}
-    unwrap :: a -> a
-    unwrap = id
-
 instance Unwrap [Exp] where
     unwrap = map unwrap
 
 instance Unwrap Exp where
-    ---gaal unwrap (Cxt _ exp)      = unwrap exp
-    ---gaal unwrap (Pos _ exp)      = unwrap exp
-    ---gaal unwrap (Prag _ exp)     = unwrap exp
     unwrap (Ann _ exp)      = unwrap exp
     unwrap (Pad _ _ exp)    = unwrap exp
     unwrap (Sym _ _ exp)    = unwrap exp
@@ -1015,13 +1181,13 @@ instance Eq VProcess
 instance Ord VProcess where
     compare _ _ = EQ
 
-extractPlaceholderVarsExp :: Exp -> ([Exp], [String]) -> ([Exp], [String])
+extractPlaceholderVarsExp :: Exp -> ([Exp], Set Var) -> ([Exp], Set Var)
 extractPlaceholderVarsExp ex (exps, vs) = (ex':exps, vs')
     where
     (ex', vs') = extractPlaceholderVars ex vs
 
 {-| Deduce the placeholder vars ($^a, $^x etc.) used by a block). -}
-extractPlaceholderVars :: Exp -> [String] -> (Exp, [String])
+extractPlaceholderVars :: Exp -> Set Var -> (Exp, Set Var)
 extractPlaceholderVars (App n invs args) vs = (App n' invs' args', vs''')
     where
     (n', vs')      = extractPlaceholderVars n vs
@@ -1035,17 +1201,17 @@ extractPlaceholderVars (Syn n exps) vs = (Syn n exps', vs'')
     where
     (exps', vs') = foldr extractPlaceholderVarsExp ([], vs) exps
     vs'' = case n of
-        "when"  -> nub $ vs' ++ ["$_"]
-        "given" -> delete "$_" vs'
+        "when"  -> Set.insert (cast "$_") vs'
+        "given" -> Set.delete (cast "$_") vs'
         _       -> vs'
-extractPlaceholderVars (Var name) vs
-    | (sigil:'^':identifer) <- name
-    , name' <- (sigil : identifer)
-    = (Var name', nub (name':vs))
-    | name == "$_"
-    = (Var name, nub (name:vs))
+extractPlaceholderVars (Var var) vs
+    | TImplicit <- v_twigil var
+    , var' <- var{ v_twigil = TNil }
+    = (Var var', Set.insert var' vs)
+    | var == cast "$_"
+    = (Var var, Set.insert var vs)
     | otherwise
-    = (Var name, vs)
+    = (Var var, vs)
 extractPlaceholderVars (Ann ann ex) vs = ((Ann ann ex'), vs')
     where
     (ex', vs') = extractPlaceholderVars ex vs
@@ -1057,48 +1223,19 @@ extractPlaceholderVars (Sym scope var ex) vs = ((Sym scope var ex'), vs')
     (ex', vs') = extractPlaceholderVars ex vs
 extractPlaceholderVars exp vs = (exp, vs)
 
-
--- can be factored
-{-|
-Return the context implied by a particular primary sigil
-(\$, \@, \% or \&). E.g. used to find what context to impose on
-the RHS of a binding (based on the sigil of the LHS).
--}
-cxtOfSigil :: Char -> Cxt
-cxtOfSigil '$'  = cxtItemAny
-cxtOfSigil '@'  = cxtSlurpyAny
-cxtOfSigil '%'  = cxtSlurpyAny
-cxtOfSigil '&'  = CxtItem $ mkType "Code"
-cxtOfSigil '<'  = CxtItem $ mkType "Pugs::Internals::VRule"
-cxtOfSigil ':'  = CxtItem $ mkType "Type"
-cxtOfSigil x    = internalError $ "cxtOfSigil: unexpected character: " ++ show x
-
-{-|
-Return the type of variable implied by a name beginning with the specified
-sigil.
--}
-typeOfSigil :: Char -> Type
-typeOfSigil '$'  = mkType "Item"
-typeOfSigil '@'  = mkType "Array"
-typeOfSigil '%'  = mkType "Hash"
-typeOfSigil '&'  = mkType "Code"
-typeOfSigil '<'  = mkType "Pugs::Internals::VRule"
-typeOfSigil ':'  = mkType "Type"
-typeOfSigil x    = internalError $ "typeOfSigil: unexpected character: " ++ show x
-
 buildParam :: String -- ^ Type of the parameter
            -> String -- ^ Parameter-sigil (@:@, @!:@, @?@, @!@, etc.)
            -> String -- ^ Name of the parameter (including primary sigil)
            -> Exp    -- ^ Expression for the param's default value
            -> Param
-buildParam typ sigil name e = MkParam
+buildParam typ sigil name e = MkOldParam
     { isInvocant    = False
     , isOptional    = '?' `elem` sigil
     , isNamed       = ':' `elem` sigil
     , isLValue      = True
     , isWritable    = (name == "$_")
     , isLazy        = False
-    , paramName     = name
+    , paramName     = cast name
     , paramContext  = if '*' `elem` sigil
         then CxtSlurpy typ'
         else CxtItem typ'
@@ -1113,9 +1250,9 @@ defaultScalarParam :: Param
 
 defaultArrayParam   = buildParam "" "*" "@_" (Val VUndef)
 defaultHashParam    = buildParam "" "*" "%_" (Val VUndef)
-defaultScalarParam  = buildParam "" "?" "$_" (Var "$_")
+defaultScalarParam  = buildParam "" "?" "$_" (Var $ cast "$_")
 
-type DebugInfo = Maybe (TVar (Map String String))
+type DebugInfo = Maybe (TVar (Map ID String))
 
 {-|
 Evaluation environment.
@@ -1131,13 +1268,13 @@ data Env = MkEnv
     , envLexical :: !Pad                 -- ^ Lexical pad for variable lookup
     , envImplicit:: !(Map Var ())        -- ^ Set of implicit variables
     , envGlobal  :: !(TVar Pad)          -- ^ Global pad for variable lookup
-    , envPackage :: !String              -- ^ Current package
+    , envPackage :: !Pkg                 -- ^ Current package
     , envClasses :: !ClassTree           -- ^ Current class tree
     , envEval    :: !(Exp -> Eval Val)   -- ^ Active evaluator
     , envCaller  :: !(Maybe Env)         -- ^ Caller's "env" pad
     , envOuter   :: !(Maybe Env)         -- ^ Outer block's env
     , envBody    :: !Exp                 -- ^ Current AST expression
-    , envDepth   :: !Int                 -- ^ Recursion depth
+    , envFrames  :: !(Set Frame)         -- ^ Recursion depth
     , envDebug   :: !DebugInfo           -- ^ Debug info map
     , envPos     :: !Pos                 -- ^ Source position range
     , envPragmas :: ![Pragma]            -- ^ List of pragmas in effect
@@ -1146,6 +1283,16 @@ data Env = MkEnv
     , envAtomic  :: !Bool                -- ^ Are we in an atomic transaction?
     } 
     deriving (Show, Eq, Ord, Typeable) -- don't derive YAML for now
+
+data Frame
+    = FrameLoop
+    | FrameWhen
+    | FrameGather
+    | FrameRoutine
+    deriving (Show, Eq, Ord, Typeable) -- don't derive YAML for now
+
+envPos' :: Env -> Pos
+envPos' = envPos
 
 {-|
 Module initialization information.
@@ -1184,7 +1331,7 @@ more details.
 
 The @Bool@ is a \'freshness\' flag used to ensure that @my@ variable slots
 are re-generated each time we enter their scope; see the
-'Pugs.Eval.reduce' entry for ('Pad' 'SMy' ... ).
+'Pugs.Eval.reduce' entry for ('Pad' 'SMy' ...).
 
 The current global and lexical pads are stored in the current 'Env', which
 is stored in the @Reader@-monad component of the current 'Eval' monad.
@@ -1201,8 +1348,20 @@ data PadEntry
 data IHashEnv = MkHashEnv deriving (Show, Typeable) {-!derive: YAML_Pos!-}
 data IScalarCwd = MkScalarCwd deriving (Show, Typeable) {-!derive: YAML_Pos!-}
 
+refreshPad :: (MonadIO m, MonadSTM m) => Pad -> m Pad
+refreshPad pad = do
+    fmap listToPad $ forM (padToList pad) $ \(name, tvars) -> do
+        tvars' <- forM tvars $ \orig@(fresh, _) -> do
+            isFresh <- liftSTM $ readTVar fresh
+            if isFresh then do { liftSTM (writeTVar fresh False); return orig } else do
+            -- regen TVar -- this is not the first time entering this scope
+            ref <- newObject (typeOfSigilVar name)
+            tvar' <- liftSTM $ newTVar ref
+            return (fresh, tvar')
+        return (name, tvars')
+
 newtype ObjectId = MkObjectId { unObjectId :: Int }
-    deriving (Show, Eq, Ord, Num, Enum, Typeable) {-!derive: YAML_Pos!-}
+    deriving (Show, Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
 
 data VObject = MkObject
     { objType   :: !VType
@@ -1227,6 +1386,18 @@ data VMatch = MkMatch
 instance Show Pad where
     show pad = "MkPad (padToList " ++ show (padToList pad) ++ ")"
 
+findSymRef :: Var -> Pad -> Eval VRef
+findSymRef name pad = liftSTM $ do
+    ref <- findSym name pad
+    readTVar ref
+
+{-# SPECIALISE findSym :: Var -> Pad -> Eval (TVar VRef) #-}
+{-# SPECIALISE findSym :: Var -> Pad -> Maybe (TVar VRef) #-}
+findSym :: Monad m => Var -> Pad -> m (TVar VRef)
+findSym name pad = case lookupPad name pad of
+    Just (x:_)  -> return x
+    _           -> fail $ "Cannot find variable: " ++ show name
+
 -- | Look up a symbol in a 'Pad', returning the ref it is bound to.
 lookupPad :: Var -- ^ Symbol to look for
           -> Pad -- ^ Pad to look in
@@ -1239,10 +1410,10 @@ lookupPad :: Var -- ^ Symbol to look for
     stored as &infix:+, i.e. without the brackets.
 -}
 
-lookupPad key (MkPad map) = case Map.lookup (possiblyFixOperatorName key) map of
-        Just (MkEntryMulti xs)   -> Just [tvar | (_, tvar) <- xs]
-        Just (MkEntry (_, tvar)) -> Just [tvar]
-        Nothing -> Nothing
+lookupPad key (MkPad map) = case Map.lookup key map of
+    Just (MkEntryMulti xs)   -> Just [tvar | (_, tvar) <- xs]
+    Just (MkEntry (_, tvar)) -> Just [tvar]
+    Nothing -> Nothing
 
 {-|
 Transform a pad into a flat list of bindings. The inverse of 'mkPad'.
@@ -1250,13 +1421,13 @@ Transform a pad into a flat list of bindings. The inverse of 'mkPad'.
 Note that @Data.Map.assocs@ returns a list of mappings in ascending key order.
 -}
 padToList :: Pad -> [(Var, [(TVar Bool, TVar VRef)])]
-padToList (MkPad map) = (Map.assocs . Map.map entryToList) map
+padToList (MkPad map) = [ (cast k, entryToList v) | (k, v) <- Map.assocs map ]
     where
     entryToList (MkEntry x)         = [x]
     entryToList (MkEntryMulti xs)   = xs
 
 listToPad :: [(Var, [(TVar Bool, TVar VRef)])] -> Pad
-listToPad = MkPad . Map.map listToEntry . Map.fromList
+listToPad entries = MkPad (Map.fromList [ (cast k, listToEntry v) | (k, v) <- entries ])
     where
     listToEntry [x] = MkEntry x
     listToEntry xs  = MkEntryMulti xs
@@ -1280,174 +1451,7 @@ mkCompUnit :: String -> Pad -> Exp -> CompUnit
 mkCompUnit _ pad ast = MkCompUnit compUnitVersion pad ast
 
 compUnitVersion :: Int
-compUnitVersion = 3
-
-{- Eval Monad -}
--- type Eval x = EvalT (ContT Val (ReaderT Env SIO)) x
-type Eval = EvalT (ContT Val (ReaderT Env SIO))
-newtype EvalT m a = EvalT { runEvalT :: m a }
-
-runEvalSTM :: Env -> Eval Val -> STM Val
-runEvalSTM env = runSTM . (`runReaderT` env { envAtomic = True }) . (`runContT` return) . runEvalT
-
-runEvalIO :: Env -> Eval Val -> IO Val
-runEvalIO env = runIO . (`runReaderT` env) . (`runContT` return) . runEvalT
-
-tryIO :: a -> IO a -> Eval a
-tryIO err = lift . liftIO . (`catch` (const $ return err))
-
-{-|
-'shiftT' is like @callCC@, except that when you activate the continuation
-provided by 'shiftT', it will run to the end of the nearest enclosing 'resetT',
-then jump back to just after the point at which you activated the continuation.
-
-Note that because control eventually returns to the point after the 
-subcontinuation is activated, you can activate it multiple times in the 
-same block. This is unlike @callCC@'s continuations, which discard the current
-execution path when activated.
-
-See 'resetT' for an example of how these delimited subcontinuations actually
-work.
--}
-shiftT :: ((a -> Eval Val) -> Eval Val)
-       -- ^ Typically a lambda function of the form @\\esc -> do ...@, where
-       --     @esc@ is the current (sub)continuation
-       -> Eval a
-shiftT e = EvalT . ContT $ \k ->
-    runContT (runEvalT . e $ lift . lift . k) return
-
-{-|
-Create an scope that 'shiftT'\'s subcontinuations are guaranteed to eventually
-exit out the end of.
-
-Consider this example:
-
-> resetT $ do
->     alfa
->     bravo
->     x <- shiftT $ \esc -> do
->        charlie
->        esc 1
->        delta
->        esc 2
->        return 0
->     zulu x
-
-This will:
-
-  1) Perform @alfa@
-  
-  2) Perform @bravo@
-  
-  3) Perform @charlie@
-  
-  4) Bind @x@ to 1, and thus perform @zulu 1@
-  
-  5) Fall off the end of 'resetT', and jump back to just after @esc 1@
-  
-  6) Perform @delta@
-  
-  7) Bind @x@ to 2, and thus perform @zulu 2@
-  
-  8) Fall off the end of 'resetT', and jump back to just after @esc 2@
-  
-  6) Escape from the 'resetT', causing it to yield 0
-
-Thus, unlike @callCC@'s continuations, these subcontinuations will eventually
-return to the point after they are activated, after falling off the end of the
-nearest 'resetT'.
--}
-resetT :: Eval Val -- ^ An evaluation, possibly containing a 'shiftT'
-       -> Eval Val
-resetT e = lift . lift $
-    runContT (runEvalT e) return
-
-instance Monad Eval where
-    return a = EvalT $ return a
-    m >>= k = EvalT $ do
-        a <- runEvalT m
-        runEvalT (k a)
-    fail str = do
-        pos <- asks envPos
-        shiftT . const . return $ VError (VStr str) [pos]
-
-instance MonadTrans EvalT where
-    lift x = EvalT x
-
-instance Functor Eval where
-    fmap f (EvalT a) = EvalT (fmap f a)
-
-instance MonadIO Eval where
-    liftIO io = EvalT (liftIO io)
-
-guardSTM :: STM a -> Eval a
-guardSTM stm = do
-    rv <- liftSTM $ fmap Right stm `catchSTM` (return . Left)
-    case rv of
-        Left e -> fail (show e)
-        Right v -> return v
-    
-{-|
-Perform an IO action and raise an exception if it fails.
--}
-guardIO :: IO a -> Eval a
-guardIO io = do
-    rv <- liftIO $ try io
-    case rv of
-        Left e -> fail (show e)
-        Right v -> return v
-
-{-|
-Like @guardIO@, perform an IO action and raise an exception if it fails.
-
-If t
-supress the exception and return an associated value instead.
--}
-guardIOexcept :: [((IOError -> Bool), a)] -> IO a -> Eval a
-guardIOexcept safetyNet io = do
-    rv <- liftIO $ try io
-    case rv of
-        Right v -> return v
-        Left  e -> catcher e safetyNet
-    where
-    catcher e [] = fail (show e)
-    catcher e ((f, res):safetyNets)
-        | f e       = return res
-        | otherwise = catcher e safetyNets
-
-instance MonadSTM Eval where
-    -- liftSTM stm = EvalT (lift . lift . liftSTM $ stm)
-    liftSTM stm = do
-        atom <- asks envAtomic
-        if atom
-            then EvalT (lift . lift . liftSTM $ stm)
-            else EvalT (lift . lift . liftIO . liftSTM $ stm)
-
-instance MonadReader Env Eval where
-    ask       = lift ask
-    local f m = EvalT $ local f (runEvalT m)
-
-findSymRef :: (MonadSTM m) => String -> Pad -> m VRef
-findSymRef name pad = do
-    case findSym name pad of
-        Just ref -> liftSTM $ readTVar ref
-        Nothing  -> fail $ "Cannot find variable: " ++ show name
-
-findSym :: String -> Pad -> Maybe (TVar VRef)
-findSym name pad = case lookupPad name pad of
-    Just (x:_)  -> Just x
-    _           -> Nothing
-
-instance MonadCont Eval where
-    -- callCC :: ((a -> Eval b) -> Eval a) -> Eval a
-    callCC f = EvalT . callCCT $ \c -> runEvalT . f $ \a -> EvalT $ c a
-
-{-
-instance MonadEval Eval
-
-class (MonadReader Env m, MonadCont m, MonadIO m, MonadSTM m) => MonadEval m
---     askGlobal :: m Pad
--}
+compUnitVersion = 8
 
 {-|
 Retrieve the global 'Pad' from the current evaluation environment.
@@ -1471,21 +1475,22 @@ writeVar name val = do
         _        -> return () -- XXX Wrong
 
 readVar :: Var -> Eval Val
-readVar name@(_:'*':_) = do
-    glob <- askGlobal
-    case findSym name glob of
-        Just tvar -> do
-            ref <- liftSTM $ readTVar tvar
-            readRef ref
-        _        -> return undef
-readVar name@(sigil:rest) = do
-    lex <- asks envLexical
-    case findSym name lex of
-        Just tvar -> do
-            ref <- liftSTM $ readTVar tvar
-            readRef ref
-        _  -> readVar (sigil:'*':rest)
-readVar _ = return undef
+readVar var
+    | isGlobalVar var = do
+        glob <- askGlobal
+        case findSym var glob of
+            Just tvar -> do
+                ref <- liftSTM $ readTVar tvar
+                readRef ref
+            _        -> return undef
+    | otherwise = do
+        lex <- asks envLexical
+        case findSym var lex of
+            Just tvar -> do
+                ref <- liftSTM $ readTVar tvar
+                readRef ref
+            -- XXX - fallback to global should be eliminated here
+            _  -> readVar (toGlobalVar var)
 
 {-|
 The \'empty expression\' is just a no-op ('Noop').
@@ -1494,11 +1499,15 @@ emptyExp :: Exp
 emptyExp = Noop
 
 retControl :: VControl -> Eval a
-retControl c = do
-    shiftT $ const (return $ VControl c)
+retControl = retShift . VControl
 
-retError :: (Show a) => VStr -> a -> Eval b
-retError str a = fail $ str ++ ": " ++ show a
+retShift :: Val -> Eval a
+-- retShift = shiftT . const . return
+retShift = EvalT . return . RException
+
+retShiftEmpty :: Eval a
+-- retShiftEmpty = shiftT (const retEmpty)
+retShiftEmpty = retShift =<< retEmpty
 
 defined :: VScalar -> Bool
 defined VUndef  = False
@@ -1533,9 +1542,12 @@ readRef (MkRef (IHash hv)) = do
 readRef (MkRef (IArray av)) = do
     vals <- array_fetch av
     return $ VList vals
+
+-- XXX - This case is entirely bogus; but no time to fix it now.
 readRef (MkRef (IPair pv)) = do
     (k, v) <- pair_fetch pv
     return $ VList [k, v]
+
 readRef (MkRef (IHandle io)) = return . VHandle =<< handle_fetch io
 readRef (MkRef (IRule rx)) = return . VRule =<< rule_fetch rx
 readRef (MkRef (IThunk tv)) = readRef =<< fromVal =<< thunk_force tv
@@ -1570,14 +1582,20 @@ clearRef (MkRef (IPair s))   = pair_storeVal s undef
 clearRef (MkRef (IThunk tv)) = clearRef =<< fromVal =<< thunk_force tv
 clearRef r = retError "Cannot clearRef" r
 
-newObject :: (MonadSTM m) => Type -> m VRef
+{-# SPECIALISE newObject :: Type -> Eval VRef #-}
+{-# SPECIALISE newObject :: Type -> IO VRef #-}
+newObject :: (MonadSTM m, MonadIO m) => Type -> m VRef
 newObject typ = case showType typ of
     "Item"      -> liftSTM $ fmap scalarRef $ newTVar undef
     "Scalar"    -> liftSTM $ fmap scalarRef $ newTVar undef
-    "Array"     -> liftSTM $ fmap arrayRef $ (newTVar IntMap.empty :: STM IArray)
-    "Hash"      -> liftSTM $ fmap hashRef $ (newTVar Map.empty :: STM IHash)
-    "Code"      -> liftSTM $ fmap codeRef $ newTVar mkPrim
-        { subAssoc = ""
+    "Array"     -> liftSTM $ do
+        iv  <- newTVar Seq.empty
+        return $ arrayRef (MkIArray iv)
+    "Hash"      -> do
+        h   <- liftIO (H.new (==) H.hashString)
+        return $ hashRef (h :: IHash)
+    "Code"      -> return $! codeRef $ mkPrim
+        { subAssoc = ANil
         , subBody  = Prim . const $ fail "Cannot use Undef as a Code object"
         }
     "Type"      -> liftSTM $ fmap scalarRef $ newTVar undef
@@ -1585,12 +1603,16 @@ newObject typ = case showType typ of
         key <- newObject (mkType "Scalar")
         val <- newObject (mkType "Scalar")
         return $ MkRef (IPair (VRef key, VRef val))
-    "Pugs::Internals::VRule"
-                -> liftSTM $ fmap scalarRef $ newTVar undef
-    _           -> fail ("Cannot create object: " ++ showType typ)
+    "Regex"     -> liftSTM $ fmap scalarRef $ newTVar undef -- XXX Wrong
+    "Capture"   -> liftSTM $ fmap scalarRef $ newTVar undef -- XXX Wrong
+    _           -> fail ("Class prototype occured where its instance object expected: " ++ showType typ)
 
 doPair :: Val -> (forall a. PairClass a => a -> b) -> Eval b
 doPair (VRef (MkRef (IPair pv))) f = return $ f pv
+doPair (VRef (MkRef (IHash hv))) f = do
+    vals <- hash_fetch hv
+    let [(k, v)] = Map.toList vals
+    return $ f (VStr k, v)
 doPair (VRef (MkRef (IArray av))) f = do
     vals <- array_fetch av
     let [k, v] = take 2 (vals ++ repeat undef)
@@ -1603,7 +1625,7 @@ doPair (VRef (MkRef (IScalar sv))) f = do
             scalar_store sv (VRef ref)
             return $ f pv
         _  -> doPair val f
-doPair val@(VRef _) _ = retError "Cannot cast into Pair" val
+doPair (VRef x) _ = retError "Cannot cast into Pair" x
 doPair val f = do
     vs <- fromVal val
     case (vs :: VList) of
@@ -1648,7 +1670,7 @@ doHash val f = do
 -- can be factored out
 doArray :: Val -> (forall a. ArrayClass a => a -> b) -> Eval b
 doArray (PerlSV sv) f = return $ f sv
-doArray (VRef (MkRef (IArray hv))) f = return $ f hv
+doArray (VRef (MkRef (IArray av))) f = return $ f av
 doArray (VRef (MkRef (IScalar sv))) f = do
     val <- scalar_fetch sv
     if defined val
@@ -1658,6 +1680,9 @@ doArray (VRef (MkRef (IScalar sv))) f = do
             scalar_store sv (VRef ref)
             return $ f hv
 doArray (VRef (MkRef p@(IPair _))) f = return $ f p
+doArray val@(VRef (MkRef IHash{})) f = do
+    av  <- fromVal val
+    return $ f (av :: VArray)
 doArray val@(VRef _) _ = retError "Cannot cast into Array" val
 doArray (VMatch m) f = do
     return $ f (matchSubPos m)
@@ -1689,9 +1714,6 @@ data IVar v where
     IRule   :: RuleClass   a => !a -> IVar VRule
     IThunk  :: ThunkClass  a => !a -> IVar VThunk
     IPair   :: PairClass   a => !a -> IVar VPair
-
-data VOpaque where
-    MkOpaque :: Value a => !a -> VOpaque
 
 -- | An empty failed match
 mkMatchFail :: VMatch
@@ -1738,21 +1760,41 @@ refType (MkRef x) = object_iType x
 
 -- Haddock doesn't seem to like data/instance declarations with a where clause.
 #ifndef HADDOCK
+instance Eq IHash where
+    x == y = addressOf x == addressOf y
+instance Ord IHash where
+    compare x y = compare (addressOf x) (addressOf y)
+instance Show IHash where
+    show = showAddressOf "Hash"
+instance Typeable2 H.HashTable where
+    typeOf2 _ = typeOf ()
+
 instance Eq VRef where
-    (==) = const $ const False
+    x == y = addressOf x == addressOf y
 instance Ord VRef where
-    compare _ _ = EQ
+    compare x y = compare (addressOf x) (addressOf y)
 instance Show VRef where
-    show v = "<" ++ showType (refType v) ++ ">"
+    show ref@(MkRef ivar) = case ivar of
+        IScalar x -> showAddr x
+        IArray  x -> showAddr x
+        IHash   x -> showAddr x
+        ICode   x -> showAddr x
+        IHandle x -> showAddr x
+        IRule   x -> showAddr x
+        IThunk  x -> showAddr x
+        IPair   x -> showAddr x
+        where
+        showAddr x = showAddressOf (showType (refType ref)) x
+
+instance Typeable a => Show (IVar a) where
+    show ivar = show (MkRef ivar)
 
 instance Eq (IVar a) where
-    (==) = const $ const False
+    x == y = addressOf x == addressOf y
 instance Ord (IVar a) where
-    compare _ _ = EQ
+    compare x y = compare (addressOf x) (addressOf y)
 instance Ord (TVar a) where
-    compare _ _ = EQ
-instance (Typeable a) => Show (IVar a) where
-    show v = show (MkRef v)
+    compare x y = compare (addressOf x) (addressOf y)
 #endif
 
 scalarRef   :: ScalarClass a=> a -> VRef
@@ -1773,12 +1815,14 @@ newScalar = liftSTM . (fmap IScalar) . newTVar
 
 newArray :: (MonadSTM m) => VArray -> m (IVar VArray)
 newArray vals = liftSTM $ do
-    av <- newTVar $ IntMap.fromAscList ([0..] `zip` map lazyScalar vals)
-    return $ IArray av
+    tvs <- mapM newTVar vals
+    iv  <- newTVar (Seq.fromList tvs)
+    return $ IArray (MkIArray iv)
 
 newHash :: (MonadSTM m) => VHash -> m (IVar VHash)
 newHash hash = do
-    ihash <- liftSTM (newTVar $ Map.map lazyScalar hash)
+    --liftSTM $ unsafeIOToSTM $ putStrLn "new hash"
+    ihash <- liftSTM . unsafeIOToSTM $ H.fromList H.hashString (map (\(a,b) -> (a, lazyScalar b)) (Map.toList hash))
     return $ IHash ihash
 
 newHandle :: (MonadSTM m) => VHandle -> m (IVar VHandle)
@@ -1804,14 +1848,39 @@ retConstError val = retError "Can't modify constant item" val
 
 -- Haddock doesn't like these; not sure why ...
 #ifndef HADDOCK
-type IArray             = TVar (IntMap (IVar VScalar))
+
+{-
+instance A.MArray IArray ArrayIndex STM where
+    getBounds (MkIArray iv) = do
+        a   <- readTVar iv
+        return (bounds a)
+    newArray b e = do
+        a   <- replicateM (rangeSize b) (newTVar e)
+        iv  <- newTVar (A.listArray b a)
+        return $ MkIArray iv
+    newArray_ b = do
+        a   <- replicateM (rangeSize b) (newTVar A.arrEleBottom)
+        iv  <- newTVar (A.listArray b a)
+        return $ MkIArray iv
+    unsafeRead (MkIArray iv) i = do
+        a   <- readTVar iv
+        readTVar $ A.unsafeAt a i
+    unsafeWrite (MkIArray iv) i e = do
+        a   <- readTVar iv
+        writeTVar (A.unsafeAt a i) e
+-}
+
+newtype IArray = MkIArray (TVar (Seq.Seq (TVar VScalar)))
+    deriving (Typeable)
+
 type IArraySlice        = [IVar VScalar]
-type IHash              = TVar (Map VStr (IVar VScalar))
+type IHash              = H.HashTable VStr (IVar VScalar) -- XXX UTF8 handled at Types/Hash.hs
 type IScalar            = TVar Val
 type ICode              = TVar VCode
 type IScalarProxy       = (Eval VScalar, (VScalar -> Eval ()))
 type IScalarLazy        = Maybe VScalar
 type IPairHashSlice     = (VStr, IVar VScalar)
+
 
 -- these implementation allows no destructions
 type IRule   = VRule
@@ -1824,7 +1893,7 @@ data VRef where
 instance Typeable VRef where
     typeOf (MkRef x) = typeOf x
 
-instance Typeable1 (EvalT (ContT Val (ReaderT Env SIO))) where
+instance Typeable1 (EvalT (ReaderT Env SIO)) where
     typeOf1 _ = typeOf ()
 
 instance Typeable1 IVar where
@@ -1846,19 +1915,19 @@ _FakeEnv = unsafePerformIO $ liftSTM $ do
     ref  <- newTVar Map.empty
     glob <- newTVar $ MkPad Map.empty
     init <- newTVar $ MkInitDat { initPragmas=[] }
-    maxi <- newTVar 1
+    maxi <- newTVar $ MkObjectId 1
     return $ MkEnv
         { envContext = CxtVoid
         , envLexical = MkPad Map.empty
         , envImplicit= Map.empty
         , envLValue  = False
         , envGlobal  = glob
-        , envPackage = "main"
+        , envPackage = cast "Main"
         , envClasses = initTree
         , envEval    = const (return VUndef)
         , envCaller  = Nothing
         , envOuter   = Nothing
-        , envDepth   = 0
+        , envFrames  = Set.empty
         , envBody    = Val undef
         , envDebug   = Just ref -- Set to "Nothing" to disable debugging
         , envPos     = MkPos "<null>" 1 1 1 1
@@ -1871,12 +1940,10 @@ _FakeEnv = unsafePerformIO $ liftSTM $ do
 fakeEval :: MonadIO m => Eval Val -> m Val
 fakeEval = liftIO . runEvalIO _FakeEnv
 
+instance YAML Val.Val
 instance YAML ([Val] -> Eval Val) where
     asYAML _ = return nilNode
     fromYAML _ = return (const $ return VUndef)
-instance YAML ObjectId where
-    asYAML (MkObjectId x) = asYAML x
-    fromYAML x = fmap MkObjectId (fromYAML x)
 instance YAML (Maybe Env) where
     asYAML _ = return nilNode
     fromYAML _ = return Nothing
@@ -1886,38 +1953,44 @@ instance YAML (Eval Val) where
 instance YAML a => YAML (Map String a) where
     asYAML x = asYAMLmap "Map" $ Map.toAscList (Map.map asYAML x)
     fromYAML node = fmap Map.fromList (fromYAMLmap node)
+instance YAML a => YAML (Map Var a) where
+    asYAML x = asYAMLmap "Map" . sortBy (\x y -> fst x `compare` fst y) $
+        [ (cast k, asYAML v) | (k, v) <- Map.toList x ]
+    fromYAML node = do
+        list <- fromYAMLmapBuf node
+        return (Map.fromList [ (cast k, v) | (k, v) <- list ])
 instance Typeable a => YAML (IVar a) where
     asYAML x = asYAML (MkRef x)
 instance YAML VRef where
     asYAML (MkRef (ICode cv)) = do
         VCode vsub  <- fakeEval $ fmap VCode (code_fetch cv)
         vsubC       <- asYAML vsub
-        return $ mkTagNode (tagHs "VCode") $ YamlSeq [vsubC]
+        return $ mkTagNode (tagHs "VCode") $ ESeq [vsubC]
     asYAML (MkRef (IScalar sv)) = do
         val <- fakeEval $ scalar_fetch sv
         svC <- asYAML val
         let tag = if scalar_iType sv == mkType "Scalar::Const"
                     then "VScalar" else "IScalar"
-        return $ mkTagNode (tagHs tag) $ YamlSeq [svC]
+        return $ mkTagNode (tagHs tag) $ ESeq [svC]
     asYAML (MkRef (IArray av)) = do
         VList vals <- fakeEval $ fmap VList (array_fetch av)
         avC <- asYAML vals
-        return $ mkTagNode (tagHs "Array") $ YamlSeq [avC]
+        return $ mkTagNode (tagHs "Array") $ ESeq [avC]
     asYAML (MkRef (IHash hv)) = do
         VMatch MkMatch{ matchSubNamed = hv } <- fakeEval $ fmap (VMatch . MkMatch False 0 0 "" []) (hash_fetch hv)
         hvC <- asYAML hv
-        return $ mkTagNode (tagHs "Hash") $ YamlSeq [hvC]
+        return $ mkTagNode (tagHs "Hash") $ ESeq [hvC]
     asYAML (MkRef (IPair pv)) = do
         VList [k, v] <- fakeEval $ fmap (\(k, v) -> VList [k, v]) (pair_fetch pv)
         avC <- asYAML (k, v)
-        return $ mkTagNode (tagHs "Pair") $ YamlSeq [avC]
+        return $ mkTagNode (tagHs "Pair") $ ESeq [avC]
     asYAML ref = do
         val <- fakeEval $ readRef ref
         svC <- asYAML val
         liftIO $ print "====>"
         liftIO $ print svC
         fail ("Not implemented: asYAML \"" ++ showType (refType ref) ++ "\"")
-    fromYAML MkYamlNode{nodeTag=Just s, nodeElem=YamlSeq [node]}
+    fromYAML MkNode{n_tag=Just s, n_elem=ESeq [node]}
         | s == packBuf "tag:hs:VCode"   =
             fmap (MkRef . ICode) (fromYAML node :: IO VCode)
         | s == packBuf "tag:hs:VScalar" =
@@ -1929,9 +2002,40 @@ instance YAML VRef where
         | s == packBuf "tag:hs:Hash"    = newV newHash
         where newV f = fmap MkRef (f =<< fromYAML node)
     fromYAML node = fail $ "Unhandled YAML node: " ++ show node
+instance YAML IHash where
+     asYAML x = do
+         l      <- liftIO $ H.toList x
+         asYAMLmap "IHash" (map (\(k, v) -> (k, asYAML v)) l)
+     fromYAML node = do
+         l  <- fromYAMLmap node
+         l' <- H.fromList H.hashString l
+         return l'
+
+instance YAML ID where
+    asYAML x = asYAML (idBuf x)
+    fromYAML x = do
+        buf <- fromYAML x
+        bufToID buf
+ 
+instance Perl5 ID where
+    showPerl5 x = showPerl5 (cast x :: ByteString)
+instance JSON ID where
+    showJSON x = showJSON (cast x :: ByteString)
+
+instance YAML Var where
+    asYAML x = asYAML (cast x :: String)
+    fromYAML = fmap (cast :: String -> Var) . fromYAML
+ 
+instance Perl5 Var where
+    showPerl5 x = showPerl5 (cast x :: String)
+instance JSON Var where
+    showJSON x = showJSON (cast x :: String)
+
+instance YAML (Set Val) where
+    asYAML = asYAML . Set.toAscList
+    fromYAML = fmap Set.fromAscList . fromYAML 
 
 instance YAML VControl
-instance YAML (Set Val)
 instance YAML (VThread Val)
 instance YAML ClassTree
 instance YAML Dynamic
@@ -1971,18 +2075,35 @@ instance Perl5 Val where
 
 instance Typeable Unique where typeOf _ = typeOf ()
 instance Typeable ProcessHandle where typeOf _ = typeOf ()
-instance Typeable Regex where typeOf _ = typeOf ()
+{- 604 means 6.4.x, not 6.4.0. So please don't delete this. -}
 #if __GLASGOW_HASKELL__ <= 604
 instance Typeable1 Tree where typeOf1 _ = typeOf ()
 #endif
 
+instance Eq VJunc where
+    (MkJunc aa ab ac) == (MkJunc aa' ab' ac') = aa == aa' && ab == ab'
+                      && ac == ac'
+
+instance Ord VJunc where
+    compare (MkJunc aa ab ac) (MkJunc aa' ab' ac') =
+            foldl (\x y -> if x == EQ then compare y EQ else x) EQ
+            [compare aa aa',compare ab ab',compare ac ac']
 
 {- !!! For DrIFT -- Don't delete !!!
+
+data VJunc = MkJunc
+    { juncType :: !JuncType
+    , juncDup  :: !(Set Val)
+    , juncSet  :: !(Set Val)
+    } deriving (Typeable) {-!derive: YAML_Pos!-}
+
+data JuncType = JAny | JAll | JNone | JOne
+    deriving (Eq, Ord, Typeable) {-!derive: YAML_Pos!-}
 
 data Scope = SState | SLet | STemp | SEnv | SMy | SOur | SGlobal
     {-!derive: YAML_Pos, JSON, Perl5!-}
 
-data Pad = MkPad { padEntries :: Map Var PadEntry }
+data Pad = MkPad { padEntries :: IntMap PadEntry }
     {-!derive: YAML_Pos!-}
 
 data Pos = MkPos

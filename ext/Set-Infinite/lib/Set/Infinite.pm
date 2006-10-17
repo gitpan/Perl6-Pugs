@@ -1,4 +1,4 @@
-use v6;
+use v6-alpha;
 
 use Span;
 # Set::Symbols is defined in the Recurrence.pm package
@@ -10,7 +10,7 @@ class Set::Infinite-0.01
 {
     has Set::Infinite::Functional $.set;
 
-=for TODO
+=begin TODO
 
   Bugs:
     * Lazy lists are not implemented
@@ -55,8 +55,7 @@ class Set::Infinite-0.01
 
 submethod BUILD ($class: *%param ) {    
     my @spans;
-    for ( *%param<objects>, *%param<spans>, *%param<recurrence> ) -> $span
-    {
+    for %param<objects spans recurrence>.map:{ $_ ?? @$_ !! () } -> $span {
         # TODO - write t/test for Array (such as 1 .. 10 and 1..10,20..30)
         next unless defined( $span );
         my $sp;
@@ -97,10 +96,10 @@ method size ()          returns Object { return $.set.size }
 
 submethod _normalize_parameter ($self: $span) {
     # is it a Set::Infinite ?
-    return $span.set if $span.isa( $self.ref );
+    return $span.set if $span.isa( $self.WHAT );
     # is it a Set::Infinite::Functional ?
     my $span0 = $self.set;
-    return $span if $span.isa( $span0.ref );
+    return $span if $span.isa( $span0.WHAT );
     # new() knows what to do: Span, Span::Num, Span.Int, Object
     my $result = $self.new( spans => $span );
     return $result.set;

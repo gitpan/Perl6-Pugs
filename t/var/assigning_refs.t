@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # See thread "@array = $scalar" on p6l started by Ingo Blechschmidt:
@@ -34,7 +33,8 @@ plan 18;
 # Of course, these (should) give a warning ("odd number in hash construction").
 {
   my $hashref = {:a(1), :b(2), :c(3)};
-  my %hash    = ($hashref,);
+  my %hash;
+  try { %hash = ($hashref,) };
 
   is +%hash, 1, '%hash = ($hashref,) does not flatten the hashref', :todo<bug>;
 }

@@ -1,10 +1,10 @@
-use v6;
+use v6-alpha;
 
 use HTTP::Headers;
 
 class HTTP::Message-0.1;
 
-our $CRLF = "\015\012";
+our $CRLF = "\o15\o12";
 
 has HTTP::Headers $!headers handles «
     header push_header init_header remove_header remove_content_headers header_field_names scan
@@ -26,7 +26,7 @@ multi submethod BUILD (HTTP::Headers $header, Str $content = "") {
 }
 
 multi submethod BUILD (%header, Str $content = "") {
-    $!headers = HTTP::Headers.new(*%header);
+    $!headers = HTTP::Headers.new(|%header);
     $!content = $content;
 }
 
@@ -85,7 +85,7 @@ method content ($self: Str $content?, Bool $keep?) is rw {
                     $!content unless $!content.defined;
                     
                     my $old = $!content;
-                    $old = $$old if $old.ref eq "Scalar";
+                    $old = $$old if $old.WHAT eq "Scalar";
                     
                     return $old;
                 }
@@ -95,7 +95,7 @@ method content ($self: Str $content?, Bool $keep?) is rw {
                     $!content unless $!content.defined;
                     
                     my $old = $self!content;
-                    $old = $$old if $old.ref eq "Scalar";
+                    $old = $$old if $old.WHAT eq "Scalar";
                 }
                 
                 $!content = $content;
@@ -152,7 +152,7 @@ method decoded_content ($self: ) {
 method as_string ($self: Str $newline = "\n") returns Str {
     my $content = $self.content;
     
-    return [~] ($!headers.as_string($newline), $newline, ($content.chars && $content !~ /\n$/) ?? "\n" !! "");
+    return [~] ($!headers.as_string($newline), $newline, ($content.chars && $content !~~ /\n$/) ?? "\n" !! "");
 }
 
 method parts ($self: *@new) is rw {
@@ -166,7 +166,7 @@ method parts ($self: *@new) is rw {
             if ($content_type ~~ m,^message/,) {
                 die "Only one part allowed for $content_type content!"
                     if @new > 1;
-            } elsif ($content_type !~ m,^multipart/,) {
+            } elsif ($content_type !~~ m,^multipart/,) {
                 $self.remove_content_headers;
                 $self.content_type("multipart/mixed");
             }
@@ -180,7 +180,7 @@ method parts ($self: *@new) is rw {
 }
 
 method add_part ($self: ::?CLASS $part) returns Void {
-    if ((.content_type // "") !~ m,^multipart/,) {
+    if ((.content_type // "") !~~ m,^multipart/,) {
         my $message = ::?CLASS.new(.remove_content_headers, .content(""));
         $self.content_type("multipart/mixed");
         @!parts = $message;
@@ -203,7 +203,7 @@ my method parts ($self: ) {
     
     if ($content_type ~~ m,^multipart/,) {
         my @h = HTTP::Headers::Util::split_header_words(.header("Content-Type"));
-        my %h = %{@h[0]};
+        my %h = %(@h[0]);
         
         if ((my $boundary = $h<boundary>).defined) {
             my $str = $self.content;

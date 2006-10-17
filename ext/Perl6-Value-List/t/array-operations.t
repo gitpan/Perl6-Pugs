@@ -1,10 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 28;
-force_todo <4 5 6 7 8 16 17 20 21 22 23 25>;
+force_todo <4 5 6 7 8 16 17>;
  
 use Perl6::Value::List;
 
@@ -65,7 +63,7 @@ use Perl6::Value::List;
   my $a1 = Perl6::Value::List.new( cstart => &mylist ); 
   $a1 = $a1.pairs;
   my $p = $a1.shift;
-  is( ~($p.ref),  'Pair',     'pair' );
+  is( ~($p.WHAT),  'Pair',     'pair' );
   is( $p.perl, '(0 => 4)', 'pair' );
 }
 

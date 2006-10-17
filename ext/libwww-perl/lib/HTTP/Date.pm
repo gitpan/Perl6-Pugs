@@ -1,5 +1,4 @@
-#!/usr/bin/pugs
-use v6;
+use v6-alpha;
 
 module HTTP::Date {
     sub time2str ($time = time)   is export(:MANDATORY) { ... }

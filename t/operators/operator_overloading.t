@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 24;
+plan 35;
 
 =pod
 
@@ -59,12 +58,15 @@ is("boop"&&&&&, "ANDANDANDANDANDboop",
    "postfix operator overloading for new operator (weird)");
 
 my $var = 0;
-eval_ok('macro circumfix:<!--...-->   ($text) { "" }; <!-- $var = 1; -->; $var == 0;', 'circumfix macro', :todo<feature>);
+ok(eval('macro circumfix:{"<!--","-->"} ($text) is parsed / .*? / { "" }; <!-- $var = 1; -->; $var == 0;'), 'circumfix macro {"",""}', :todo<feature>);
+ok(eval('macro circumfix:«<!-- -->» ($text) is parsed / .*? / { "" }; <!-- $var = 1; -->; $var == 0;'), 'circumfix macro «»', :todo<feature>);
 
 # demonstrate sum prefix
 
-sub prefix:<Σ> ($x) { [+] *$x }
-is(Σ [1..10], 55, "sum prefix operator");
+{
+    my sub prefix:<Σ> (@x) { [+] @x }
+    is(Σ [1..10], 55, "sum prefix operator");
+}
 
 # check that the correct overloaded method is called
 multi postfix:<!> ($x) { [*] 1..$x }
@@ -104,6 +106,30 @@ is("boobies"!, "BOOBIES!!!", "correct overloaded method called");
   is ~(&infix:<»+«>([1,2,3],[4,5,6])), "5 7 9", "accessing a hyperoperator using its subroutine name";
 }
 
+# Overriding infix:<;>
+{
+    my proto infix:<;> ($a, $b) { $a + $b }
+    is (3 ; 2), 5  # XXX correct?
+}
+
+# [NOTE]
+# pmichaud ruled that prefix:<;> and postfix:<;> shouldn't be defined by
+# the synopses:
+#   http://colabti.de/irclogger/irclogger_log/perl6?date=2006-07-29,Sat&sel=189#l299
+# so we won't test them here.
+
+# Overriding prefix:<if>
+# L<S04/"Statement parsing" /"since prefix:<if> would hide statement_modifier:<if>">
+{
+    my proto prefix:<if> ($a) { $a*2 }
+    is (if 5), 10;
+}
+
+# [NOTE]
+# pmichaud ruled that infix<if> is incorrect:
+#   http://colabti.de/irclogger/irclogger_log/perl6?date=2006-07-29,Sat&sel=183#l292
+# so we won't test it here either.
+
 # great.  Now, what about those silent auto-conversion operators a la:
 # multi sub prefix:<+> (Str $x) returns Num { ... }
 # ?
@@ -115,9 +141,9 @@ is("boobies"!, "BOOBIES!!!", "correct overloaded method called");
 # L<A12/"Overloading" /Coercions to other classes can also be defined:/>
 {
     class MyClass {
-      method prefix:<~> { "hi" }
-      method prefix:<+> { 42   }
-      method infix:<as>($self, OtherClass $to) {
+      method prefix:<~> is export { "hi" }
+      method prefix:<+> is export { 42   }
+      method infix:<as>($self, OtherClass $to) is export {
         my $obj = $to.new;
         $obj.x = 23;
         return $obj;
@@ -132,9 +158,51 @@ is("boobies"!, "BOOBIES!!!", "correct overloaded method called");
   lives_ok { $obj = MyClass.new }, "instantiation of a prefix:<...> and infix:<as> overloading class worked";
   my $try = lives_ok { ~$obj }, "our object was stringified correctly";
   if ($try) {
-   is ~$obj, "hi", "our object was stringified correctly";
+   is ~$obj, "hi", "our object was stringified correctly", :todo<feature>;
   } else {
     skip 1, "Stringification failed";
   };
   is eval('($obj as OtherClass).x'), 23, "our object was coerced correctly", :todo<feature>;
+}
+
+{
+	my sub infix:<Z> ($a, $b) {
+		$a ** $b;
+	}
+	is (2 Z 1 Z 2), 4, "default Left-associative works.";
+}
+
+{
+	my sub infix:<Z> is assoc('left') ($a, $b) {
+		$a ** $b;
+	}
+
+	is (2 Z 1 Z 2), 4, "Left-associative works.";
+}
+
+{
+	my sub infix:<Z> is assoc('right') ($a, $b) {
+		$a ** $b;
+	}
+
+	is (2 Z 1 Z 2), 2, "Right-associative works.";
+}
+
+{
+	my sub infix:<Z> is assoc('chain') ($a, $b) {
+		$a eq $b;
+	}
+
+
+	is (1 Z 1 Z 1), Bool::True, "Chain-associative works.";
+	is (1 Z 1 Z 2), Bool::False, "Chain-associative works.";
+}
+
+{
+	sub infix:<our_non_assoc_infix> is assoc('non') ($a, $b) {
+		$a ** $b;
+	}
+	is (2 our_non_assoc_infix 3), (2 ** 3), "Non-associative works for just tow operands.";
+	is ((2 our_non_assoc_infix 2) our_non_assoc_infix 3), (2 ** 2) ** 3, "Non-associative works when used with parens.";
+	eval_dies_ok '2 our_non_assoc_infix 3 our_non_assoc_infix 4', "Non-associative should not parsed when used chainly.";
 }

@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts -cpp -fvia-C -optc-w -fno-warn-unused-binds -fno-warn-unused-imports #-}
+{-# OPTIONS_GHC -fglasgow-exts -cpp -fvia-C -fno-warn-unused-binds -fno-warn-unused-imports -fallow-overlapping-instances #-}
 
 module Pugs.Run.Perl5 () where
 
@@ -41,17 +41,14 @@ foreign export ccall "pugs_IvToVal"
 foreign export ccall "pugs_NvToVal"
     nvToVal :: CDouble -> IO PugsVal
 
-foreign export ccall "pugs_PvToVal"
-    pvToVal :: CString -> IO PugsVal
+foreign export ccall "pugs_PvnToVal"
+    pvnToVal :: CString -> CInt -> IO PugsVal
+
+foreign export ccall "pugs_UndefVal"
+    undefVal :: IO PugsVal
 
 askPerl5Env :: IO Env
-askPerl5Env = do
-    val <- deVal =<< pugs_getenv
-    case val of
-        VControl (ControlEnv env)   -> return env
-        _                           -> do
-            print val
-            fail "cannot fetch $pugs::env"
+askPerl5Env = deEnv =<< pugs_getenv
 
 pugs_eval :: CString -> IO PugsVal
 pugs_eval cstr = do
@@ -70,37 +67,36 @@ pugs_apply subPtr invPtr argsPtr cxt = do
     env     <- askPerl5Env
     sub     <- deVal subPtr
     inv     <- deValMaybe invPtr
-    args    <- mapM deVal =<< peekArray0 nullPtr argsPtr
+    args    <- mapM deVal =<< peekArray0 nullVal argsPtr
     let subExp = case sub of
-            VStr name@('&':_)   -> Var name
-            VStr name           -> Var ('&':name)
+            VStr name@('&':_)   -> _Var name
+            VStr name           -> _Var ('&':name)
             _                   -> Val sub
+    -- warn "Applying:" (subExp, inv, args, envLexical env)
     val <- runEvalIO env $
-        evalExp (Ann (Cxt (cxtEnum cxt)) $ App subExp (fmap Val inv) (map Val args))
+        evalExp (Ann (Cxt (cxtEnum cxt)) $
+            App subExp (fmap Val inv) (map Val args))
     newSVval val
 
 deVal :: PugsVal -> IO Val
-deVal ptr = deRefStablePtr (castPtrToStablePtr ptr)
+deVal ptr = deRefStablePtr ptr
+
+deEnv :: PugsEnv -> IO Env
+deEnv ptr = do
+    env <- deRefStablePtr ptr
+    return env{ envDebug = Nothing }
+
+nullVal :: PugsVal
+nullVal = castPtrToStablePtr nullPtr
 
 deValMaybe :: PugsVal -> IO (Maybe Val)
-deValMaybe ptr | ptr == nullPtr = return Nothing
+deValMaybe ptr | castStablePtrToPtr ptr == nullPtr = return Nothing
 deValMaybe ptr = fmap Just (deVal ptr)
 
 valToSv :: PugsVal -> IO PerlSV
 valToSv ptr = do
     val <- deVal ptr
     newSVval val
-
-newSVval :: Val -> IO PerlSV
-newSVval val = case val of
-    PerlSV sv   -> return sv
-    VStr str    -> vstrToSV str
-    VType typ   -> vstrToSV (showType typ)
-    VBool bool  -> vintToSV (fromEnum bool)
-    VInt int    -> vintToSV int
-    VRat rat    -> vnumToSV rat
-    VNum num    -> vnumToSV num
-    _           -> mkValRef val
 
 valToIv :: PugsVal -> IO CInt
 valToIv ptr = do
@@ -132,10 +128,13 @@ ivToVal = mkVal . VInt . fromIntegral
 nvToVal :: CDouble -> IO PugsVal
 nvToVal = mkVal . VNum . realToFrac
 
-pvToVal :: CString -> IO PugsVal
-pvToVal cstr = do
-    str <- peekCString cstr
-    ptr <- mkVal $ VStr str
+pvnToVal :: CString -> CInt -> IO PugsVal
+pvnToVal cstr len = do
+    str <- peekCStringLen (cstr, fromEnum len)
+    ptr <- mkVal $ VStr (decodeUTF8 str)
     return ptr
+
+undefVal :: IO PugsVal
+undefVal = mkVal VUndef
 
 #endif

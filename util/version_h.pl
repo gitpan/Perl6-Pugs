@@ -1,10 +1,14 @@
 #!/usr/bin/perl -w
+
+# TODO: add a comment explaining what this small program does.
+
 use strict;
 use warnings;
-use Cwd;
+use FindBin qw($Bin);
 
-my $version_h = shift || Cwd::cwd() . "/src/Pugs/pugs_version.h";
-my $base = shift || Cwd::cwd();
+chdir_to_base();
+my $version_h = shift || "$Bin/../src/Pugs/pugs_version.h";
+my $base = shift || "$Bin/../";
 my $svn_entries = "$base/.svn/entries";
 
 my $old_revision = -1;
@@ -31,7 +35,7 @@ if (-e "$base/MANIFEST") {
 }
 elsif (-r $svn_entries) {
     print "Writing version from $svn_entries to $version_h\n";
-    open FH, $svn_entries or die $!;
+    open FH, $svn_entries or die "Unable to open file ($svn_entries). Aborting. Error returned was: $!";
     while (<FH>) {
         /^ *committed-rev=.(\d+)./ or next;
         $revision = $1;
@@ -54,7 +58,11 @@ elsif (-r $svn_entries) {
     }
 }
 $revision ||= 0;
+
+# WARNING! don't modify the following output, since smartlinks.pl relies on it.
 print "Current version is $revision\n";
+
+#utime undef, undef, "$base/src/Pugs/Version.hs";
 
 if ($revision != $old_revision) {
   # As we've closed STDIN (filehandle #0), slot #0 is available for new
@@ -62,17 +70,49 @@ if ($revision != $old_revision) {
   # "io" warnings off, perl will print "Filehandle STDIN reopened...", because
   # our handle for $version_h got slot #0, like STDIN.
   no warnings "io";
-  open OUT, "> $version_h" or die $!;
+  open OUT, "> $version_h" or die "unable to open file ($version_h) for writing. Aborting. Error was: $!";
   print OUT "#undef PUGS_SVN_REVISION\n";
   print OUT "#define PUGS_SVN_REVISION $revision\n";
   close OUT;
+
+  my $hs_file = "$base/src/Pugs/Version.hs";
+  # warn "===> touching $hs_file\n";
+  utime undef, undef, $hs_file;
 
   if ($revision != 0) {
     # rebuild Help.hs to show new revision number
     unlink "$base/dist/build/src/Pugs/Version.hi";
     unlink "$base/dist/build/src/Pugs/Version.o";
+    unlink "$base/dist/build/Pugs/Version.hi";
+    unlink "$base/dist/build/Pugs/Version.o";
     exit;
   }
 } elsif ($revision) {
   print "Not writing $version_h because $old_revision == $revision\n";
+}
+
+sub chdir_to_base {
+    # rest of script expects us to be at the base dir, so find it
+    # and chdir to it
+    my $svn_entries = ".svn/entries";
+    if (-r $svn_entries) {
+        open my $fh, "<", $svn_entries
+            or die "Couldn't open $svn_entries: $!\n";
+        my ($url, $repo);
+        while (<$fh>) {
+            if (/^ *url="(.*)"/) {
+                $url = $1
+            } elsif (/^ *repos="(.*)"/) {
+                $repo = $1;
+            }
+            $url && $repo && last;
+        }
+        close $fh;
+        return unless $url && $repo;
+        return if $url eq $repo;
+        $url =~ s|$repo/||;
+        $url =~ s|[^/]+|..|g;
+        chdir $url;
+    }
+    # XXX Make work for svk too
 }

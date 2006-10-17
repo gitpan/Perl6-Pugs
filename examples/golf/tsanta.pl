@@ -1,100 +1,96 @@
-# tsanta.pl. Santa Claus golf game test program.
-# For more detail: http://www.perlmonks.org/?node_id=438876
-# For historical interest, I've left this program pretty much
-# unchanged from the original p5 Santa golf game of 2001.
-# Also for future historical amusement, I've inserted unchanged
-# my original first attempts, head.p6, tail.p6, rev.p6, mid.p6,
-# wc.p6, developed with a very early version of Pugs (6.0.10)
-# and with very little knowledge of Perl 6. These five examples
-# can be improved in many ways, and have been in the Perl Monks
-# thread mentioned above.
-#
-# To test head.p6, tail.p6, rev.p6, mid.p6, wc.p6 for correctness,
-# simply run this program in the same directory containing
-# those files.
-#
-# Enjoy! -- asavige (aka mad golfer)
+# Pugs p6 version of tsanta.pl.
+# This is a simple translation of p5 tsanta.pl to p6.
+# See comments in tsanta.pl for more information.
 
-use strict;
+use v6-alpha;
 
-# XXX: should make this tmp file unique (using $$ say).
-my $intmp  = 'insanta.tmp';
+sub nonce () { return (".$*PID." ~ int rand 1000) }
+my $intmp  = 'insanta'  ~ nonce();
+my $outtmp = 'outsanta' ~ nonce();
 
-sub Usage {
-   print <<'GROK';
-usage: perl tsanta.pl
-   or: perl tsanta.pl head.p6 tail.p6 rev.p6 mid.p6 wc.p6
-GROK
-   exit(1);
+# XXX: would like to use 'pugs' in normal use, './pugs' when run
+# from 'make test'.
+my $PUGS = 'pugs';
+
+sub usage {
+    print
+"usage: $PUGS tsanta.pl
+   or: $PUGS tsanta.pl pugscmd head.pl tail.pl rev.pl mid.pl wc.pl
+";
+    exit(1);
 }
 
-sub GolfScore {
-   my $script = shift;
-   open(FF, $script) or die "error: open '$script'";
-   my $golf = 0;
-   while (<FF>) {
-      $_ .= chomp; next unless length;
-      s/^#!.*?perl// if $. == 1;
-      $golf += length;
-   }
-   close(FF);
-   return $golf;
+sub length (Str $s) returns Int { +split("", $s) }
+
+sub golf_score (Str $script) returns Int {
+    my $fh = open($script) err die("open '$script' failed: $!");
+    my $golf = 0;
+    my $dollar_dot = 0;    # Note: $. aka $fh.linenum() not implemented yet
+    for =$fh  -> $line {
+        ++$dollar_dot;
+        $golf += length($line) - 1
+            unless $dollar_dot==1 && $line.index("#!") == 0;
+    }
+    $fh.close() err die("close '$script' failed: $!");
+    return $golf;
 }
 
-sub PrintGolfScore {
-   my @scr = @_;
-   my $tot = 0;
-   for my $s (@scr) { $tot += GolfScore($s) }
-   print "You shot a round of $tot strokes.\n";
+sub print_golf_score (*@scr) {
+    my $tot = 0;
+    for @scr -> $s { $tot += golf_score($s) }
+    say("You shot a round of $tot strokes.");
 }
 
-sub BuildFile {
-   my ($fname, $data) = @_;
-   open(FF, '>'.$fname) or die "error: open '$fname'";
-   print FF $data;
-   close(FF);
+sub build_file (Str $fname, Str $data) {
+    my $fh = open($fname, :w) err die("open '$fname' failed: $!");
+    $fh.print($data) err die("print '$fname' failed: $!");
+    $fh.close() err die("close '$fname' failed: $!");
 }
 
-sub CheckOne {
-   my ($scr, $label, $data, $exp) = @_;
-   BuildFile($intmp, $data);
-   my $cmd = "pugs $scr $intmp";
-   print "$label: running: '$cmd'...";
-   my $out = `$cmd`; my $rc = $? >> 8;
-   print "done (rc=$rc).\n";
-   if ($out ne $exp) {
-      warn "Expected:\n"; print STDERR $exp;
-      warn "Got:\n"; print STDERR $out;
-      die "Oops, you failed.\n";
-   }
+sub check_one (Str $scr, Str $label, Str $data, Str $exp) {
+    build_file($intmp, $data);
+    my $cmd = "$PUGS $scr $intmp >$outtmp";
+    print("$label: running: '$cmd'...");
+    # my $out = `$cmd`;
+    system($cmd) err die("system '$cmd' failed: $!");
+    # XXX: get return code. how? $!? (I think $? is obsolete in p6).
+    my $rc = 0;
+    my $out = slurp($outtmp) err die("slurp '$outtmp' failed: $!");
+    # my $rc = $? >> 8;
+    say("done (rc=$rc)");
+    if ($out ne $exp) {
+        $*ERR.print("Expected:\n$exp");
+        $*ERR.print("Got:\n$out");
+        die("Oops, you failed.\n");
+    }
 }
 
 # -----------------------------------------------------
 
-my $file1 = <<'GROK';
-1st line
-GROK
+my $file1 =
+"1st line
+";
 
-my $file2 = <<'GROK';
-1st line
+my $file2 =
+"1st line
 2nd line
-GROK
+";
 
-my $file3 = <<'GROK';
-1st line
+my $file3 =
+"1st line
 2nd line
 3rd line
-GROK
+";
 
-my $file4 = <<'GROK';
-1st line
+my $file4 =
+"1st line
 2nd line
 3rd line
 4th line
-GROK
+";
 
-my $file12 = <<'GROK';
-1st line
+my $file12 =
+"1st line
 2nd line
 3rd line
 4th line
@@ -106,10 +102,10 @@ my $file12 = <<'GROK';
 10th line
 11th line
 12th line
-GROK
+";
 
-my $file21 = <<'GROK';
-1st line
+my $file21 =
+"1st line
 2nd line
 3rd line
 4th line
@@ -130,105 +126,103 @@ my $file21 = <<'GROK';
 
 
 
-GROK
+";
 
 # -----------------------------------------------------
 
-sub CheckHead {
-   my ($scr) = @_;
-   my @tt = (
-      [ 'file1',  $file1,  "1st line\n" ],
-      [ 'file2',  $file2,  "1st line\n2nd line\n" ],
-      [ 'file3',  $file3,  "1st line\n2nd line\n3rd line\n" ],
-      [ 'file12', $file12,
-        "1st line\n2nd line\n3rd line\n4th line\n5th line\n".
-        "6th line\n7th line\n8th line\n9th line\n10th line\n" ],
-   );
-   for my $r (@tt) { CheckOne($scr, $r->[0], $r->[1], $r->[2]) }
+sub check_head (Str $scr) {
+    my @tt = (
+       'file1',  $file1,  "1st line\n",
+       'file2',  $file2,  "1st line\n2nd line\n",
+       'file3',  $file3,  "1st line\n2nd line\n3rd line\n",
+       'file12', $file12,
+       "1st line\n2nd line\n3rd line\n4th line\n5th line\n"~
+       "6th line\n7th line\n8th line\n9th line\n10th line\n"
+    );
+    for @tt -> $f0, $f1, $f2 { check_one($scr, $f0, $f1, $f2) }
 }
 
-sub CheckTail {
-   my ($scr) = @_;
-   my @tt = (
-      [ 'file1',  $file1,  "1st line\n" ],
-      [ 'file2',  $file2,  "1st line\n2nd line\n" ],
-      [ 'file3',  $file3,  "1st line\n2nd line\n3rd line\n" ],
-      [ 'file12', $file12,
-        "3rd line\n4th line\n5th line\n6th line\n7th line\n".
-        "8th line\n9th line\n10th line\n11th line\n12th line\n" ],
-      [ 'file21', $file21, "12th line\n\n\n\n\n\n\n\n\n\n" ],
-   );
-   for my $r (@tt) { CheckOne($scr, $r->[0], $r->[1], $r->[2]) }
+sub check_tail (Str $scr) {
+    my @tt = (
+       'file1',  $file1,  "1st line\n",
+       'file2',  $file2,  "1st line\n2nd line\n",
+       'file3',  $file3,  "1st line\n2nd line\n3rd line\n",
+       'file12', $file12,
+       "3rd line\n4th line\n5th line\n6th line\n7th line\n"~
+       "8th line\n9th line\n10th line\n11th line\n12th line\n",
+       'file21', $file21, "12th line\n\n\n\n\n\n\n\n\n\n"
+    );
+    for @tt -> $f0, $f1, $f2 { check_one($scr, $f0, $f1, $f2) }
 }
 
-sub CheckRev {
-   my ($scr) = @_;
-   my @tt = (
-      [ 'file1',  $file1,  "1st line\n" ],
-      [ 'file2',  $file2,  "2nd line\n1st line\n" ],
-      [ 'file3',  $file3,  "3rd line\n2nd line\n1st line\n" ],
-      [ 'file21', $file21,
-        "\n\n\n\n\n\n\n\n\n12th line\n11th line\n10th line\n".
-        "9th line\n8th line\n7th line\n6th line\n5th line\n".
-        "4th line\n3rd line\n2nd line\n1st line\n" ],
-   );
-   for my $r (@tt) { CheckOne($scr, $r->[0], $r->[1], $r->[2]) }
+sub check_rev (Str $scr) {
+    my @tt = (
+       'file1',  $file1,  "1st line\n",
+       'file2',  $file2,  "2nd line\n1st line\n",
+       'file3',  $file3,  "3rd line\n2nd line\n1st line\n",
+       'file21', $file21,
+       "\n\n\n\n\n\n\n\n\n12th line\n11th line\n10th line\n"~
+       "9th line\n8th line\n7th line\n6th line\n5th line\n"~
+       "4th line\n3rd line\n2nd line\n1st line\n"
+    );
+    for @tt -> $f0, $f1, $f2 { check_one($scr, $f0, $f1, $f2) }
 }
 
-sub CheckMid {
-   my ($scr) = @_;
-   my @tt = (
-      [ 'file1',  $file1,  "1st line\n" ],
-      [ 'file2',  $file2,  "1st line\n2nd line\n" ],
-      [ 'file3',  $file3,  "2nd line\n" ],
-      [ 'file4',  $file4,  "2nd line\n3rd line\n" ],
-      [ 'file12', $file12, "6th line\n7th line\n" ],
-      [ 'file21', $file21, "11th line\n" ],
-   );
-   for my $r (@tt) { CheckOne($scr, $r->[0], $r->[1], $r->[2]) }
+sub check_mid (Str $scr) {
+    my @tt = (
+       'file1',  $file1,  "1st line\n",
+       'file2',  $file2,  "1st line\n2nd line\n",
+       'file3',  $file3,  "2nd line\n",
+       'file4',  $file4,  "2nd line\n3rd line\n",
+       'file12', $file12, "6th line\n7th line\n",
+       'file21', $file21, "11th line\n"
+    );
+    for @tt -> $f0, $f1, $f2 { check_one($scr, $f0, $f1, $f2) }
 }
 
-sub CheckWc {
-   my ($scr) = @_;
-   my @tt = (
-      [ 'file1',  $file1,  "0000000001\n" ],
-      [ 'file2',  $file2,  "0000000002\n" ],
-      [ 'file3',  $file3,  "0000000003\n" ],
-      [ 'file4',  $file4,  "0000000004\n" ],
-      [ 'file12', $file12, "0000000012\n" ],
-      [ 'file21', $file21, "0000000021\n" ],
-   );
-   for my $r (@tt) { CheckOne($scr, $r->[0], $r->[1], $r->[2]) }
+sub check_wc (Str $scr) {
+    my @tt = (
+       'file1',  $file1,  "0000000001\n",
+       'file2',  $file2,  "0000000002\n",
+       'file3',  $file3,  "0000000003\n",
+       'file4',  $file4,  "0000000004\n",
+       'file12', $file12, "0000000012\n",
+       'file21', $file21, "0000000021\n"
+    );
+    for @tt -> $f0, $f1, $f2 { check_one($scr, $f0, $f1, $f2) }
 }
 
 # -----------------------------------------------------
 
-my $head = 'head.p6';
-my $tail = 'tail.p6';
-my $rev  = 'rev.p6';
-my $mid  = 'mid.p6';
-my $wc   = 'wc.p6';
-if (@ARGV) {
-   @ARGV==5 or Usage();
-   $head = shift;
-   $tail = shift;
-   $rev  = shift;
-   $mid  = shift;
-   $wc   = shift;
+my $head = 'head.pl';
+my $tail = 'tail.pl';
+my $rev  = 'rev.pl';
+my $mid  = 'mid.pl';
+my $wc   = 'wc.pl';
+if @*ARGS {
+    +@*ARGS == 6 or usage();
+    $PUGS = @*ARGS.shift();
+    $head = @*ARGS.shift();
+    $tail = @*ARGS.shift();
+    $rev  = @*ARGS.shift();
+    $mid  = @*ARGS.shift();
+    $wc   = @*ARGS.shift();
 }
-select(STDERR);$|=1;select(STDOUT);$|=1;  # auto-flush
--f $head or die "error: file '$head' not found.\n";
--f $tail or die "error: file '$tail' not found.\n";
--f $rev  or die "error: file '$rev' not found.\n";
--f $mid  or die "error: file '$mid' not found.\n";
--f $wc   or die "error: file '$wc' not found.\n";
-PrintGolfScore($head, $tail, $rev, $mid, $wc);
-CheckHead($head);
-CheckTail($tail);
-CheckRev($rev);
-CheckMid($mid);
-CheckWc($wc);
-PrintGolfScore($head, $tail, $rev, $mid, $wc);
-print "Hooray, you passed.\n";
+-f $head or die("error: file '$head' not found");
+-f $tail or die("error: file '$tail' not found");
+-f $rev  or die("error: file '$rev' not found");
+-f $mid  or die("error: file '$mid' not found");
+-f $wc   or die("error: file '$wc' not found");
+print_golf_score($head, $tail, $rev, $mid, $wc);
+check_head($head);
+check_tail($tail);
+check_rev($rev);
+check_mid($mid);
+check_wc($wc);
+print_golf_score($head, $tail, $rev, $mid, $wc);
+say("Hooray, you passed.");
 
-END { defined($intmp) and unlink($intmp) }
+END {
+    defined($intmp)  and unlink($intmp);
+    defined($outtmp) and unlink($outtmp);
+}

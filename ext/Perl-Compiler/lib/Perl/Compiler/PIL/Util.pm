@@ -4,8 +4,8 @@ class Perl::Compiler::PIL::Util::Pad {
     has Str @.names;
 
     method lookup_pad($name) {
-        if grep { $_ ~~ $name }, @.names {
-            $?SELF;
+        if (grep { $_ ~~ $name }, @.names) {
+            self;
         }
         else {
             $.parent ?? $.parent.lookup_pad($name) !! fail;

@@ -1,7 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
+
+# L<S29/Str/=item length>
 
 =kwid
 
@@ -14,7 +15,9 @@ L<"http://www.unicode.org/unicode/reports/tr11/">
 
 =cut
 
-plan 53;
+plan 54;
+
+eval_dies_ok('"moose".length', 'Str.length properly not implemented');
 
 # string literals, for sanity
 

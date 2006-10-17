@@ -1,11 +1,10 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 3;
 
-# L<S12/"Attributes" /If you declare the class as/>;
+# L<S12/"Attributes" /If you declare the class as/>
 
 class Foo {
     has $.readonly_attr;

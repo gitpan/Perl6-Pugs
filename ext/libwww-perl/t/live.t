@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 my $tempfile = 'temp-ex-output';
@@ -22,7 +20,7 @@ if (%*ENV{"PUGS_TESTS_ALLOW_NETWORK"}) {
     http://datenzoo.de/index.html
   >;
 };
-plan 2+@urls*9+@live_urls*8;
+plan 2+@urls*10+@live_urls*8;
 
 use LWP::Simple; pass "(dummy instead of broken use_ok)";
 
@@ -45,13 +43,14 @@ sub spawn_server (Int $port) {
       my $hdl = $sock.accept;
 
       my $request = =$hdl;
-      $request ~~ s:Perl5/\s+$//;
+      $request ~~ s:P5/\s+$//;
       #diag $request;
-      if ($request ~~ rx:Perl5{^GET /stop-server/}) {
-        last();
+      if ($request ~~ rx:P5"^GET /stop-server/") {
+            $hdl.close;
+            last();
       };
 
-      while (readline($hdl) ~~ rx:Perl5/\S/) { 1 };
+      while (readline($hdl) ~~ rx:P5/\S/) { 1 };
       $hdl.print( "HTTP/1.0 200 OK\r\n"
                 ~ "Content-Type: text/plain; charset=UTF-8\r\n"
                 ~ "Server: Fake local Pugs HTTPd\r\n"
@@ -71,24 +70,23 @@ my $base_url = spawn_server( 8086 );
 
 for @urls -> $t_url {
   my $url = $t_url;
-  $url ~~ s:perl5/%s/$base_url/;
+  $url ~~ s:P5/%s/$base_url/;
 
   diag "Getting HEAD of $url";
   my $head = head($url);
-  ok($head ~~ rx:perl5/.../, "Got some headers as scalar");
+  ok($head ~~ m:P5/.../, "Got some headers as scalar");
   my @head = head($url);
-  ok(@head > 3, "Got more than 1 line as list", :todo);
+  ok(@head > 3, "Got more than 1 line as list");
   my %head = head($url);
-  ok(%head.keys() > 3, "Got some headers as hash", :todo);
-  is(%head{'Content-Type'}, "text/html", "Got a content type of text/html", :todo);
+  ok(%head.keys() > 3, "Got some headers as hash", );
+  is(%head{'Content-Type'}, "text/plain; charset=UTF-8", "Got a content type of text/plain", );
 
   diag "Retrieving $url";
   my $res = get($url);
   ok(defined $res, "Got some result");
-  ok(defined($res ~~ rx:Perl5/./), "and it's not empty");
+  ok($res.chars, "and it's not empty");
 
-  # TODO: Uncomment once length() is implemented
-  # is( length($res), length($expected), "The response has the correct length");
+  is( chars($res), chars($expected), "The response has the correct length");
   # TODO: Add a check against Content-Length, once it's implemented
 
   is( $res, $expected, "Got the correct response");
@@ -100,12 +98,12 @@ for @urls -> $t_url {
   is( $f, $res, "... and getstore() returns $url");
 };
 
-get("$base_url/stop");
+get("$base_url/stop-server/");
 
 for @live_urls -> $url {
   diag "Getting HEAD of $url";
   my $head = head($url);
-  ok( $head ~~ rx:perl5/.../, "Got some headers as scalar");
+  ok( $head ~~ rx:P5/.../, "Got some headers as scalar");
   my @head = head($url);
   todo_ok( @head > 3, "Got more than 1 line as list");
   my %head = head($url);
@@ -115,7 +113,7 @@ for @live_urls -> $url {
   diag "Retrieving $url";
   my $res = get($url);
   ok(defined $res, "Got some result");
-  ok( defined ($res ~~ rx:perl5/./), "and it's not empty");
+  ok( defined ($res ~~ rx:P5/./), "and it's not empty");
 
   # TODO: Uncomment once length() is implemented
   # is( length($res), length($expected), "The response has the correct length");

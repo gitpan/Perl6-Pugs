@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 1;
@@ -20,7 +19,7 @@ Namespaces, symbol tables and symbolic references.
 #=cut
 
 # flunk("%:: parse", :todo);
-eval_ok('%::', '%:: parses', :todo);
+ok(eval('%::'), '%:: parses', :todo);
 my $symhash   = eval '%::';
 
 my  $lex      = 'bar';

@@ -1,4 +1,5 @@
-use v6;
+use v6-alpha;
+
 use Foo;
 
 class Bar is ::Foo;

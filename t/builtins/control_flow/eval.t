@@ -1,7 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+plan 6;
+
+# L<S29/"Control::Basic"/"=item eval">
 
 =pod
 
@@ -9,7 +10,6 @@ Tests for the eval() builtin
 
 =cut
 
-plan 5;
 
 if $?PUGS_BACKEND ne "BACKEND_PUGS" {
   skip_rest "PIL2JS and PIL-Run do not support eval() yet.";
@@ -25,6 +25,9 @@ my $foo = 1234;
 is(eval('$foo'), $foo);
 
 # traps die?
-ok(!eval('die; 1'));
+ok(!eval('die; 1'), "eval can trap die");
 
 ok(!eval('my @a = (1); @a<0>'), "eval returns undef on syntax error");
+
+ok(!eval('use Poison; 1'), "eval can trap a fatal use statement");
+

@@ -6,8 +6,8 @@
 " This is a big undertaking. Perl 6 is the sort of language that only Perl
 " can parse. But I'll do my best to get vim to.
 "
-" You can associate the extension ".p6" with the filetype "perl6" by setting
-"     autocmd BufNewFile,BufRead *.p6 setf perl6
+" You can associate the extension ".pl" with the filetype "perl6" by setting
+"     autocmd BufNewFile,BufRead *.pl setf perl6
 " in your ~/.vimrc.
 
 " Die if there's already a defined syntax
@@ -27,7 +27,7 @@ syn keyword p6KeyScopeDecl  let my our state temp has
 syn keyword p6KeyFlow       if else elsif unless  
 syn keyword p6KeyFlow       for foreach loop while until when next last redo
 syn keyword p6KeyFlow       given not or and err xor return 
-syn keyword p6ClosureTrait  BEGIN CHECK INIT FIRST ENTER LEAVE KEEP UNDO NEXT LAST
+syn keyword p6ClosureTrait  BEGIN CHECK INIT START FIRST ENTER LEAVE KEEP UNDO NEXT LAST
 syn keyword p6ClosureTrait  PRE POST END
 syn keyword p6KeyException  die fail try CATCH CONTROL
 syn keyword p6KeyIO         print open read write readline say seek
@@ -65,8 +65,8 @@ syn match p6PODSecTitle  ".*$"        contained
 
 " Variables, arrays, and hashes with ordinary \w+ names
 syn match p6KeyType      "¢[:\.*^?]\?[a-zA-Z_]\w*"
-syn match p6VarPlain     "\(::?\|[$@%][:\.*^?]\?\)[a-zA-Z_]\w*"
-syn match p6VarException "\$!"
+syn match p6VarPlain     "\(::?\|[$@%][\!\.*^?]\?\)[a-zA-Z_]\w*"
+syn match p6VarException "\$![a-zA-Z]\@!"
 syn match p6VarCapt      "\$[0-9\/]"
 syn match p6VarPunct     "\$\d\+"
 syn match p6Invoke       "\(&\|[.:]/\)[a-zA-Z_]\w*"

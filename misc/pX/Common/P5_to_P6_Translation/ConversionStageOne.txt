@@ -13,11 +13,11 @@ The body of the code will apply the following translations to the input syntax t
 
 First stage translations for Perl5->Perl6
 
--Arrays with indices: $array[i] -> @array[i]
+(DONE)-Arrays with indices: $array[i] -> @array[i]
 
--Hashes with keys: $hash{$key} -> %hash{$key}
+(DONE)-Hashes with keys: $hash{$key} -> %hash{$key}
 
--Hash with constant key: $hash{word} -> %hash<word>
+(DONE)-Hash with constant key: $hash{word} -> %hash<word>
 
 -Hash referenceing multiple keys: @hash{'a','b','c'} -> %hash<a b c>
 
@@ -27,9 +27,9 @@ First stage translations for Perl5->Perl6
 
 -Forced scalar value of array: scalar @foo -> +@foo # or @foo.elems
 
--Conditional return: a ? b : c -> a ?? b !! c
+(DONE)-Conditional return: a ? b : c -> a ?? b !! c
 
--Regular expresion (external considerations): $x =~ s/.../.../g -> $x ~~ s:P5:g/.../.../
+(DONE)-Regular expresion (external considerations): $x =~ s/.../.../g -> $x ~~ s:P5:g/.../.../
 
 -Conditional assignment: $foo = "bar" unless defined $foo -> $foo //= "bar" 
 
@@ -37,19 +37,19 @@ First stage translations for Perl5->Perl6
 
 -Loop over all values: foreach my $foo (@baz) {...} -> for @baz -> $foo {...} (also need to handle without 'my')
 
--Length of string: length("foo") -> "foo".chars
+(DONE)-Length of string: length("foo") -> "foo".chars
 
--Splitting on a regular experssion: split(m/;/, $foo) -> split(/;/, $foo)
-					split('\s+') -> split(/\s+/)
-					split(FOO) -> .split(FOO)
-   					split(FOO,$bar) -> $bar.split(FOO)
+-Splitting on a regular experssion: (DONE) split(m/;/, $foo) -> split(/;/, $foo)
+				    (DONE) split('\s+') -> split(/\s+/)
+					   split(FOO) -> .split(FOO)
+   					   split(FOO,$bar) -> $bar.split(FOO)
 
 
--Split on space: split(' ', $foo) -> $foo.words
+(DONE)-Split on space: split(' ', $foo) -> $foo.words
 
 -Heredocs: <<END -> qq:to/END/ (and other friends)
 
 
 -Closing files (Optional translation, good for OO paradigm)(Need to add user pref for this): close($file) -> $file.close
 
--Read from file: <FH> -> $fh.readline
+(DONE)-Read from file: <FH> -> $fh.readline

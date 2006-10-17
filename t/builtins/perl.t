@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # L<S02/"Names and Variables" /To get a Perlish representation of any data value/>
@@ -8,10 +7,10 @@ use Test;
 my @tests = (
     # Basic scalar values
     42, 42/10, 4.2, sqrt(2), 3e5, Inf, -Inf, NaN,
-    "a string", "", "\0", "\t", "\n", "\r\n", "\7", '{', '}', "\123", '$a @string %with &sigils()',
+    "a string", "", "\0", "\t", "\n", "\r\n", "\o7", '{', '}', "\d123", '$a @string %with &sigils()',
     ?1, ?0,
     undef,
-    rx:Perl5{foo}, rx:Perl5{}, rx:Perl5{^.*$},
+    rx:P5/foo/, rx:P5//, rx:P5/^.*$/,
 
     # References to scalars
     \42, \Inf, \-Inf, \NaN, \"string", \"", \?1, \?0, \undef,
@@ -61,8 +60,8 @@ unless $?PUGS_BACKEND eq "BACKEND_PUGS" {
     for @tests -> $obj {
         is ~$obj.perl.eval, ~$obj,
             "($obj.perl()).perl returned something whose eval()ed stringification is unchanged";
-        is ~$obj.perl.eval.ref, ~$obj.ref,
-            "($obj.perl()).perl returned something whose eval()ed .ref is unchanged";
+        is ~$obj.perl.eval.WHAT, ~$obj.WHAT,
+            "($obj.perl()).perl returned something whose eval()ed .WHAT is unchanged";
     }
 }
 

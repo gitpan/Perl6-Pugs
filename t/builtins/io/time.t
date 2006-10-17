@@ -1,6 +1,7 @@
-#!/usr/bin/pugs
-use v6;
+use v6-alpha;
 use Test;
+
+# L<S29/"Time">
 
 # Based Heavily on the t/op/time.t test from Perl5.8.6
 # Perhaps the testing of these builtins needs to be more rigorous
@@ -17,14 +18,14 @@ sub is_dt (Str $datetime) returns Bool {
     my ($dow, $mon, $day, $time, $year) = split(' ', $datetime);
     my $result = 0;
 
-    for qw(Sun Mon Tue Wed Thu Fri Sat) {
+    for < Sun Mon Tue Wed Thu Fri Sat > {
         if $dow eq $_ {
             $result++;
             last();
         }
     }
 
-    for qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec) {
+    for < Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec > {
         if  $mon eq $_ {
             $result++;
             last();

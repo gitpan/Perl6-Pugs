@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid 
@@ -21,9 +20,6 @@ is($pair.perl, '("foo" => "bar")', 'canonical representation');
 
 is(key($pair), 'foo', 'got the right key($pair)');
 is(value($pair), 'bar', 'got the right value($pair)');
-
-is(key $pair, 'foo', 'got the right key $pair');
-is(value $pair, 'bar', 'got the right value $pair');
 
 is($pair.key(), 'foo', 'got the right $pair.key()');
 is($pair.value(), 'bar', 'got the right $pair.value()');
@@ -87,6 +83,15 @@ is($pair4.key.value, 'bar', 'got right nested value');
 my $quux = (quux => "xyzzy");
 is($quux.key, 'quux', "lhs quotes" );
 
+{
+    # L<S06/Immutable types/Pair "one-element Mapping">
+    my $pair = :when<now>;
+    is ~(%$pair), "when\tnow";
+    # hold back this one according to audreyt
+    #ok $pair.does(Hash), 'Pair does Hash';
+    ok (%$pair).does(Hash), '%() makes Pair to does Hash', :todo<bug>;
+}
+
 # lvalue Pair assignments from S06 and thread starting with
 # L<"http://www.nntp.perl.org/group/perl.perl6.language/19425">
 
@@ -113,7 +118,7 @@ my %hash  = ('foo' => 'bar');
 for  %hash.pairs -> $pair {
     isa_ok($pair,'Pair') ; 
     my $testpair = $pair;
-    isa_ok($testpair, 'Pair', :todo<bug>); # new lvalue variable is also a Pair
+    isa_ok($testpair, 'Pair'); # new lvalue variable is also a Pair
     my $boundpair := $pair;
     isa_ok($boundpair,'Pair'); # bound variable is also a Pair
     is($pair.key, 'foo', 'in for loop got the right $pair.key');
@@ -154,8 +159,6 @@ sub test4 (Hash %h){
     }
 }
 test4 %hash;
-
-=end p6l
 
 =cut
 

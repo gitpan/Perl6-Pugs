@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
 plan 10;
+
+# L<S03/Precedence /loose unary/>
 
 ok(true 1,     "true 1 is true");
 ok(true -1,    "true -1 is true");

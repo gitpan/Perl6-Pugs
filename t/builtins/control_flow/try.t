@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-# L<S04/"Statement parsing" /or try \{\.\.\.}\./>
+# L<S04/"Statement parsing"/"or try {...}">
 
 plan 25;
 
@@ -28,21 +27,13 @@ plan 25;
 }
 
 {
-    my %hash = try { "a" };
+    my %hash = try { 'a', 1 };
     is +%hash,        1, '%hash = try {...} worked (1)';
     is ~%hash.keys, "a", '%hash = try {...} worked (2)';
 }
 
 {
-    my %hash = try { ("a",) };
-    is +%hash,        1, '%hash = try {...} worked (3)';
-    is ~%hash.keys, "a", '%hash = try {...} worked (4)';
-}
-
-{
-    warn "Please ignore the next warning about odd number of elements,\n";
-    warn "it's expected.\n";
-    my %hash = try { hash("a",) };
+    my %hash = try { hash("a", 1) };
     is +%hash,        1, '%hash = try {...} worked (5)';
     is ~%hash.keys, "a", '%hash = try {...} worked (6)';
 }
@@ -62,7 +53,7 @@ plan 25;
     eval 'try {
         die "blah"
 
-        CATCH /la/ { $caught = 1 }
+        CATCH { $caught = 1 }
     }';
 
     ok($caught, "exception caught", :todo);
@@ -82,8 +73,8 @@ plan 25;
         $was_in_foo++;
         return 23;
     }
-    is foo(), 42,      'return() inside try{}-blocks works (1)', :todo<bug>;
-    is $was_in_foo, 1, 'return() inside try{}-blocks works (2)', :todo<bug>;
+    is foo(), 42,      'return() inside try{}-blocks works (1)';
+    is $was_in_foo, 1, 'return() inside try{}-blocks works (2)';
 }
 
 {
@@ -111,12 +102,14 @@ unless (eval 'Exception.new') {
 
     my ($not_died, $caught);
     eval 'try {
-        die Naughty "error"
+        die Naughty: "error"
 
         $not_died = 1;
 
-        CATCH Naughty {
-            $caught = 1;
+        CATCH {
+            when Naughty {
+                $caught = 1;
+            }
         }
     }';
 
@@ -131,14 +124,15 @@ unless (eval 'Exception.new') {
 
     my ($other, $naughty);
     eval 'try {
-        die Naughty::Specific "error";
+        die Naughty::Specific: "error";
 
-        CATCH Naughty::Other {
-            $other = 1;
-        }
-    
-        CATCH Naughty {
-            $naughty = 1;
+        CATCH {
+            when Naughty::Other {
+                $other = 1;
+            }
+            when Naughty {
+                $naughty = 1;
+            }
         }
     }';
 
@@ -152,18 +146,21 @@ unless (eval 'Exception.new') {
 
     my ($naughty, $lived);
     eval 'try {
-            die Dandy "error";
+        die Dandy: "error";
         
-            CATCH Naughty {
+        CATCH {
+            when Naughty {
                 $naughty = 1;
             }
-        };
+        }
+    };
 
-        $lived = 1;
+    $lived = 1;
     ';
 
     ok(!$lived, "did not live past uncaught throw in try");
-    ok(~ref($!), '$! is an object');
-    is(eval('ref($!)'), Dandy, ".. of the right class", :todo<bug>);
+    ok(~WHAT($!), '$! is an object');
+    ok(!$naughty, "did not get caught by wrong handler");
+    is(eval('WHAT($!)'), Dandy, ".. of the right class", :todo<bug>);
 };
 

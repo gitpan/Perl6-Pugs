@@ -1,12 +1,9 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 20;
 
 use Span::Code; pass "(dummy instead of broken use_ok)";
-use Span::Code;   # XXX should not need this
 use Recurrence;
 use Span::Num;
 
@@ -81,7 +78,7 @@ is( $even_numbers.previous( 10 ), 8, 'previous even' );
         'Span::Code complement' );
 }
 
-=for later
+=begin later
 
 my $odd_numbers = $even_numbers.complement;
 is( $odd_numbers.next( 10 ), 11, 'odd even' );
@@ -247,7 +244,7 @@ is( $odd_numbers.previous( 10 ), 9, 'odd even' );
 
 =cut
 
-=for later
+=begin later
 
 is( $span.size, 2, "real size" );
 # is( $span.size( density => 1 ), 3, "integer size" );

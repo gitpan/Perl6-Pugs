@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 14;
@@ -10,7 +9,6 @@ plan 14;
 Checking Junctions' Associativeness
 
 L<S09/"Junctions">
-
 L<S03/"Junctive operators">
 
 =cut

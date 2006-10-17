@@ -17,6 +17,10 @@ class (Typeable a) => ArrayClass a where
     array_fetchKeys av = do
         svList <- array_fetch av
         return $ zipWith const [0..] svList
+    array_fetchElemAll :: a -> Eval [IVar VScalar]
+    array_fetchElemAll av = do
+        size <- array_fetchSize av
+        mapM (array_fetchElem av) [0..size-1]
     array_fetchElem   :: a -> ArrayIndex -> Eval (IVar VScalar) -- autovivify
     array_fetchElem av idx = do
         return $ proxyScalar (array_fetchVal av idx) (array_storeVal av idx)
@@ -116,101 +120,100 @@ class (Typeable a) => ArrayClass a where
 
 instance ArrayClass IArraySlice where
     array_iType = const $ mkType "Array::Slice"
-    array_store av vals = mapM_ (uncurry writeIVar) (zip av vals)
+    array_store av vals = mapM_ (uncurry writeIVar) (zip av (vals ++ repeat undef))
     array_fetchSize = return . length
     array_fetchElem av idx = getIndex idx Nothing (return av) Nothing
     array_storeSize _ _ = return () -- XXX error?
     array_storeElem _ _ _ = retConstError undef
 
+a_size :: Seq.Seq (TVar VScalar) -> Int
+a_size = Seq.length
+
 instance ArrayClass IArray where
-    array_store av vals = do
-        let svList = map lazyScalar vals
-        liftSTM $ writeTVar av $ IntMap.fromAscList ([0..] `zip` svList)
-    array_fetchSize av = do
-        avMap <- liftSTM $ readTVar av
-        return $ IntMap.size avMap
-    array_storeSize av sz = do
-        liftSTM $ modifyTVar av $ \avMap ->
-            let size = IntMap.size avMap in
-            case size `compare` sz of
-                GT -> fst $ IntMap.split sz avMap
-                EQ -> avMap
-                LT -> IntMap.union avMap $
-                    IntMap.fromAscList ([size .. sz-1] `zip` repeat lazyUndef)
-    array_shift av = do
-        svList <- liftSTM $ fmap IntMap.elems $ readTVar av
-        case svList of
-            (sv:rest) -> do
-                liftSTM $ writeTVar av $ IntMap.fromAscList ([0..] `zip` rest)
-                readIVar sv
-            _ -> return undef
-    array_unshift av vals = do
-        liftSTM $ modifyTVar av $ \avMap ->
-            let svList = IntMap.elems avMap in
-            IntMap.fromAscList ([0..] `zip` ((map lazyScalar vals) ++ svList))
-    array_pop av = do
-        avMap <- liftSTM $ readTVar av
-        if IntMap.null avMap
-            then return undef
-            else do
-                let idx = IntMap.size avMap - 1
-                liftSTM $ writeTVar av $ IntMap.delete idx avMap
-                readIVar . fromJust $ IntMap.lookup idx avMap
-    array_push av vals = do
-        liftSTM $ modifyTVar av $ \avMap ->
-            let svList = IntMap.elems avMap in
-            IntMap.fromAscList ([0..] `zip` (svList ++ (map lazyScalar vals)))
-    array_extendSize _ 0 = return ()
-    array_extendSize av sz = do
-        liftSTM $ modifyTVar av $ \avMap ->
-            let size = IntMap.size avMap in
-            case size `compare` sz of
-                GT -> avMap
-                EQ -> avMap
-                LT -> IntMap.union avMap $
-                    IntMap.fromAscList ([size .. sz-1] `zip` repeat lazyUndef)
-    array_fetchVal av idx = do
-        readIVar =<< getMapIndex idx (Just $ constScalar undef)
-            (liftSTM $ readTVar av) 
-            Nothing -- don't bother extending
-    array_fetchKeys av = do
-        avMap <- liftSTM $ readTVar av
-        return $ IntMap.keys avMap
-    array_fetchElem av idx = do
-        sv <- getMapIndex idx Nothing
-            (liftSTM $ readTVar av) 
-            (Just (array_extendSize av $ idx+1))
-        if refType (MkRef sv) == mkType "Scalar::Lazy"
-            then do
-                val <- readIVar sv
-                sv' <- newScalar val
-                liftSTM . modifyTVar av $ \avMap ->
-                    let idx' = idx `mod` IntMap.size avMap in
-                    IntMap.adjust (const sv') idx' avMap
-                return sv'
-            else return sv
-    array_existsElem av idx | idx < 0 = array_existsElem av (abs idx - 1)
-    array_existsElem av idx = do
-        avMap <- liftSTM $ readTVar av
-        return $ IntMap.member idx avMap
-    array_deleteElem av idx = do
-        liftSTM . modifyTVar av $ \avMap ->
-            let size = IntMap.size avMap
-                idx' | idx < 0   = idx `mod` IntMap.size avMap -- XXX wrong; wraparound
-                     | otherwise = idx in
-            case (size - 1) `compare` idx' of
-                LT -> avMap
-                EQ -> IntMap.delete idx' avMap
-                GT -> IntMap.adjust (const lazyUndef) idx' avMap
-    array_storeElem av idx sv = do
-        liftSTM . modifyTVar av $ \avMap ->
-            let size = IntMap.size avMap
-                idx' | idx < 0   = idx `mod` IntMap.size avMap -- XXX wrong; wraparound
-                     | otherwise = idx in
-            if size > idx'
-                then IntMap.adjust (const sv) idx' avMap
-                else IntMap.union avMap $
-                    IntMap.fromAscList ([size .. idx'] `zip` (sv:repeat lazyUndef))
+    array_store (MkIArray iv) vals = liftSTM $ do
+        tvs <- mapM newTVar vals
+        writeTVar iv (Seq.fromList tvs)
+    array_fetchSize (MkIArray iv) = liftSTM $ do
+        a   <- readTVar iv
+        return $ a_size a
+    array_storeSize (MkIArray iv) sz = liftSTM $ do
+        a       <- readTVar iv
+        case a_size a `compare` sz of
+            GT -> writeTVar iv (Seq.take sz a) -- shrink
+            EQ -> return ()
+            LT -> do
+                tvs <- replicateM (sz - a_size a) (newTVar undef)
+                writeTVar iv ((Seq.><) a (Seq.fromList tvs)) -- extend
+    array_shift (MkIArray iv) = liftSTM $ do
+        a   <- readTVar iv
+        case a_size a of
+            0   -> return undef
+            _   -> do
+                writeTVar iv (Seq.drop 1 a)
+                readTVar (Seq.index a 0)
+    array_unshift _ [] = return ()
+    array_unshift (MkIArray iv) vals = liftSTM $ do
+        a   <- readTVar iv
+        tvs <- mapM newTVar vals
+        writeTVar iv ((Seq.><) (Seq.fromList tvs) a)
+    array_pop (MkIArray iv) = liftSTM $ do
+        a   <- readTVar iv
+        case a_size a of
+            0   -> return undef
+            sz  -> do
+                writeTVar iv (Seq.take (sz - 1) a)
+                readTVar (Seq.index a (sz - 1))
+    array_push _ [] = return ()
+    array_push (MkIArray iv) vals = liftSTM $ do
+        a   <- readTVar iv
+        tvs <- mapM newTVar vals
+        writeTVar iv ((Seq.><) a (Seq.fromList tvs))
+    array_extendSize (MkIArray iv) sz = liftSTM $ do
+        a       <- readTVar iv
+        case a_size a `compare` sz of
+            LT  -> do
+                tvs <- replicateM (sz - a_size a) (newTVar undef)
+                writeTVar iv ((Seq.><) a (Seq.fromList tvs))
+            _   -> return ()
+    array_fetchVal arr idx = do
+        rv  <- getArrayIndex idx (Just $ constScalar undef)
+                (return arr)
+                Nothing -- don't bother extending
+        readIVar rv
+    array_fetchKeys (MkIArray iv) = liftSTM $ do
+        a   <- readTVar iv
+        return [0 .. (a_size a - 1)]
+    array_fetchElem arr idx = do
+        getArrayIndex idx Nothing
+            (return arr)
+            (Just (array_extendSize arr $ idx+1))
+    array_existsElem arr idx | idx < 0 = array_existsElem arr (abs idx - 1)    -- FIXME: missing mod?
+    array_existsElem (MkIArray iv) idx = liftSTM $ do
+        a   <- readTVar iv
+        return (idx < a_size a)
+    array_storeElem arr@(MkIArray iv) idx (IScalar sv) = do
+        a   <- liftSTM $ readTVar iv
+        let size = a_size a
+        when (size <= idx) $ do
+            array_extendSize arr (idx + 1)
+        case fromTypeable sv of
+            Just tvar   -> do
+                liftSTM $ modifyTVar iv (Seq.update idx tvar)
+            _           -> do
+                val <- scalar_fetch sv
+                liftSTM $ do
+                    tvar <- newTVar val
+                    modifyTVar iv (Seq.update idx tvar)
+    array_storeElem _ _ _ = fail "impossible"
+    array_deleteElem (MkIArray iv) idx = liftSTM $ do
+        a   <- readTVar iv
+        let idx' | idx < 0   = idx `mod` size        --- XXX wrong; wraparound => what do you mean?
+                 | otherwise = idx
+            size = a_size a
+        case (size-1) `compare` idx' of
+            LT -> return ()
+            EQ -> writeTVar iv (Seq.take (size-1) a)
+            GT -> writeTVar (Seq.index a idx') undef
 
 instance ArrayClass VArray where
     array_iType = const $ mkType "Array::Const"
@@ -236,11 +239,13 @@ instance ArrayClass VArray where
     array_fetch = return
     array_fetchSize = return . length
     array_fetchVal av idx = getIndex idx (Just undef) (return av) Nothing
+    array_fetchElemAll av = return $ map constScalar av
     array_fetchElem av idx = do
         val <- array_fetchVal av idx
         return $ constScalar val
     array_storeVal _ _ _ = retConstError undef
     array_storeElem _ _ _ = retConstError undef
+    array_existsElem av idx = return . not . null $ drop idx av
 
 instance ArrayClass (IVar VPair) where
     array_iType = const $ mkType "Pair"
@@ -260,14 +265,10 @@ instance ArrayClass (IVar VPair) where
 
 perl5EvalApply :: String -> [PerlSV] -> Eval Val
 perl5EvalApply code args = do
-    env <- ask
-    rv  <- liftIO $ do
-        envSV <- mkVal env
-        subSV <- evalPerl5 code envSV (enumCxt cxtItemAny)
-        invokePerl5 subSV nullSV args envSV (enumCxt cxtItemAny)
-    return $ case rv of
-        [sv]    -> PerlSV sv
-        _       -> VList (map PerlSV rv)
+    env     <- ask
+    envSV   <- liftIO $ mkEnv env
+    subSV   <- liftIO $ evalPerl5 code envSV (enumCxt cxtItemAny)
+    runInvokePerl5 subSV nullSV args
 
 instance ArrayClass PerlSV where
     array_iType = const $ mkType "Array::Perl"

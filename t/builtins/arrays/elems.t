@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # L<A02/"RFC 212: Make C<length(@array)> Work">
@@ -23,12 +22,12 @@ plan 12;
 
 {
   my $a;
-  dies_ok { $a.elems }, ".elems does not work on arbitrary scalars (1)", :todo<bug>;
+  dies_ok { $a.elems }, ".elems does not work on arbitrary scalars (1)";
 }
 
 {
   my $a = 42;
-  dies_ok { $a.elems }, ".elems does not work on arbitrary scalars (2)", :todo<bug>;
+  dies_ok { $a.elems }, ".elems does not work on arbitrary scalars (2)";
 }
 
 {

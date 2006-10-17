@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -11,7 +10,7 @@ L<S04/"The general loop statement">
 
 =cut
 
-plan 13;
+plan 14;
 
 # basic loop
 
@@ -66,25 +65,10 @@ is($count, 10, 'verify our ending condition');
     ok($continued, "next performs a loop's continue expression");
 }
 
-=kwid
+my $loopvar = 0;
 
-loop { } while tests... i.e. loops without the () bits
-
-L<S04/"Loop statements">
-
-=cut
-
-{
-  my $x = 0; loop { $x++ } while $x < 10;
-  is($x, 10, 'loop {} while');
+loop {
+    is($loopvar, $loopvar, "bare loop iterates $loopvar");
+    last if ++$loopvar == 3;
 }
-
-{
-  my $x = 1; loop { $x++ } while 0;
-  is($x, 2, 'ensure loop {} while runs at least once');
-}
-
-{
-  my $x = 0; try { loop { $x++; redo if $x < 10 } while 0 };
-  is($x, 10, 'redo works in loop', :todo<feature>);
-}
+is($loopvar, 3, "bare loop exited after 3 iterations");

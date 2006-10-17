@@ -1,25 +1,36 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 3;
+plan 5;
 
 {
-    my $a = *(1, 2, 3);
-    is($a, 1, "scalar = *list", :todo);
+    my ($a) = |(1, 2, 3);
+    is($a, 1, "(scalar) = |list");
 };
 
 {
     my @a = (1, 2, 3);
-    my $b = *@a;
-    is($b, 1, "scalar = *array", :todo);
+    my ($b) = |@a;
+    is($b, 1, "(scalar) = |array");
 };
 
 {
     my $a = (1, 2, 3);
-    my $b = *$a;
-    is($b, [1, 2, 3], "scalar = *arrayref");
+    my $b = |$a;
+    is($b, [1, 2, 3], "scalar = |arrayref");
+};
+
+{
+    my $a = (1, 2, 3);
+    my ($b) = |@$a;
+    is($b, 1, "(scalar) = |dereffed arrayref");
+};
+
+{
+    my $a = (1, 2, 3);
+    my ($b) = @$a;
+    is($b, 1, "(scalar) = dereffed arrayref");
 };
 
 =begin END

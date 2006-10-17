@@ -1,4 +1,4 @@
-use v6;
+use v6-alpha;
 
 # Set::Symbols is defined in the Recurrence.pm package
 use Set::Symbols;
@@ -12,7 +12,7 @@ class Span-0.01
 
     has $.span;
 
-=for TODO
+=begin TODO
     
   Bugs:
     * 'undefine span' is wrong - use empty_span instead (in set_end() / set_start() )
@@ -64,7 +64,7 @@ submethod BUILD ($class: *%param is copy ) {
 
     if defined( %param<object> ) 
     {
-        if %param<object>.isa( $class.ref )
+        if %param<object>.isa( $class.WHAT )
         {
             $.span = %param<object>.span;
             return;
@@ -74,7 +74,7 @@ submethod BUILD ($class: *%param is copy ) {
             $.span = %param<object>;
             return;
         }
-        if %param<object>.ref eq 'Array' {
+        if %param<object>.WHAT eq 'Array' {
             if %param<object>.elems > 0
             {
                 %param<start> = %param<object>[0];
@@ -236,7 +236,7 @@ sub _normalize_parameter ( $self, $param ) {
         return $span0, $self.new( span => Span::Code.new( recurrence => $param, span => $result ) );
     }
     $span1 = $span1.span if $span1.isa( 'Span' );
-    return $span0, $span1 if $span1.isa( 'Span::Code' | $span0.ref );
+    return $span0, $span1 if $span1.isa( 'Span::Code' | $span0.WHAT );
     if $span1.isa( 'Span::Num' ) 
     {
         # say "span-num";

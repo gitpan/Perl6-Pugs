@@ -2,8 +2,9 @@ my $a = 0;
 my $still_running = 2;
 my $thr1 = async {
     say "Thread 1 started";
-    atomically {
-        $a > 5 or retry;
+    # "contend" does not work in pugs  6.2.12 (r12811)
+    contend {
+        $a > 5 or defer;
         $a = -1000;
         $still_running--;
     }
@@ -12,9 +13,9 @@ my $thr1 = async {
 
 my $thr2 = async {
     say "Thread 2 started";
-    atomically {
-        { $a > 100 or retry }\
-            .retry_with:{ $a < -100 or retry }
+    contend {
+        maybe { $a > 100 or defer }
+	maybe { $a < -100 or defer }
         $still_running--;
     }
     say 'Thread 2 finished: $a is now < -100'
@@ -22,7 +23,7 @@ my $thr2 = async {
 while ($still_running) {
     say $a;
     sleep 1;
-    atomically { $a++; }
+    contend { $a++; }
 }
 $thr1.join;
 $thr2.join;

@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 if $?PUGS_BACKEND ne "BACKEND_PUGS" {
@@ -27,20 +26,20 @@ my @tests = (
     
     # Test open('README') in BEGIN, CHECK, and INIT
     $ignore_errors ~ 'my $fh = BEGIN { open "README" }; print "_nok_"',
-    { $^a !~ rx:P5/_nok_/ },
+    { $^a !~~ rx:P5/_nok_/ },
 
     $ignore_errors ~ 'my $fh = CHECK { open "README" }; print "_nok_"',
-    { $^a !~ rx:P5/_nok_/ },
+    { $^a !~~ rx:P5/_nok_/ },
 
     'my $fh = INIT { open "README" }; print($fh ?? "ok" !! "nok")',
     { $^a eq "ok" },
 
     # Test my $fh = open('README'); { $fh } in BEGIN, CHECK
     $ignore_errors ~ 'my $fh = BEGIN { my $f = open "README"; ({ $f },) }; print "_nok_"',
-    { $^a !~ rx:P5/_nok_/ },
+    { $^a !~~ rx:P5/_nok_/ },
 
     $ignore_errors ~ 'my $fh = CHECK { my $f = open "README"; ({ $f },) }; print "_nok_"',
-    { $^a !~ rx:P5/_nok_/ },
+    { $^a !~~ rx:P5/_nok_/ },
 
     'my $fh = INIT { my $f = open "README"; ({ $f },) }; print($fh ?? "ok" !! "nok")',
     { $^a eq "ok" },
@@ -53,7 +52,7 @@ diag "Running under $*OS";
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if($*OS eq any <MSWin32 mingw msys cygwin>) {
+if $*OS eq any <MSWin32 mingw msys cygwin> {
   $pugs = 'pugs.exe';
   $redir = '>';
 };

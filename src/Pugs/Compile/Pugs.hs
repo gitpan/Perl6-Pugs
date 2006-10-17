@@ -1,10 +1,10 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
 
 module Pugs.Compile.Pugs (genPugs) where
 import Pugs.AST
 import Pugs.Types
 import Pugs.Internals
-import qualified Data.ByteString.Char8 as Str
+import qualified UTF8 as Str
 import qualified Data.Map as Map
 
 type Str = Str.ByteString
@@ -28,7 +28,7 @@ instance Compile (Maybe Exp) where
     compile Nothing = return $ Str.pack "Nothing"
     compile (Just exp) = compWith "Just" [compile exp]
 
-pl, pr, bl, br :: Str
+pl, pr, bl, br, cm :: Str
 pl = Str.pack "("
 pr = Str.pack ")"
 bl = Str.pack "["
@@ -65,12 +65,17 @@ instance Compile Pad where
         where
         syms = padToList pad
 
-instance Compile (String, [(TVar Bool, TVar VRef)]) where
-    compile ((':':'*':_), _) = return Str.empty -- XXX - :*Bool etc; punt for now
-    compile (n, tvars) = do
-        tvarsC <- fmap (filter (not . Str.null)) $ mapM compile tvars
-        if null tvarsC then return Str.empty else do
-        return $ Str.concat [pl, Str.pack (show n), Str.pack ", [", joinMany tvarsC, br, pr]
+instance Compile IHash where
+    compile map = error (show map)
+
+
+instance Compile (Var, [(TVar Bool, TVar VRef)]) where
+    compile (var, tvars)
+        | SType <- v_sigil var, isGlobalVar var = return Str.empty
+        | otherwise = do
+            tvarsC <- fmap (filter (not . Str.null)) $ mapM compile tvars
+            if null tvarsC then return Str.empty else do
+            return $ Str.concat [pl, Str.pack (cast var), Str.pack ", [", joinMany tvarsC, br, pr]
 
 instance (Typeable a) => Compile (Maybe (TVar a)) where
     compile = const . ret $ "Nothing"
@@ -139,7 +144,8 @@ instance Compile VObject where
 instance Compile VCode where
     -- compile MkCode{ subBody = Prim _ } = return $ text "return mkPrim"
     compile MkCode{ subBody = Prim _ } = return Str.empty
-    compile (MkCode v1 v2 v3 _ v4 v5 v6 v7 v8 v9 v10 _) = do 
+    -- XXX - Ew. This signature can't be right.
+    compile (MkCode v1 v2 v3 _ v4 v5 v6 v7 v8 v9 v10 _ _ _ _ _ _ _ _ _ _ _ _) = do 
         compWith "MkCode"
             [ compile v1
             , ret (show v2)

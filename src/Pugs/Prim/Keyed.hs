@@ -47,7 +47,6 @@ valuesFromVal (PerlSV sv) = do
     return . VList $ Map.elems pairs
 valuesFromVal v = retError "Not a keyed reference" v
 
-
 -- XXX These bulks of code below screams for refactoring
 
 pairsFromRef :: VRef -> Eval [Val]
@@ -132,5 +131,6 @@ deleteFromRef (MkRef (IScalar sv)) val = do
     case refVal of
         VRef ref    -> deleteFromRef ref val
         VList _     -> (`deleteFromRef` val) =<< fromVal refVal
-        _           -> return undef
-deleteFromRef ref _ = retError "Not a keyed reference" ref
+        v           -> retError "Argument is not a Hash or Array element or slice in delete" v
+deleteFromRef ref _ = retError "Argument is not a Hash or Array element or slice in delete" ref
+

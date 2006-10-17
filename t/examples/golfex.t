@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -9,11 +8,9 @@ Test miscellaneous golfish examples.
 
 =cut
 
-force_todo 8;
-
 # See L<"http://www.nntp.perl.org/group/perl.perl6.compiler/1135">
 # for discussion of:
-#    (=<>).reverse.print
+#    list(=<>).reverse.print
 #    [=<>].reverse.print
 
 sub build_file (Str $fname, Str $data) {
@@ -23,7 +20,7 @@ sub build_file (Str $fname, Str $data) {
 }
 
 my @examples = (
-    '(=<>).reverse.map:{.say}',
+    'list(=<>).reverse.map:{.say}',
     '[=<>].reverse.map:{.say}'
 );
 

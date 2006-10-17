@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
 plan 10;
+
+# L<S03/Precedence /loose unary/>
 
 is(not 1,     False, "not 1 is false");
 is(not -1,    False, "not -1 is false");

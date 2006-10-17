@@ -1,13 +1,12 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
 
 Test golf examples
 
-This runs examples/golf/tsanta.p6 to test both mad golfer asavige's
+This runs examples/golf/tsanta.pl to test both mad golfer asavige's
 original golf solutions and rg0now's improved solutions.
 
 =cut
@@ -28,11 +27,11 @@ $PUGS           = 'pugs' if $*OS eq any(<MSWin32 mingw msys cygwin>);
 sub nonce () { return (".$*PID." ~ int rand 1000) }
 my $outtmp      = 'outgolf' ~ nonce();
 my $golfdir     = 'examples/golf';
-my $tsanta      = "$golfdir/tsanta.p6";
+my $tsanta      = "$golfdir/tsanta.pl";
 
 my @progs       = ( 'head', 'tail', 'rev', 'mid', 'wc' );
-my $mad_sol     = join(' ', @progs.map():{ $golfdir ~ '/'        ~ $_ ~ '.p6' });
-my $rg0now_sol  = join(' ', @progs.map():{ $golfdir ~ '/rg0now-' ~ $_ ~ '.p6' });
+my $mad_sol     = join(' ', @progs.map():{ $golfdir ~ '/'        ~ $_ ~ '.pl' });
+my $rg0now_sol  = join(' ', @progs.map():{ $golfdir ~ '/rg0now-' ~ $_ ~ '.pl' });
 
 for ($mad_sol, $rg0now_sol) -> $s {
     unlink($outtmp);
@@ -48,5 +47,3 @@ for ($mad_sol, $rg0now_sol) -> $s {
 }
 
 END { defined($outtmp) and unlink($outtmp) }
-
-=cut

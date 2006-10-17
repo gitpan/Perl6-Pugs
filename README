@@ -42,11 +42,11 @@ The following works are owned by third-party projects and are not
 subject to joint ownership.  Eventually, these packages should all
 be moved to the third-party/ directory.
 
-The "ByteString" subsystem is derived from Don Stewart et all's work,
+The "ByteString" subsystem is derived from Don Stewart et al's work,
 under a BSD-style license.  See third-party/fps/LICENSE.
 
-The "FilePath" subsystem is derived from FilePath 0.1.0 by Isaac Jones,
-under a BSD-style license.  See src/System/LICENSE.
+The "FilePath" subsystem is derived from Neil Mitchell's work,
+under a BSD-style license.  See third-party/filepath/System/FilePath.hs.
 
 The "HsJudy" subsystem is derived from Caio Marcelo de Oliveira Filho's
 work, under a BSD-style license.  See third-party/HsJudy/HsJudy.cabal.
@@ -70,15 +70,8 @@ under the same license as Parrot.  See src/pge/README.
 The "RRegex" subsystem is derived from hsregex 0.2 by John Meacham,
 under a BSD-style license.  See src/RRegex/LICENSE.
 
-The "Rule" subsystem is derived from Parsec 2.0 by Daan Leijen,
-under a BSD-style license.  See src/Pugs/Rule/LICENSE.
-
-The "TextRegexLazy" subsystem is derived from Christopher Kuklewic's
-work, under a BSD-style license, except for Text.Regex.Lazy.DFAEngine,
-which is under LGPL.  See third-party/TextRegexLazy/Text/Regex/Lazy/LICENSE.
-
-The "UTF8" subsystem is derived from Sven Moritz Hallberg's work,
-under a BSD-style license.  See src/UTF8.lhs.
+The "UTF8" subsystem is derived from Martin Norbäck's work,
+under a BSD-style ilcense.  See src/UTF8.hs.
 
 
 COPYRIGHTED PERL 6 LIBRARY EXTENSIONS

@@ -1,6 +1,6 @@
-module HTTP::Server::Simple-6.00;
+use v6-alpha;
 
-use v6;
+module HTTP::Server::Simple-6.00;
 
 has Int $.port;
 has IO  $.socket;
@@ -55,7 +55,7 @@ method handle_request {
     $.remote.print($doc);
 }
 
-method handler { ./handle_request }
+method handler { self.handle_request }
 
 method parse_request {
     my Str $chunk = $.remote.readline;
@@ -83,14 +83,14 @@ method parse_headers {
 method prepare {
     $*IN  := $.remote;
     $*OUT := $.remote;
-    my ( $method, $uri, $proto ) = ./parse_request
-        or do { ./bad_request; return 0 };
+    my ( $method, $uri, $proto ) = self.parse_request
+        or do { self.bad_request; return 0 };
     $proto ||= 'HTTP/0.9';
     $uri ~~ m:P5/([^?]*)(?:\?(.*))?/;
     my Str $file  = $0 || '';
     my Str $query = $1 || '';
     unless $method ~~ m:P5/^(?:GET|POST|HEAD)$/ {
-        ./bad_request;
+        self.bad_request;
         return 0;
     }
     %*ENV<SERVER_PROTOCOL> = $proto;
@@ -101,8 +101,8 @@ method prepare {
     %*ENV<REMOTE_ADDR>     = '';
     %*ENV<REMOTE_HOST>     = '';
     %*ENV<QUERY_STRING>    = $query;
-    my $headers = ./parse_headers or do { ./bad_request; return 0 };
-    for @{ $headers } -> $header {
+    my $headers = self.parse_headers or do { self.bad_request; return 0 };
+    for @$headers -> $header {
         my Str $tag = $header.key.uc;
         $tag = "HTTP_$tag"
             unless $tag ~~ m:P5/^(?:CONTENT_(?:LENGTH|TYPE)|COOKIE)$/;
@@ -113,11 +113,11 @@ method prepare {
 
 method run {
     $.socket = $.port.listen;
-    say "You can connect to http://localhost:8080";
+    say "You can connect to http://localhost:$.port";
     loop {
         my %env = %*ENV;
         $.remote = $.socket.accept;
-        ./handler if ./prepare;
+        self.handler if self.prepare;
         $.remote.close;
         %*ENV = %env;
     }

@@ -3,13 +3,13 @@
 use strict;
 use warnings;
 
-use YAML;
+use Best 0.05 [ [qw/YAML::Syck YAML/], qw/Dump LoadFile/ ];
 #my @data = map { YAML::LoadFile($_) } @ARGV;
 #
 #my $combined = combine_tests(@data);
 #
 #print YAML::Dump($combined);
-print YAML::Dump(combine_tests(map { YAML::LoadFile($_) } @ARGV));
+print Dump(combine_tests(map { LoadFile($_) } @ARGV));
 #
 # Annotates the last test tree with the earlier one's
 # and returns the modified reference.
@@ -29,12 +29,12 @@ sub combine_tests{
     my %sum;
     my @revisions;
     for my $data (@_) {
-    	my $revision = $data->{revision};
-    	push @revisions, $revision;
+        my $revision = $data->{revision};
+        push @revisions, $revision;
         for my $file (@{ $data->{meat}{test_files} }) {
             my $fname = $file->{file};
             for my $event (@{ $file->{events} }) {
-    			my $n = $event->{num};
+                my $n = $event->{num};
                 push @{ $sum{$fname}[$n] }, {%$event, revision => $revision };
             }
         }
@@ -44,23 +44,23 @@ sub combine_tests{
     # Remove all events which are *identical*
     #
     my $all_the_same = sub {
-    	my $first = shift;
-    	for my $o ( @_ ) {
+        my $first = shift;
+        for my $o ( @_ ) {
             for my $k ( keys %$o ) {
-    			next if $k eq 'revision';
+                next if $k eq 'revision';
                 return 0 unless defined $o->{$k};
-    			return 0 unless $first->{$k} eq $o->{$k};
+                return 0 unless $first->{$k} eq $o->{$k};
             }
-    	}
+        }
         return 1;
     };
     
     while( my ($fname, $events) =  each %sum ) {
         for(my $i=1; $i<@$events; $i++) {
             my $event = $events->[$i];
-    		if($all_the_same->(@{ $events->[$i] })) {
-    			undef $events->[$i];
-    		} else {
+            if($all_the_same->(@{ $events->[$i] })) {
+                undef $events->[$i];
+            } else {
                 pop @{ $events->[$i] };
             }
         }
@@ -90,5 +90,5 @@ sub combine_tests{
     #
     pop @revisions;
     $target->{more_revisions} = [ @revisions ] if @revisions;
-	$target;
+    $target;
 }

@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 4;
@@ -18,7 +16,7 @@ use Benchmark; pass "(dummy instead of broken use_ok)";
                          for (0..2) {
                              push @r, @a[$_] + @b[$_];
                          }
-                     }
+                     },
                    });
     }
 }

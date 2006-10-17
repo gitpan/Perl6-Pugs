@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # L<S03/"Binding">
@@ -38,8 +37,6 @@ There're two ways one can argue:
     42                  # 42 is a constant
     sub foo ($a) {...}  # $a is a readonly
 
-=end unspecced
-
 =cut
 
 {
@@ -73,7 +70,7 @@ There're two ways one can argue:
         "using the variable return value of an 'is rw' sub as the LHS in a binding operation works", :todo<bug>;
 }
 
-=for discussion
+=begin discussion
 
 Should the constant return value be autopromoted to a var? Or should it stay a
 constant?

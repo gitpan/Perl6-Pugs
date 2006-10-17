@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # L<"http://use.perl.org/~autrijus/journal/25365">
@@ -16,7 +15,9 @@ use Test;
 #       $_;
 #   };
 
-plan 7;
+plan 13;
+
+sub eval_elsewhere($code){ eval($code) }
 
 # Without an own class
 {
@@ -28,7 +29,7 @@ plan 7;
     $was_in_but_block++;
     $topic_in_but_block = $_;
     23;
-    # Here is an implicit ($_;) to get 3 back to $num, insteaf of 23.
+    # Here is an implicit ($_;) to get 3 back to $num, instead of 23.
   };
 
   is $num,                3, "syntax but worked on a literal";
@@ -49,7 +50,7 @@ plan 7;
     $topic_in_but_block = $_;
     .attr = 42;
     23;
-    # Here is an implicit ($_;) to get 3 back to $num, insteaf of 23.
+    # Here is an implicit ($_;) to get 3 back to $num, instead of 23.
   };
 
   ok $was_in_but_block, 'syntax but ($obj but {...}) was executed';
@@ -58,4 +59,18 @@ plan 7;
   my $attr = try { $obj.attr };
   is $attr, 42, "attribute setting worked correctly in syntax but";
   cmp_ok $obj, &infix:<~~>, SampleClass, "syntax but returned the original object";
+}
+
+# L<S02/Context/"can override the class definition:">
+# L<S12/Roles/generalize a particular enumerated value to its role.>
+{
+  my $true_zero is context;
+  ok eval_elsewhere('$+true_zero = 0 but True; 1'), "0 but True syntax evaluates", :todo<bug>;
+  ok ($true_zero == 0), "0 but True is numerically equal to 0";
+  ok ?($true_zero), "0 but True is true", :todo<bug>;
+  # TimToady++ says I can test False as well
+  my $false_positive is context;
+  ok eval_elsewhere('$+false_positive = 3 but False; 1'), "3 but False syntax evaluates", :todo<bug>;
+  ok ($false_positive == 3), "3 but False is numerically equal to 3", :todo<bug>;
+  ok !($false_positive), "3 but False is false";
 }

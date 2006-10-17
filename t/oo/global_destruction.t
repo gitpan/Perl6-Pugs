@@ -1,10 +1,9 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 3;
-my $destroy_test = '#!/usr/bin/pugs
+my $destroy_test = 'use v6-alpha;
 
 class Foo
 {
@@ -25,11 +24,11 @@ my $foo    = Foo.new();
 my $parent = Parent.new();
 my $child  = Child.new();';
 
-my $out = open('destroy_test.p6', :w);
+my $out = open('destroy_test.pl', :w);
 
 unless $out
 {
-    diag( "Could not write destroy_test.p6" );
+    diag( "Could not write destroy_test.pl" );
     exit;
 }
 
@@ -38,7 +37,7 @@ $out.close;
 
 my ($pugs,$redir) = ("./pugs", ">");
 
-if($*OS eq any <MSWin32 mingw msys cygwin>) {
+if $*OS eq any <MSWin32 mingw msys cygwin> {
   $pugs = 'pugs.exe';
   $redir = '>';
 };
@@ -55,7 +54,7 @@ sub run_pugs ($c) {
   return $res;
 }
 
-my $output  = run_pugs("destroy_test.p6");
+my $output  = run_pugs("destroy_test.pl");
 
 like( $output, rx:P5/Foo goes away/,
     'global destruction should collect objects...' );
@@ -68,6 +67,6 @@ END
 {
     if ! %*ENV<TEST_DEBUG_FILES>
     {
-        unlink 'destroy_test.p6';
+        unlink 'destroy_test.pl';
     }
 }

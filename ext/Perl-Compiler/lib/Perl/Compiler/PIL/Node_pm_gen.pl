@@ -70,26 +70,26 @@ sub common_code ($data,$constructor,$stuff,*@fields) {
     $code ~= ("\n  submethod BUILD "
           ~"("~join(", ",map -> $n,$t { "\$$n" }, @fields) ~") \{"
           ~"\n    "~join("\n    ",map -> $n,$t { "\$.{$n} = \$$n;" }, @fields)
-          ~"\n    ./type_check("
+          ~"\n    self.type_check("
           ~"\n      "~join(",\n      ",map -> $n,$t { "\$.{$n}.vtype, '$t'" }, @fields) ~");"
           ~"\n    }");
     $code ~= "\n}\n";
     $code;
 }
 sub node_h ($data,$constructor,*@fields) {
-    my $code = common_code($data,$constructor,"",*@fields);
+    my $code = common_code($data,$constructor,"", |@fields);
     say $code; # XXX - see above
     $code;
 }
 sub node_a ($data,$constructor,*@fields) {
     my $code = "\n  sub new(\$v0) \{ BUILD({@fields[0]} => \$v0) }";
-    $code = common_code($data,$constructor,$code,*@fields);
+    $code = common_code($data,$constructor,$code, |@fields);
     say $code; # XXX - see above
     $code;
 }
 sub node_a2 ($data,$constructor,*@fields) {
     my $code = "\n  sub new(\$v0,\$v1) \{ BUILD({@fields[0]} => \$v0,{@fields[2]} => \$v1) }";
-    $code = common_code($data,$constructor,$code,*@fields);
+    $code = common_code($data,$constructor,$code, |@fields);
     say $code; # XXX - see above
     $code;
 }

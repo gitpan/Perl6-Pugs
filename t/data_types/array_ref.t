@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -63,7 +62,7 @@ is($array_ref5[5], 'foo',  'got the right value at array_ref5 index 5');
 # create an array_ref slice with an array_ref (in a variable)
 
 my $slice = [ 2, 0, 1 ];
-my $array_ref6 = [ $array_ref1[*$slice] ];
+my $array_ref6 = [ $array_ref1[@$slice] ];
 isa_ok($array_ref6, 'Array');
 
 is(+$array_ref6, 3, 'the array_ref6 has 3 elements');
@@ -114,11 +113,11 @@ is try { $array11[0][0] = 6; $array11[0][0] }, 6, "changing nested array (2)";
 # [] creates new containers (() does not)
 {
   my $foo;
-  ok !([$foo][0] =:= $foo), "creating arrays using [] creates new containers (1)", :todo<bug>;
+  ok !([$foo][0] =:= $foo), "creating arrays using [] creates new containers (1)";
 }
 
 {
   my $foo;
   my $arrayref = [$foo];
-  ok !($arrayref[0] =:= $foo), "creating arrays using [] creates new containers (2)", :todo<bug>;
+  ok !($arrayref[0] =:= $foo), "creating arrays using [] creates new containers (2)";
 }

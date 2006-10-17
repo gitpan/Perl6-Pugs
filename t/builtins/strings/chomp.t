@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 26;
@@ -11,7 +10,8 @@ Basic tests for the chomp() builtin
 
 =cut
 
-# L<S29/"Perl6::Str" /chomp/>
+# L<S29/"Str"/=item chomp>
+
 # Also see L<"http://use.perl.org/~autrijus/journal/25351">
 #   &chomp and &wrap are now nondestructive; chomp returns the chomped part,
 #   which can be defined by the filehandle that obtains the default string at

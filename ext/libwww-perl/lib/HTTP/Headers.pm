@@ -1,4 +1,4 @@
-use v6;
+use v6-alpha;
 
 #require URI;
 
@@ -45,10 +45,10 @@ my @entity_headers = <
 my %entity_header = @entity_headers.map:{ %entity_header{uc $_} = 1 };
 
 our @header_order = (
- *@general_headers,
- *@request_headers,
- *@response_headers,
- *@entity_headers,
+ @general_headers,
+ @request_headers,
+ @response_headers,
+ @entity_headers,
 );
 
 # Make alternative representations of @header_order.  This is used
@@ -129,10 +129,10 @@ my method header (Str $field is copy, Str $val is copy, Str $op = "") {
   $val = undef if $op eq "INIT" and @old;
   if $val.defined {
     my @new = ($op eq "PUSH") ?? @old !! ();
-    if $val !~ Array {
+    if $val !~~ Array {
       push @new, $val;
     } else {
-      push @new, *@$val;
+      push @new, @$val;
     }
     %!headers{$field} = @new > 1 ?? \@new !! @new[0];
   }
@@ -177,7 +177,7 @@ method as_string ($self: Str $ending = "\n") {
       # must handle header values with embedded newlines with care
       $val ~~ s/\s+$//;                    # trailing newlines and space must go
       $val ~~ s:g/\n\n+/\n/;               # no empty lines
-      $val ~~ s:g/\n(<-[\040\t]>)/\n $0/;  # initial space for continuation
+      $val ~~ s:g/\n(<-[\x20\t]>)/\n $0/;  # initial space for continuation
       $val ~~ s:g/\n/$ending/;             # substitute with requested line ending
     }
     @result.push("$field: $val");
@@ -238,7 +238,7 @@ method content_type ($self: ) is rw {
 
 method referer ($self: ) is rw {
   return Proxy.new(
-    FETCH => { @{$self!header("Referer")}[0] },
+    FETCH => { $self!header("Referer")[0] },
     STORE => -> $new is copy {
       if ($new ~~ /\#/) {
         # Strip fragment per RFC 2616, section 14.36.
@@ -295,7 +295,7 @@ my method basic_auth ($self: Str $h) is rw {
     # -- XXX does this create a reasonable warning? If not, put
     #   Carp::croak("Basic authorization user name can't contain ':'")
     # back.
-    # XXX Str where { $^str !~ /\:/ }
+    # XXX Str where { $^str !~~ /\:/ }
     STORE => -> Str $user, Str $passwd = "" {
       #$self!header($h, "Basic " ~ MIME::Base64::encode("$user:$passwd", ""));
     });

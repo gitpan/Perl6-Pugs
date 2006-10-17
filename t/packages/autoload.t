@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # various tests derived from L<S10/Autoloading>
@@ -28,27 +27,27 @@ lives_ok { $x = OughtaLoad::test(2,3,4) },
 
 package OughtaWork {
     our $s = 0;
-    sub AUTOSCALAR($_) { my $v = "\${$_} number {++$s}";
-                     eval "our \${$_} := \$v";
+    sub AUTOSCALAR($_) { my $v = "\$$_ number {++$s}";
+                     eval "our \$$_ := \$v";
                      \$v }
     our $a = 0;
     sub AUTOARRAY($_)  { my @v = ( "auto", $_, ++$a );
-                     eval "our @{$_} := @v";
+                     eval "our @$_ := @v";
                      \@v }
     our $h = 0;
     sub AUTOHASH($_)   { my %v = ( auto => $_, num => ++$h );
-                     eval "our %{$_} := %v";
+                     eval "our %$_ := %v";
                      \%v }
     our $u = 0;
     sub AUTOSUB($_)    { my $x = "\&{$_} number {++$u}";
                      my $sub = sub { $x };
-                     eval "our &{$_} := \$sub";
+                     eval "our &$_ := \$sub";
                      return $sub;
                    }
     our $m = 0;
-    method AUTOMETH($_) { my $x = "$?SELF {$_}.number {++$m}";
+    method AUTOMETH($_) { my $x = "{self} {$_}.number {++$m}";
                      my $method = sub($self:) { "{$self}.$x" };
-                     eval "our &{$_} := \$method";
+                     eval "our &$_ := \$method";
                      return $method;
                    }
 }
@@ -91,17 +90,17 @@ is(@a.join(","), q[auto,bar,3], "Returns correct var", :todo<feature>);
 
 # hash
 my %h = OughtaWork::AUTOHASH("test");
-is(%h.kv.join(","), q[auto,test,num,1], "AUTOHASH sanity test");
+is(%h.kv.sort.join(","), q[1,auto,num,test], "AUTOHASH sanity test");
 
 lives_ok { %h = %OughtaWork::foo }, "AUTOHASH - first";
-is(%h.kv.join(","), q[auto,foo,num,2], "Returns correct var", :todo<feature>);
+is(%h.kv.sort.join(","), q[2,auto,foo,num], "Returns correct var", :todo<feature>);
 
 %h=();
 lives_ok { %h = %OughtaWork::foo }, "AUTOHASH - repeat";
-is(%h.kv.join(","), q[auto,foo,num,2], "AUTOHASH only called once", :todo<feature>);
+is(%h.kv.sort.join(","), q[2,auto,foo,num], "AUTOHASH only called once", :todo<feature>);
 
 lives_ok { %h = %OughtaWork::bar }, "AUTOHASH - second";
-is(%h.kv.join(","), q[auto,bar,num,3], "Returns correct var", :todo<feature>);
+is(%h.kv.sort.join(","), q[3,auto,bar,num], "Returns correct var", :todo<feature>);
 
 
 # sub
@@ -110,17 +109,17 @@ my $v = $s();
 is($v, q[&test number 1], "AUTOSUB sanity test");
 
 $v="";
-eval_ok q{ $s = &OughtaWork::foo; $v = $s(); },
+ok eval(q{ $s = &OughtaWork::foo; $v = $s(); }),
         "AUTOSUB - first", :todo<feature>;
 is($v, q[&foo number 2], "Returns correct var", :todo<feature>);
 
 $v="";
-eval_ok q{ $s = &OughtaWork::foo; $v = $s();  },
+ok eval(q{ $s = &OughtaWork::foo; $v = $s();  }),
         "AUTOSUB - repeat", :todo<feature>;
 is($v, q[&foo number 2], "AUTOSUB only called once", :todo<feature>);
 
 $v="";
-eval_ok q{ $s = &OughtaWork::bar; $v = $s();  },
+ok eval(q{ $s = &OughtaWork::bar; $v = $s();  }),
         "AUTOSUB - second", :todo<feature>;
 is($v, q[&bar number 3], "Returns correct var", :todo<feature>);
 
@@ -129,20 +128,20 @@ is($v, q[&bar number 3], "Returns correct var", :todo<feature>);
 # methods"; they have to be classes or roles for AUTOMETH to be method
 # lookups.
 my $inv = ::OughtaWork;
-eval_ok q{ $s = OughtaWork.AUTOMETH("test"); $v = $s($inv:) },
+ok eval(q{ $s = OughtaWork.AUTOMETH("test"); $v = $s($inv:) }),
         "AUTOMETH - sanity", :todo<bug>;
 is($v, q[OughtaWork.test number 1], "AUTOMETH sanity test", :todo<bug>);
 
 $v = "";
-eval_ok q{ $s = OughtaWork.foo; $v = $s($inv:) },
+ok eval(q{ $s = OughtaWork.foo; $v = $s($inv:) }),
         "AUTOMETH - first", :todo<feature>;
 is($x, q[OughtaWork.foo number 2], "Returns correct var", :todo<feature>);
 
 $s = sub { };
-eval_ok q{ $s = OughtaWork.foo; $v = $s($inv:)  },
+ok eval(q{ $s = OughtaWork.foo; $v = $s($inv:)  }),
         "AUTOMETH - repeat", :todo<feature>;
 is($x, q[OughtaWork.foo number 2], "AUTOMETH only called once", :todo<feature>);
-eval_ok q{ $s = OughtaWork.bar; $v = $s($inv:)  },
+ok eval(q{ $s = OughtaWork.bar; $v = $s($inv:)  }),
         "AUTOMETH - second", :todo<feature>;
 is($x, q[OughtaWork.bar number 3], "Returns correct var", :todo<feature>);
 

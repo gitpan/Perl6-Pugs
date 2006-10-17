@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
 
 {-|
     Pretty printing for various data structures.
@@ -12,11 +12,12 @@
 -}
 
 module Pugs.Pretty (
-    Pretty, pretty,
+    Pretty(..), pretty, priggy,
 ) where
 import Pugs.Internals
 import Pugs.Types
 import Pugs.AST
+import qualified Pugs.Val as Val
 import Pugs.Rule (SourcePos)
 import Text.PrettyPrint
 import qualified Data.Set as Set
@@ -26,22 +27,38 @@ defaultIndent :: Int
 defaultIndent = 2
 
 class (Show a) => Pretty a where
-    format :: a -> Doc
+    format, formatQuite :: a -> Doc
     format x = text $ show x
+    formatQuite = format
 
 instance Pretty VStr
+instance Pretty Var
 
 instance Pretty Exp where
     format (NonTerm pos) = text "Syntax error at" <+> format pos
     format (Val v) = format v
     format (Syn x vs) = text "Syn" <+> format x <+> (braces $ vcat (punctuate (text ";") (map format vs)))
     format (Stmts exp1 exp2) = (vcat $ punctuate (text ";") $ (map format) [exp1, exp2])
-    format (App (Var name) invs args) = text "App" <+> text name <+> parens (nest defaultIndent $ cat (punctuate (text ": ") [ cat (punctuate (text ", ") (map format x)) | x <- [maybeToList invs, args] ]))
+    format (App (Var name) invs args) = text "App" <+> text (cast name) <+> parens (nest defaultIndent $ cat (punctuate (text ": ") [ cat (punctuate (text ", ") (map format x)) | x <- [maybeToList invs, args] ]))
     format (App sub invs args) = text "App" <+> parens (format sub) <+> parens (nest defaultIndent $ vcat (punctuate (text ", ") (map format $ maybeToList invs ++ args)))
     format (Sym scope name exp) = text "Sym" <+> text (show scope) <+> format name $+$ format exp
     format (Pad scope pad exp) = text "Pad" <+> text (show scope) <+> format pad $+$ format exp
     format (Ann _ exp) = format exp
     format x = text $ show x
+    formatQuite (Syn "," xs) = parens (formatQuite xs)
+    formatQuite (App (Var var) Nothing args)
+        | C_infix <- v_categ var
+        = parens (hsep (punctuate (text . (' ':) . cast $ v_name var) (map formatQuite args)))
+        | otherwise
+        = text (showsVar var "") <> parens (formatQuite args)
+    formatQuite (App (Var var) (Just inv) args)
+        = formatQuite inv <> char '.' <> text (cast $ v_name var) <> parens (formatQuite args)
+    formatQuite (Ann _ exp) = formatQuite exp
+    formatQuite x = format x
+
+instance Pretty [Exp] where
+    format xs = hsep (punctuate comma (map format xs))
+    formatQuite xs = hsep (punctuate comma (map formatQuite xs))
 
 instance Pretty (TVar Bool, TVar VRef) where
     format (_, tvar) = format tvar
@@ -77,10 +94,10 @@ instance Pretty (Exp, SourcePos) where
     format (x, _) = format x 
 
 instance Pretty (TVar VRef) where
-    format x = braces $ text $ "ref:" ++ show x
+    format x = text ('#':show x)
 
 instance Pretty VRef where
-    format x = braces $ text $ "ref:" ++ show x
+    format x = text ('#':show x)
 
 instance Pretty VMatch where
     format m = joinList (text ", ")
@@ -137,7 +154,7 @@ instance Pretty Val where
     format (VStr x) = text $ "\"" ++ encodeUTF8 (concatMap quoted x) ++ "\""
     format (VRat x) = text $ showTrueRat x
     format (VComplex x) = text $ show x
-    format (VControl (ControlEnv _)) = text "<env>"
+    format (VControl ControlContinuation{}) = text "<continuation>"
     format (VControl x) = text $ show x
     format (VProcess x) = text $ show x
     format (VOpaque (MkOpaque x)) = braces $ text $ "obj:" ++ show x
@@ -149,7 +166,7 @@ instance Pretty Val where
 -}
     format (VRef x) = format x
     format (VList x) = format x
-    format (VCode x) = text . (++ "{...}") $ case subType x of
+    format (VCode x) = (<> braces (format $ subBody x)) . text $ case subType x of
         SubMacro        -> "macro "
         SubRoutine      -> "sub "
         SubMethod       -> "method "
@@ -187,6 +204,12 @@ instance Pretty Val where
         ]
     format (PerlSV _) = text $ "{obj-perl5}"
     format VUndef = text $ "undef"
+    format (VV x) = format x -- === formatVal x
+    formatQuite (VV x) = text . cast $ Val.valShow x
+    formatQuite x = format x
+
+instance Pretty Val.Val where
+    format = formatVal
 
 quoted :: Char -> String
 quoted '\'' = "\\'"
@@ -201,8 +224,8 @@ quoted '@'  = "\\@"
 quoted '%'  = "\\%"
 quoted '&'  = "\\&"
 quoted '^'  = "\\^"
-quoted x | x < ' ' || x > '~' = "\\d[" ++ show (ord x) ++ "]"
-quoted x = [x]
+quoted x | isPrint x = [x]
+quoted x    = "\\x[" ++ showHex (ord x) "]"
 
 doubleBraces :: Doc -> Doc
 doubleBraces x = vcat [ (lbrace <> lbrace), nest defaultIndent x, rbrace <> rbrace]
@@ -210,6 +233,6 @@ doubleBraces x = vcat [ (lbrace <> lbrace), nest defaultIndent x, rbrace <> rbra
 joinList :: Doc -> [Doc] -> Doc
 joinList x y = cat $ punctuate x y
 
-pretty :: Pretty a => a -> String
+pretty, priggy :: Pretty a => a -> String
 pretty a = render $ format a
-
+priggy a = render $ formatQuite a

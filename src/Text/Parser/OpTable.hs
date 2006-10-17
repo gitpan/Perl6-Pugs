@@ -6,7 +6,7 @@ module Text.Parser.OpTable where
 import Prelude hiding (length, lookup, null, drop, span)
 import qualified Data.Map as Map
 import qualified Data.Seq as Seq
-import qualified Data.FastPackedString as Str
+import qualified Data.ByteString as Str
 import qualified Data.List as List
 import Data.Ratio
 import Data.Generics hiding (Prefix, Infix)
@@ -14,7 +14,9 @@ import Data.Char (isDigit)
 import Data.List (find)
 import Data.Seq (Seq, fromList)
 import Data.Map (Map, insert, lookup, toAscList, (!))
-import Data.FastPackedString (empty, pack, null, drop, dropSpace, length, isPrefixOf, span, FastString(..), lineIdxs)
+import Data.ByteString (elemIndex)
+import Data.ByteString.Base (ByteString(..))
+import Data.ByteString.Char8 (empty, pack, null, drop, dropSpace, length, isPrefixOf, span, ByteString)
 import GHC.Prim(unsafeCoerce#)
 
 data Op
@@ -46,7 +48,7 @@ data DynResult
 
 instance Data DynResult where
     gunfold = error "gunfold"
-        :: (forall r. c (Str -> r) -> c r) -> (forall r . r -> c r) -> Constr -> c DynResult
+--      :: (forall r. c (Str -> r) -> c r) -> (forall r . r -> c r) -> Constr -> c DynResult
     toConstr = error "gfoldl"
     dataTypeOf = error "dataTypeOf"
 
@@ -109,7 +111,7 @@ data OpTable r = MkOpTable
 emptyTable :: OpTable r
 emptyTable = MkOpTable Map.empty Map.empty Map.empty Map.empty Map.empty
 
-type Str = Str.FastString
+type Str = Str.ByteString
 type EntryMap a = Map Op (Token a)
 type TokenMap a = Map TokenName (Token a)
 
@@ -464,3 +466,11 @@ instance (OpClass ((String -> Token r -> [r] -> r) -> (Str -> Op) -> String -> [
 splitWords :: String -> [String]
 splitWords [] = [""]
 splitWords x  = List.words x
+
+-- a set of positions where newline occurs
+lineIdxs :: ByteString -> [Int]
+lineIdxs ps@(PS _ idx _)
+    | null ps = []
+    | otherwise = case elemIndex 0x0A ps of
+             Nothing -> []
+             Just n  -> (n + idx:lineIdxs (drop (n+1) ps))

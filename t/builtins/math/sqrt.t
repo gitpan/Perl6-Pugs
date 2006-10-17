@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
 plan 2;
+
+# L<S29/Num/"=item sqrt">
 
 =pod 
 

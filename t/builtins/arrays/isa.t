@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid 
@@ -8,7 +7,7 @@ use Test;
 .isa() tests
 
 These tests are specific to the .isa() which is attached to the
-Perl6 Array "class". Which is actually @array.meta.isa(), which 
+Perl6 Array "class". Which is actually @array.HOW.isa(), which 
 is actually just the normal OO .isa(). This test does not attempt
 to test anything other than the "normal" behavior of @array.isa()
 

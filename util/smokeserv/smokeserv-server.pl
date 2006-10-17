@@ -10,6 +10,7 @@ use Storable    qw<store_fd fd_retrieve freeze>;
 use Digest::MD5 qw<md5_hex>;
 use HTML::Template;
 use Algorithm::TokenBucket;
+use File::Find;
 use Time::Piece;
 use Time::Seconds;
 
@@ -22,7 +23,10 @@ use constant {
   VERSION     => 0.4,
   MAX_SIZE    => 2**20 * 3.0,  # MiB limit
   BASEDIR     => "/var/www/iblech/stuff/pugs-smokes/",
+  SMARTLINKS  => "/var/www/iblech/stuff/pugs-util/smartlinks.pl",
   BASEHTTPDIR => "/iblech/stuff/pugs-smokes/",
+  PUGS_SVN    => "http://svn.openfoundry.org/pugs",
+  PUGS_SPEC   => "/var/www/iblech/stuff/pugs-smokes/spec",
   BUCKET      => "bucket.dat",
   MAX_RATE    => 1 / 30,       # Allow a new smoke all 30s
   BURST       => 5,            # Set max burst to 5
@@ -64,8 +68,13 @@ sub validate_params {
 
   uncompress_smoke();
   unless($CGI->param("smoke") =~ /^<!DOCTYPE html/) {
-    print "The submitted smoke does not look like a smoke!";
+    print "The submitted smoke does not look like a smoke (it doesn't begin with /^<!DOCTYPE html/!";
     exit;
+  }
+
+  # This error ist not critical, so don't exit().
+  unless($CGI->param("yml")) {
+    print "Warning: No .yml sent!\n";
   }
 }
 
@@ -74,6 +83,12 @@ sub uncompress_smoke {
     Compress::Zlib::memGunzip($CGI->param("smoke")) ||
     Compress::Bzip2::memBunzip($CGI->param("smoke")) ||
     $CGI->param("smoke"));
+
+  $CGI->param("yml",
+    Compress::Zlib::memGunzip($CGI->param("yml")) ||
+    Compress::Bzip2::memBunzip($CGI->param("yml")) ||
+    $CGI->param("yml"))
+      if $CGI->param("yml");
 }
 
 sub require_compression_modules {
@@ -86,6 +101,7 @@ sub require_compression_modules {
 
 sub add_smoke {
   my $html = $CGI->param("smoke");
+  my $yml = $CGI->param("yml");
 
   my $id = md5_hex $html;
   if(glob "pugs-smoke-*-$id.html") {
@@ -108,8 +124,12 @@ sub add_smoke {
     unexpect => $6,
   };
 
-  if(grep { not $smoke{$_} } qw<pugs_version osname duration summary runcore>) {
-    print "The submitted smoke has an invalid format!";
+  my @req_fields = qw< pugs_version osname duration summary runcore >;
+  if(my @missing_fields = grep { not $smoke{$_} } @req_fields) {
+    print <<EOF;
+The submitted smoke has an invalid format:
+Not all of the required fields (@missing_fields) exist.
+EOF
     exit;
   }
 
@@ -117,6 +137,11 @@ sub add_smoke {
   $smoke{timestamp}       = time;
   $smoke{id}              = $id;
   my $filename            = pack_smoke(%smoke);
+  my $yml_filename        = yml_name($filename);
+  my $syn_dir             = synopsis_name($filename);
+
+  $html =~ s:("t_index/[^#"]*)\.html([#"]):$1.t$2:g; # change .html to .t
+  $html =~ s:"t_index:\"$syn_dir:g;       # replace t_index with $syn_dir
 
   open my $fh, ">", $filename or
     die "Couldn't open \"$filename\" for writing: $!\n";
@@ -124,6 +149,87 @@ sub add_smoke {
     die "Couldn't write to \"$filename\": $!\n";
   close $fh or
     die "Couldn't close \"$filename\": $!\n";
+
+  if($yml) {
+    open my $fh, ">", $yml_filename or
+      die "Couldn't open \"$yml_filename\" for writing: $!\n";
+    print $fh $yml or
+      die "Couldn't write to \"$yml_filename\": $!\n";
+    close $fh or
+      die "Couldn't close \"$yml_filename\": $!\n";
+
+    make_synopses($filename, $yml_filename);
+  }
+}
+
+sub make_synopses
+{
+  my ($html_file, $yml_file) = @_;
+
+  my $syn_dir = synopsis_name($html_file);  # the output directory
+  mkdir $syn_dir;
+  system(PUGS_SPEC . '/update') and warn "Couldn't update synopses";
+
+  my $rev = get_revision($html_file);
+  my @t_files = make_old_tests($syn_dir, $rev);
+  if(@t_files and
+     system(SMARTLINKS, '--test-res', $yml_file,
+                        '--out-dir', $syn_dir,
+                        '--syn-dir', PUGS_SPEC,
+                        '--fast',
+                        @t_files) == 0) {
+    make_synopsis_index($syn_dir);
+  } else {
+    warn "Couldn't run smartlinks";
+    rmdir $syn_dir;  # may help some broken links
+  }
+}
+
+sub get_revision
+{
+  my $html_file = shift;
+  my $metadata = unpack_smoke($html_file);
+  return $$metadata{'pugs_revision'};
+}
+
+sub make_old_tests
+{
+  my ($syn_dir, $revision) = @_;
+  unless($revision =~ m/^\d+$/) {
+    warn "Strange revision number in .yml; can't checkout tests";
+    return ();
+  }
+  system('svn', 'co', '-q', '-r' => $revision, PUGS_SVN . '/t', "$syn_dir/t") == 0
+    or do { warn "Couldn't check out tests"; return (); };
+  my @t_files = ();
+  my $wanted = sub {
+    if(m/\.t$/) {
+      push @t_files, $File::Find::name;
+    }
+  };
+  find($wanted, "$syn_dir/t");
+  return @t_files;
+}
+
+sub make_synopsis_index
+{
+  my $syn_dir = shift;
+  local $_;
+
+  my %spec = qw(
+    01 Overview 02 Syntax        03 Operator     04 Block
+    05 Rule     06 Subroutine    09 Structure    10 Package
+    11 Module   12 Object        13 Overload     17 Concurrency
+    22 CPAN     26 Documentation 29 Functions
+  );
+  open my $fh, '>', "$syn_dir/index.html";
+  print $fh "<html><head><title>Synopses with Smoke Results</title>\n";
+  print $fh "</head><body>\n$syn_dir<br><br>\n";
+  foreach my $pod (map { (split /\//, $_, 2)[1] } glob "$syn_dir/S??.html") {
+    my $chapter = ($pod =~ /S(\d\d)/)[0];
+    print $fh "<a href=\"$pod\">$chapter $spec{$chapter}</a><br>\n";
+  }
+  print $fh "</body></html>\n";
 }
 
 sub clean_obsolete_smokes {
@@ -133,6 +239,8 @@ sub clean_obsolete_smokes {
       $_[0]->{pugs_revision} == 0 ? "release" : "dev",
   };
 
+  # @smokes is an AoH, with the hashes looking like
+  # { pugs_revision => ..., timestamp => ... }
   my %cats;
   my @smokes = map { unpack_smoke($_) } glob "pugs-smoke-*.html";
   push @{ $cats{$category->($_)} }, $_ for @smokes;
@@ -140,7 +248,7 @@ sub clean_obsolete_smokes {
   $cats{$_} = [
     (sort {
       $b->{pugs_revision} <=> $a->{pugs_revision} ||
-      $b->{timestamp}[0]  <=> $a->{timestamp}[1]
+      $b->{timestamp}[0]  <=> $a->{timestamp}[0]
     } @{ $cats{$_} })
     [0..MAX_SMOKES_OF_SAME_CATEGORY-1]
   ] for keys %cats;
@@ -152,7 +260,13 @@ sub clean_obsolete_smokes {
     delete $delete{$_->{filename}};
   }
 
-  unlink keys %delete;
+  foreach my $html_file (keys %delete) {
+    unlink $html_file;
+    my $yml_file = yml_name($html_file);
+    unlink $yml_file if(-e $yml_file);
+    my $syn_dir = synopsis_name($html_file);
+    system('rm', '-rf', $syn_dir) if(-d $syn_dir);
+  }
 }
 
 sub process_list {
@@ -209,10 +323,24 @@ sub pack_smoke {
     $smoke{id};
 }
 
+sub yml_name
+{
+  my $name = shift;
+  $name =~ s/\.html$/.yml/;
+  return $name;
+}
+
+sub synopsis_name
+{
+  my $name = shift;
+  $name =~ s/\.html$/-synopses/;
+  return $name;
+}
+
 sub unpack_smoke {
   my $name = shift;
 
-  /^pugs-smoke-([\d.]+)-r(\d+)-([\w\d]+)-(\w+)--(\d+)-(\d+)--(\d+)-(\d+)-(\d+)-(\d+)-(\d+)-(\d+)--([a-f0-9]+).html$/
+  $name =~ /^pugs-smoke-([\d.]+)-r(\d+)-([\w\d]+)-(\w+)--(\d+)-(\d+)--(\d+)-(\d+)-(\d+)-(\d+)-(\d+)-(\d+)--([a-f0-9]+).html$/
     and return {
       pugs_version  => $1,
       pugs_revision => $2,
@@ -241,6 +369,7 @@ sub unpack_smoke {
       id            => $13,
       filename      => $name,
       link          => BASEHTTPDIR . $name, 
+      synopsis_link => -e synopsis_name($name) ? BASEHTTPDIR .  synopsis_name($name) : "",
     };
   return ();
 }
@@ -252,6 +381,10 @@ sub pugspath2runcore {
   /PIL2JS/i  and return "pil2js";
   /PIL-RUN/i and return "pilrun";
   /PIR/i     and return "pir";
+
+  # v6.pm smoke: "pugs-path: perl"
+  /^perl$/   and return "perl5";
+
   return "normal";
 }
 
@@ -262,6 +395,7 @@ sub runcore2human {
   $_ eq "pil2js" and return "PIL2JS (Perl 6 on JavaScript)";
   $_ eq "pilrun" and return "PIL-Run (Perl 6 on Perl 5)";
   $_ eq "pir"    and return "PIR (Perl 6 on Parrot)";
+  $_ eq "perl5"  and return "v6.pm (Perl 6 on Perl 5)";
   $_ eq "normal" and return "Normal runcore (Perl 6 on Haskell)";
   die;
 }
@@ -425,7 +559,11 @@ $ ./util/smokeserv/smokeserv-client.pl ./smoke.html</pre>
 	      <td class="num tests_unexpect"><span title="<tmpl_var name=unexpect> unexpectedly succeeded"><tmpl_var name=unexpect></span></td>
 	    </tmpl_loop>
 	    <td><span title="Details" class="expander" onclick="toggle_visibility('<tmpl_var name=id>')" id="expander_<tmpl_var name=id>">&raquo;</span></td>
-	    <td><a style="text-decoration: none" href="<tmpl_var name=link>" title="Full smoke report">&raquo;</a></td>
+	    <td><a style="text-decoration: none" href="<tmpl_var name=link>" title="Full smoke report" rel="nofollow">&raquo;</a></td>
+	    <td><tmpl_if name=synopsis_link>
+                  <a style="text-decoration: none" href="<tmpl_var name=synopsis_link>" title="View corresponding synopses" rel="nofollow">SYN</a>
+                </tmpl_if>
+            </td>
           </tr>
           <tr class="details" id="details_<tmpl_var name=id>">
             <td colspan="11" class="indent3">
@@ -437,7 +575,10 @@ $ ./util/smokeserv/smokeserv-client.pl ./smoke.html</pre>
                 <span class="tests_skipped"><tmpl_var name=skipped> skipped</span> and
 		<span class="tests_unexpect"><tmpl_var name=unexpect> unexpectedly succeeded</span>
               </tmpl_loop><br />
-              <a href="<tmpl_var name=link>" title="Full smoke report">View full smoke report</a>
+              <a href="<tmpl_var name=link>" title="Full smoke report" rel="nofollow">View full smoke report</a><br />
+	      <tmpl_if name=synopsis_link>
+                  <a href="<tmpl_var name=synopsis_link>" title="View corresponding synopses" rel="nofollow">View corresponding synopses</a>
+              </tmpl_if>
             </td>
           </tr>
         </tmpl_loop>

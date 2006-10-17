@@ -7,6 +7,7 @@ use File::Copy qw(copy);
 use File::Path qw(mkpath rmtree);
 use File::Find qw(find);
 use File::Basename qw(dirname);
+use List::Util qw(max min);
 
 our %BuildPrefs;
 use Config;
@@ -38,6 +39,8 @@ Current settings:
 }
 
 my $run_setup;
+my $want_profiling = 0;
+my $AR_EXE;
 
 sub build {
     my($opts) = @_;
@@ -46,41 +49,265 @@ sub build {
     
     print "Build configuration:\n" . PugsBuild::Config->pretty_print;
 
-    my ($version, $ghc, $ghc_version, $setup, @args) = @{$opts->{GHC}};
-    write_buildinfo($version, $ghc, $ghc_version, @args);
+    my ($version, $ghc, $ghc_pkg, $ghc_version, $setup, @args) = @{$opts->{GHC}};
+
+    $want_profiling = grep { /^-prof$/ } @args; 
+    @args = grep { !/^-prof$/ } @args; 
+
+    # Set heap options via environment here; Win32 needs it instead
+    # of setting on GHC flags line. 
+    my @rts_args;
+    foreach my $arg (@args) {
+        $_ = $arg;
+        push @rts_args, $_ if s/^\+RTS$// .. s/^-RTS$//;
+    }
+    $ENV{GHCRTS} = join(' ', ($ENV{GHCRTS} ? $ENV{GHC_RTS} : ()), @rts_args);
+
+    if ($Config{osname} eq 'cygwin') {
+        my $cygwin_path = `cygpath -w /`;
+        my $cygpath = sub {
+            my $path = shift;
+            #warn "<> processing $path...\n";
+            my $retval = `cygpath -w $path`;
+            chomp $retval;
+            $retval =~ s{\\}{/}g;
+            #warn "<> Now it is $retval...\n";
+            return $retval;
+        };
+
+        #unshift @args, '-optc-ID:\ghc\ghc-6.4.2\include\mingw', '-optc-ID:\ghc\ghc-6.4.2\gcc-lib\include', '-optc-I/usr/include', '-optc-I/usr/include/cygwin', '-D__CYGWIN__',
+        unshift @args, '-I/usr/lib/perl5/5.8/cygwin/CORE',
+            '-optc-ID:\ghc\ghc-6.4.2\include\mingw',
+            '-optc-I/usr/include',
+            '-optl-I/usr/include/cygwin';
+        for my $arg (@args) {
+            $arg =~ s{(-optc-[IL]|-optl|-optl-L|-I|-L)(/\S+)}{$1 . $cygpath->($2)}eg;
+            #if ($arg =~ m{D:/cygwin/usr/include}i) {
+            #    $arg = '-optc-ID:\ghc\ghc-6.4.2\include\mingw';
+            #}
+        }
+
+        #push @args, '-optc-I$cywin_path/lib/perl5/5.8/cygwin/CORE',
+        #    '-optl-L$cygwin_path/lib/perl5/5.8/cygwin/CORE';
+        #warn "\n\n [248] !!!\n\n @args \n\n !!!!\n\n";
+    }
+
+    write_buildinfo($version, $ghc, $ghc_pkg, $ghc_version, @args);
 
     my $pwd = cwd();
 
     print "*** Building dependencies.  Please wait...\n\n";
 
-    # XXX - instead of --user, use our own package-conf storage position
+    # Instead of --user, use our own package-conf storage position.
 
-    foreach my $module (qw< fps HsSyck >) {
+    my $runcompiler = File::Spec->rel2abs("$pwd/util/runcompiler$Config{_exe}");
+    my $prefix      = File::Spec->rel2abs("$pwd/third-party/installed");
+    my $hc_pkg      = File::Spec->rel2abs("$pwd/util/ghc-pkg-wrapper$Config{_exe}");
+
+    if ($Config{osname} eq 'cygwin') {
+        # NB.  We're exploiting for's aliasing of variables.
+        foreach my $path ($runcompiler, $prefix, $hc_pkg) {
+            $path =~ s{^/cygdrive/(\w)/}{$1:/};
+        }
+    }
+
+    mkdir $prefix unless -d $prefix;
+
+    # On Win32, a very broken heuristics in Cabal forced us to fake a
+    # gcc-lib\ld.exe under pugs path.
+    my ($ghc_inst_path, $ghc_bin_path, $hsc2hs);
+    if ($^O eq 'MSWin32') {
+        foreach my $args (@{$opts->{SETUP}}) {
+            $args =~ /^--with-hsc2hs=((.*[\\\/]).*)/ or next;
+            $hsc2hs = $1;
+            $ghc_inst_path = $ghc_bin_path = $2;
+            $ghc_inst_path =~ s{[/\\]bin[/\\]?$}{};
+            $ENV{PATH} = "$ENV{PATH};$ghc_inst_path;$ghc_bin_path";
+
+            if (!-e "gcc-lib/ld.exe" and -e "$ghc_inst_path/gcc-lib/ld.exe") {
+                mkdir "gcc-lib";
+                copy("$ghc_inst_path/gcc-lib/ld.exe" => "gcc-lib/ld.exe");
+            }
+        }
+        die "Cannot obtain gcc-lib/ld.exe" unless -e "gcc-lib/ld.exe";
+        warn "GHC installation path: $ghc_inst_path\n";
+        warn "GHC bin path: $ghc_bin_path\n";
+        warn "Runcompile: $runcompiler\n";
+    }
+    else {
+        foreach my $args (@{$opts->{SETUP}}) {
+            $args =~ /^--with-hsc2hs=((.*[\\\/]).*)/ or next;
+            $hsc2hs = $1;
+            $ghc_bin_path = $2;
+        }
+    }
+
+    $hsc2hs ||= $ENV{HSC2HS};
+    $AR_EXE = $Config{full_ar} || File::Spec->catfile($ghc_bin_path, "ar$Config{_exe}");
+
+    my @configure_args = (
+        ($want_profiling ?  '--enable-library-profiling' : ()),
+        '--with-compiler=' . $runcompiler,
+        '--with-hc-pkg='   . $hc_pkg,
+        '--with-hsc2hs='   . $hsc2hs,
+        '--prefix='        . $prefix
+    );
+
+=begin Judy
+
+    # Judy library
+    chdir "third-party/judy/Judy-1.0.3";
+    copy('src/Judy.h', '../../HsJudy');
+
+    if ($^O eq 'MSWin32') {
+        chdir 'src';
+        $ENV{CC} = "$ghc_inst_path\\gcc";
+        $ENV{COPT} = "-I$ghc_inst_path\\include\\mingw -I$ghc_inst_path\\gcc-lib\\include " .
+            "-B$ghc_inst_path\\gcc-lib";
+        warn "\nCC = $ENV{CC}\nCOPT = $ENV{COPT}\n";
+        system("nmake /F Makefile.win32 /NOLOGO");
+        chdir '..';
+    } else {
+        #if (!-e "src/obj/.libs/libJudy.a") {
+            my $make = $Config{make};
+
+            # Judy at this moment wants GNU make.
+            $make = 'gmake' unless `$make --version` =~ /GNU/;
+            
+            system("./configure") unless -e "src/Makefile";
+            #system("$make clean");
+            chdir 'src';
+            system("$make");
+            chdir '..';
+            #mkdir("../../installed") if !-d "../../installed";
+        #}
+        #copy('src/obj/.libs/libJudy.a', '../../installed') unless -e '../../installed/libJudy.a';
+        #copy('src/obj/.libs/libJudy.a', '../../HsJudy') unless -e '../../HsJudy/libJudy.a';
+    }
+
+    chdir "../../..";
+
+=cut
+
+    foreach my $module (qw< filepath fps HsSyck >) {
+        if ( my ($archive_dir) = (
+                glob("third-party/installed/*/$module-*"),
+                glob("third-party/installed/*/pugs-$module-*"),
+            )) {
+            my $_a = ($want_profiling ? '_p.a' : '.a');
+            my $oldest_a_file = max(
+                map {-M $_} (
+                    glob("$archive_dir/*$_a"),
+                    glob("$archive_dir/*/*$_a"),
+                    glob("$archive_dir/*/*/*$_a"),
+                )
+            );
+
+            my $newest_hs_file;
+            my $wanted = sub {
+                return unless /\.hsc?$/ or /\.cabal$/;
+                $newest_hs_file = -M $_ if !$newest_hs_file or -M $_ < $newest_hs_file;
+            };
+            find $wanted, "third-party/$module";
+
+            if ($newest_hs_file and $oldest_a_file and $newest_hs_file >= $oldest_a_file) {
+                # We are safe - no rebuild needed
+                print "*** Skipping building the '$module' dependency.\n\n";
+                next;
+            }
+        }
+
         chdir "third-party/$module";
-        system("../../Setup$Config{_exe}", 'configure', '--user', '--prefix', "$pwd/dist");
-        system("../../Setup$Config{_exe}", 'unregister', '--user');
+
+        warn join ' ', ("../../Setup$Config{_exe}", 'configure', @configure_args), $/;
+        if (-e '.setup-config') {
+            system("../../Setup$Config{_exe}", 'configure', @configure_args);
+            system("../../Setup$Config{_exe}", 'unregister');
+            system("../../Setup$Config{_exe}", 'clean');
+	}
+
+        system("../../Setup$Config{_exe}", 'configure', @configure_args);
 
         print "*** Building the '$module' dependency.  Please wait...\n\n";
 
         system("../../Setup$Config{_exe}", 'build');
-        system("../../Setup$Config{_exe}", 'install', '--user');
+        system("../../Setup$Config{_exe}", 'install');
         chdir $pwd;
+
+        my ($archive_dir) = (
+            glob("third-party/installed/*/pugs-$module-*"),
+            glob("third-party/installed/*/$module-*"),
+            glob("third-party/installed/pugs-$module-*"),
+            glob("third-party/installed/$module-*"),
+        ) or die "Installation failed for $module";
+
+        foreach my $a_file (
+            glob("$archive_dir/*.a"),
+            glob("$archive_dir/*/*.a"),
+            glob("$archive_dir/*/*/*.a"),
+        ) {
+            system($AR_EXE, s => $a_file) unless $^O eq 'MSWin32';
+        }
+
+        system($hc_pkg, expose => "pugs-$module");
     }
+
+=begin Judy
+
+    # Embedding Judy object files in HsJudy
+    my ($archive_dir) = (
+        glob("third-party/installed/*/pugs-HsJudy-*"),
+        glob("third-party/installed/*/HsJudy-*"),
+        glob("third-party/installed/pugs-HsJudy-*"),
+        glob("third-party/installed/HsJudy-*"),
+    );
+
+    my @archive_files = (
+        glob("$archive_dir/*.a"),
+        glob("$archive_dir/*/*.a"),
+        glob("$archive_dir/*/*/*.a"),
+    );
+    
+    my @o_files = map { glob("third-party/judy/Judy-1.0.3/src/$_/*.o"), }
+                        qw( Judy1 JudyHS JudyCommon JudyL JudySL );
+
+    print "Embedding @o_files into @archive_files\n";
+    system($AR_EXE, "-r", $_, @o_files) for @archive_files;
+  
+    if ($Config{ranlib} ne ':') {
+        system(split(/ /,$Config{ranlib}), $_) for @archive_files;
+    }
+
+=cut
+
     print "*** Finished building dependencies.\n\n";
 
     $run_setup = sub { system($setup, @_) };
-    $run_setup->('configure', '--user', grep !/^--.*=$/, @{$opts->{SETUP}});
+    $run_setup->('configure', @configure_args, grep { !/^--.*=$/ } @{$opts->{SETUP}});
+
+    build_lib($version, $ghc, @args);
+
+    $run_setup->('install');
+
+    if ($Config{ranlib} ne ':') {
+        system(split(/ /,$Config{ranlib}), $_)
+            for glob("third-party/installed/lib/Pugs-$version/*.a");
+    }
+
+    build_exe($version, $runcompiler, $ghc_version, @args);
+
+    if ($want_profiling) {
+        $want_profiling = 0;
+        build_exe($version, $runcompiler, $ghc_version, @args);
+    }
 
     my $pm = "src/perl6/Prelude.pm";
     my $ppc_hs = "src/Pugs/Prelude.hs";
     my $ppc_yml = "blib6/lib/Prelude.pm.yml";
 
-    build_lib($version, $ghc, @args);
-    build_exe($version, $ghc, $ghc_version, @args);
-
     if ((!-s $ppc_yml) or -M $ppc_yml > -M $ppc_hs) {
         # can't assume blib6/lib exists: the user may be running
-        # `make unoptimzed` which doesn't create it.
+        # `make unoptimised` which doesn't create it.
         mkpath(dirname($ppc_yml));
         
         run($^X, qw<util/gen_prelude.pl -v -i src/perl6/Prelude.pm>,
@@ -109,20 +336,28 @@ sub build_lib {
     my $version = shift;
     my $ghc     = shift;
 
-    my $ar = $Config{full_ar};
-    my $a_file = File::Spec->rel2abs("dist/build/libHSPugs-$version.a");
+    my @a_file = File::Spec->rel2abs("dist/build/libHSPugs-$version.a");
+    push @a_file, File::Spec->rel2abs("dist/build/libHSPugs-${version}_p.a") if $want_profiling;
 
     # Add GHC to PATH
     local $ENV{PATH} = dirname($ghc) . $Config{path_sep} . $ENV{PATH};
+ 
+    run($^X, qw<util/version_h.pl>);
 
-    unlink $a_file;
+    mkdir "dist/build" unless -d "dist/build";
+
+    # Remove all -boot files since GHC 6.4 doesn't track them.
+    # This is not needed for GHC 6.5 which doesn't produce them anyway.
+    # Also, remove Version.o and Version.hi so -v will report correctly.
+    my $wanted = sub {
+        return unless $_ =~ /-boot$/ or $_ =~ /Version\.\w+$/;
+        unlink $_;
+    };
+    find $wanted, "dist/build";
+
+    unlink $_ for @a_file;
     $run_setup->('build');
-    die "Build failed: $?" unless -e $a_file;
-
-    if (!$ar) {
-        $ar = $ghc;
-        $ar =~ s{(.*)ghc}{$1ar};
-    }
+    (-e or die "Build failed: $?") for @a_file;
 
     my $fixup = sub {
         my $module = shift; # eg. "Data.Yaml.Syck"
@@ -150,7 +385,8 @@ sub build_lib {
             # warn "*** Found more than one '$basename' -- using the first one. \n";
         }
         elsif (@candidates == 0) {
-            die "*** Wasn't able to find '$basename', aborting...\n";
+            warn "*** Wasn't able to find '$basename' (this may be a problem)...\n";
+            return;
         }
 
         unless( File::Spec->canonpath($candidates[0]) eq $target ) {
@@ -159,23 +395,27 @@ sub build_lib {
                 or die "Copy '$candidates[0]' => '$target' failed: $!";
         }
 
-        system($ar, r => $a_file, $target);
+        for (@a_file) {
+            print "==> $AR_EXE r $_ $target\n";
+            system($AR_EXE, r => $_, $target);
+        }
     };
 
     $fixup->('Pugs.Embed.Perl5') if grep /^-DPUGS_HAVE_PERL5$/, @_;
     $fixup->('Pugs.Embed.Parrot') if grep /^-DPUGS_HAVE_PARROT$/, @_;
 
-    # system($ar, r => $a_file, $_) for grep /\.(?:o(?:bj)?)$/, @_;
-
-    foreach my $a_ext (grep /\.a$/, @_) {
+    foreach my $a_ext (grep { /\.a$/ and !/^-/ } @_) {
         # Do some very sneaky things -- linking other .a with us!
         my $basename = $a_ext;
         $basename =~ s!.*/!!;
         my $dir = "dist/tmp-$basename";
         mkdir $dir;
         chdir $dir;
-        system($ar, x => $a_ext);
-        system($ar, r => $a_file, glob("*"));
+        system($AR_EXE, x => $a_ext);
+        for (@a_file) {
+            print "==> $AR_EXE r $_ @{[glob('*')]}\n";
+            system($AR_EXE, r => $_, glob("*"));
+        }
         unlink(glob("*"));
         chdir '..';
         chdir '..';
@@ -183,7 +423,9 @@ sub build_lib {
     }
 
     # Run ranlib.
-    system($ar, s => $a_file);
+    if ($Config{ranlib} ne ':') {
+        system(split(/ /,$Config{ranlib}), $_) for @a_file;
+    }
 }
 
 sub build_exe {
@@ -202,24 +444,48 @@ sub build_exe {
     }
     push @pkgs, -package => 'readline' if grep /^-DPUGS_HAVE_READLINE$/, @_;
     push @pkgs, -package => 'plugins', -package => 'haskell-src' if grep /^-DPUGS_HAVE_HSPLUGINS$/, @_;
-    my @libs = "-lHSPugs-$version";
-    push @libs, grep /^-threaded/, @_;
+    my @libs = "-lHSPugs-$version" . ($want_profiling ? '_p' : '');
     push @libs, grep /^-opt/, @_;
     push @libs, grep /^-[lL]/, @_;
     push @libs, grep /\.(?:a|o(?:bj)?|\Q$Config{so}\E)$/, @_;
     push @libs, grep /^-auto/, @_;
-    push @libs, grep /^-prof/, @_;
 
-    @_ = (@pkgs, qw(-idist/build -Ldist/build -idist/build/src -Ldist/build/src -o pugs src/Main.hs), @libs);
+    # XXX - Hack to work around Cabal's semibroken profiling lib support!
+    my $out = "pugs$Config{_exe}";
+
+    if ($want_profiling) {
+        $out = "pugs-prof$Config{_exe}";
+        push @libs, '-prof';
+        push @pkgs, glob('third-party/HsSyck/dist/build/syck/*.o'), qw( dist/build/src/pcre/pcre.o );
+    }
+    else {
+        push @libs, grep /^-threaded/, @_;
+    }
+
+    # Force relinking of Main.hs to avoid stale dependencies in .hi
+    unlink 'src/Main.o';
+    unlink 'src/Main.hi';
+
+    push @pkgs, "-package" => "Pugs"; #-$version";
+
+    @_ = ('--make', @pkgs, qw(-optl-Lthird-party/installed -o ), "$out.new", qw( src/Main.hs ), @libs);
+    #@_ = (@pkgs, qw(-idist/build -Ldist/build -idist/build/src -Ldist/build/src -o pugs src/Main.hs), @libs);
     print "*** Building: ", join(' ', $ghc, @_), $/;
     system $ghc, @_;
 
-    die "Build failed: $?" unless -e "pugs$Config{_exe}";
+    die "Build failed: $?" unless -e "$out.new";
+
+    if (-e $out) {
+        unlink $out or die "Cannot remove $out: $!";
+    }
+
+    rename "$out.new" => $out;
 }
 
 sub write_buildinfo { 
     my $version = shift;
     my $ghc = shift;
+    my $ghc_pkg = shift;
     my $ghc_version = shift;
 
     open IN, "< Pugs.cabal.in" or die $!;
@@ -241,14 +507,14 @@ sub write_buildinfo {
         $depends .= ', readline -any';
     }
 
-    my $unicode_c = '';
-    if ($ghc_version =~ /^6\.4(?:\.0)?$/) {
-        $unicode_c = 'src/UnicodeC.c';
-    }
-
     my $perl5_c = '';
     if (grep /^-DPUGS_HAVE_PERL5$/, @_) {
         $perl5_c = 'src/perl5/p5embed.c';
+    }
+
+    my $parrot_c = '';
+    if (grep /^-DPUGS_HAVE_PARROT$/, @_) {
+        $parrot_c = 'src/pge/parrotembed.c';
     }
 
     # Remove -Wl flags in Perl5 embedding.
@@ -263,8 +529,6 @@ sub write_buildinfo {
     my @libs = map substr($_, 2), grep /^-l/, @_;
     #push @libs, grep /\.(?:a|o(?:bj)?)$/, @_;
 
-    my $ghc_pkg = $ghc;
-    $ghc_pkg =~ s/(.*ghc)/$1-pkg/;
     my $has_new_cabal = (`$ghc_pkg describe Cabal` =~ /version: 1\.[1-9]/i);
 
     while (<IN>) {
@@ -278,8 +542,8 @@ sub write_buildinfo {
         s/__OPTIONS__/@_/;
         s/__VERSION__/$version/;
         s/__DEPENDS__/$depends/;
-        s/__UNICODE_C__/$unicode_c/;
         s/__PERL5_C__/$perl5_c/;
+        s/__PARROT_C__/$parrot_c/;
         s/__INCLUDE_DIRS__/@include_dirs/;
         s/__LIBS__/@libs/;
         s/__LIB_DIRS__/@lib_dirs/;

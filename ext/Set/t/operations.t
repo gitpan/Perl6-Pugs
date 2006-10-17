@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 28;
@@ -14,12 +12,10 @@ my $bert = Person.new;
 
 my $set = set(0, 1, 2, 3, $bob);
 my $union = $set.union(set(4,5,6));
-is(~$union.ref, "Set", "set() - union");
+is($union.WHAT, Set, "set() - union");
 
 my $stringified = $set.stringify;
-ok($stringified ~~ rx:perl5/^set\([^<]*<obj:Person>[^<]*\)$/,
-   "stringify");
-diag("stringified to $stringified");
+ok($stringified ~~ rx:perl5/^set\(.*Person.*\)$/, "stringify");
 
 ok($union.equal(set(0..6, $bob)), "set() - equal");
 ok(!$union.not_equal(set(0..6, $bob)), "set() - !not_equal");

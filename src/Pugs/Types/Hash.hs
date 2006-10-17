@@ -7,7 +7,8 @@ class (Typeable a) => HashClass a where
     hash_fetch hv = do
         keys <- hash_fetchKeys hv
         vals <- mapM (hash_fetchVal hv) keys
-        return . Map.fromList $ keys `zip` vals
+        let ps = keys `zip` vals
+        return (length ps `seq` Map.fromList ps)
     hash_store       :: a -> VHash -> Eval ()
     hash_store hv vals = do
         hash_clear hv
@@ -33,6 +34,10 @@ class (Typeable a) => HashClass a where
     hash_fetchKeys hv = do
         vals <- hash_fetch hv
         return $ Map.keys vals
+    hash_fetchSize   :: a -> Eval Int
+    hash_fetchSize hv = do
+        vals <- hash_fetch hv
+        return $ Map.size vals
     hash_deleteElem  :: a -> HashIndex -> Eval ()
     hash_existsElem  :: a -> HashIndex -> Eval VBool
     hash_existsElem hv idx = do
@@ -77,43 +82,48 @@ instance HashClass IHashEnv where
     hash_iType = const $ mkType "Hash::Env"
     hash_fetch _ = do
         envs <- liftIO getEnvironment
-        return . Map.map VStr $ Map.fromList envs
+        return . Map.map (VStr . decodeUTF8) $ Map.fromList envs
     hash_fetchVal _ key = tryIO undef $ do
         str <- getEnv key
-        return $ fromMaybe VUndef (fmap VStr str)
+        return $ fromMaybe VUndef (fmap (VStr . decodeUTF8) str)
     hash_storeVal _ key val = do
         str <- fromVal val
-        liftIO $ setEnv key str True
+        liftIO $ setEnv key (encodeUTF8 str) True
     hash_existsElem _ key = tryIO False $ do
         str <- getEnv key
         return (isJust str)
     hash_deleteElem _ key = do
         liftIO $ unsetEnv key
 
+encodeKey, decodeKey :: HashIndex -> HashIndex
+encodeKey x = x
+decodeKey x = x
+
 instance HashClass IHash where
     hash_fetch hv = do
-        svMap <- liftSTM $ readTVar hv
-        fmap Map.fromList $ forM (Map.assocs svMap) $ \(key, sv) -> do
+        ps  <- liftIO $ H.toList hv
+        ps' <- forM ps $ \(k, sv) -> do
             val <- readIVar sv
-            return (key, val)
+            return (decodeKey k, val)
+        return (length ps' `seq` Map.fromList ps')
     hash_fetchKeys hv = do
-        liftSTM . fmap Map.keys $ readTVar hv
+        fmap (map (decodeKey . fst)) (liftIO $ H.toList hv)
     hash_fetchElem hv idx = do
-        svMap <- liftSTM $ readTVar hv
-        case Map.lookup idx svMap of
-            Just sv -> return sv
-            Nothing -> do
+        let idx' = encodeKey idx
+        r <- liftIO $ H.lookup hv idx'
+        case r of
+             Just sv -> return sv
+             Nothing -> do
                 sv <- newScalar undef
-                liftSTM $ modifyTVar hv (Map.insert idx sv)
+                liftIO $ H.insert hv idx' sv
                 return sv
     hash_storeElem hv idx sv = do
-        liftSTM $ modifyTVar hv (Map.insert idx sv)
+        liftIO $ H.insert hv (encodeKey idx) sv
     hash_deleteElem hv idx = do
-        liftSTM $ modifyTVar hv (Map.delete idx)
+        liftIO $ H.delete hv (encodeKey idx)
+        return ()
     hash_existsElem hv idx = do
-        liftSTM $ do
-            svMap <- readTVar hv
-            return $ Map.member idx svMap
+        liftIO $ fmap isJust (H.lookup hv (encodeKey idx))
 
 instance HashClass PerlSV where
     hash_iType = const $ mkType "Hash::Perl"

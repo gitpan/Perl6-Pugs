@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 20;
@@ -15,8 +13,7 @@ my $bert = Bert.new;
 
 my $set = set(0, 1, 2, 3, $bob);
 
-
-is(~$set.ref, "Set", "set()");
+is($set.WHAT, Set, "set()");
 
 ok($set.includes(0), ".includes(0)");
 ok($set.includes($bob), ".includes(\$bob)");

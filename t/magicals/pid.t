@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -25,7 +24,7 @@ my ($pugs,$redir,$squo) = ("./pugs", ">", "'");
 $pugs = './runjs.pl --run=jspm --perl5'
     if $?PUGS_BACKEND eq 'BACKEND_JAVASCRIPT';
 
-if($*OS eq any <MSWin32 mingw msys cygwin>) {
+if $*OS eq any <MSWin32 mingw msys cygwin> {
     $pugs = 'pugs.exe';
 };
 

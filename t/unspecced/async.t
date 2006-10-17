@@ -1,13 +1,12 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
 
 = DESCRIPTION
 
-This test tests the interaction of C<async{}> and
+This test tests the interaction of C<async {}> and
 C<system>. Ideally, while a C<system> call is in progress,
 C<async> blocks are still being executed.
 
@@ -35,7 +34,7 @@ my ($pugs,$redir) = ("./pugs", ">");
 ok(0, "async+system known to be erratic _everywhere_, disable for now", :todo<bug>);
 exit;
 
-if($?OS eq any <MSWin32 mingw msys cygwin>) {
+if $?OS eq any <MSWin32 mingw msys cygwin> {
   $pugs = 'pugs.exe';
   skip 1, "async known to be problematic on Win32";
   exit;

@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 12;
@@ -14,7 +12,7 @@ my $todo_test = Test::Builder::Test::TODO.new(
     reason      => 'reason for TODO-ing'
 );
 
-is( $todo_test.ref, ::Test::Builder::Test::TODO,
+is( $todo_test.WHAT, ::Test::Builder::Test::TODO,
     'new() should return a Test::Builder::Test::TODO instance' );
 
 is( $todo_test.number(), 1, 'number() should return the right test number' );

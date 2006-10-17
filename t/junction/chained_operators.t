@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # Tests that (1|2|3) is the same as any(1,2,3).
@@ -19,3 +18,4 @@ is +one(1,2,3).values, 3;
 is +(1 ^ 2 ^ 3).values, 3;
 
 is +none(1,2,3).values, 3;
+

@@ -1,9 +1,7 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 
 use Test;
-plan 24;
+plan 25;
 
 =head1 DESCRIPTION
 
@@ -11,7 +9,8 @@ Basic C<delete> tests, see S29.
 
 =cut
 
-# L<S29/"Perl6::Arrays" /"delete"/>
+# L<S29/"Array"/=item delete>
+
 # W/ positive indices:
 {
   my @array = <a b c d>;
@@ -66,7 +65,7 @@ Basic C<delete> tests, see S29.
     "deletion of the same array element accessed by different indices (2)";
 }
 
-# L<S29/"Perl6::Hashes" /"delete"/>
+# L<S29/"Hash"/=item delete>
 my %hash = (a => 1, b => 2, c => 3, d => 4);
 is +%hash, 4, "basic sanity (2)";
 is ~%hash.delete("a"), "1",
@@ -76,3 +75,9 @@ is ~%hash.delete("c", "d"), "3 4",
   "deletion of hash elements returned the right values";
 is +%hash, 1, "deletion of hash elements";
 ok !defined(%hash{"a"}), "deleted hash elements are really deleted";
+
+{
+    my $a = 1;
+    try { delete $a; };
+    like($!, rx:P5/Argument is not a Hash or Array element or slice/, "expected message for mis-use of delete");
+}

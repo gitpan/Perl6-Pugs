@@ -1,10 +1,9 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # Basic &leave tests
-# L<S06/"The leave function">
+# L<S06/"The C<leave> function">
 
 plan 5;
 

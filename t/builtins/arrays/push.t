@@ -1,7 +1,7 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+
+# L<S29/"Array"/"=item push">
 
 =kwid
 
@@ -9,7 +9,7 @@ Push tests
 
 =cut
 
-plan 41;
+plan 42;
 
 # basic push tests
 {
@@ -108,6 +108,7 @@ plan 41;
     # This one is okay, as push will push 0 elems to a rw arrayref.
     lives_ok({ push([])  }, 'push() requires arguments (2)');
     dies_ok({ 42.push(3) }, '.push should not work on scalars');
+    dies_ok({ my @r; @r.push<hi>;  }, '.push<hi> should emit error.');
 }
 
 # Push with Inf arrays (waiting on answers to perl6-compiler email)

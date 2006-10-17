@@ -1,13 +1,12 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 # L<"http://use.perl.org/~autrijus/journal/25337">
 # my() declarations scopes lexically to the rest of the block; using $MY::x or
 # $::("x") in the block before the actual declaration is erroneous.
 
-plan 11;
+plan 12;
 
 {
   is(eval('my $x; my $x; 1'), 1, "test declare my() variable twice in same scope");
@@ -42,4 +41,19 @@ plan 11;
   is(do{1; my $a = 3; $a}, 3, 'do{1; my $a = 3; $a} works');
 }
 
-eval_ok('my $x = my $y = 0; 1', '"my $x = my $y = 0" parses');
+ok(eval('my $x = my $y = 0; 1'), '"my $x = my $y = 0" parses');
+
+
+{
+    my $test = "value should still be set for arg, even if there's a later my";
+    sub foo (*%p) {
+        is(%p<a>, 'b', $test, :todo<bug> );
+        my %p;
+    }
+    foo(a => 'b');
+}
+
+
+
+
+

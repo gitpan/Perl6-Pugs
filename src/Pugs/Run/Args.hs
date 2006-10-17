@@ -55,7 +55,7 @@ concatDashE xs = xs
 data Arg
     = File !String
     | Switch !Char
-    | Opt { optFlag :: !String, optArg :: !String }
+    | Opt { _optFlag :: !String, optArg :: !String }
     deriving Show
 
 procArg :: Arg -> [String]
@@ -171,8 +171,8 @@ desugarDashE ((Switch 'n'):args) = desugarDashE $
 
 -- -E is like -e, but not accessible as a normal parameter and used only
 -- internally:
---   "-e foo bar.p6" executes "foo" with @*ARGS[0] eq "bar.p6",
---   "-E foo bar.p6" executes "foo" and then bar.p6.
+--   "-e foo bar.pl" executes "foo" with @*ARGS[0] eq "bar.pl",
+--   "-E foo bar.pl" executes "foo" and then bar.pl.
 desugarDashE ((Opt "-M" mod):args)
     | (mod', (_:args)) <- break (== '=') mod
     = useWith $ mod' ++ " '" ++ escape args ++ "'.split(',')"

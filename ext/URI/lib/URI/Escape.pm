@@ -1,11 +1,10 @@
-#!/usr/bin/pugs
-use v6;
+use v6-alpha;
 
 module URI::Escape-0.6 {
     our %escapes;
     
     for 0..255 -> $char {
-        %escapes{chr($char)} = $char.as('%%%02X');
+        %escapes{chr($char)} = $char.fmt('%%%02X');
     }
     
     # XXX need to handle the Rule case -- must check that $0 is being set
@@ -42,14 +41,16 @@ module URI::Escape-0.6 {
         ...
     }
     
-    multi sub uri_unescape ($str is copy) returns Str is export(:DEFAULT) {
-        $str ~~ s:P5:g/%([0-9A-Fa-f]{2})/{ chr(:16($0)) }/;
-        
-        return $str;
-    }
+#    multi sub uri_unescape ($str is copy) returns Str is export(:DEFAULT) {
+#        $str ~~ s:P5:g/%([0-9A-Fa-f]{2})/{ chr(:16($0)) }/;
+#        
+#        return $str;
+#    }
     
-    multi sub uri_unescape (*@str is copy) returns Array is export(:DEFAULT) {
-        @str = @str.map:{ uri_unescape($_) };
+    multi sub uri_unescape (*@str is copy) returns List is export(:DEFAULT) {
+	for @str {
+	    s:P5:g/%([0-9A-Fa-f]{2})/{ chr(:16($0)) }/;
+	}
         
         return @str;
     }

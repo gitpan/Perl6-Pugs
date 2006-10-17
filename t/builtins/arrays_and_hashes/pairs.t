@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 30;
@@ -11,13 +10,13 @@ Basic C<pairs> tests, see S29.
 
 =cut
 
-# L<S29/"Perl6::Arrays" /"pairs"/>
+# L<S29/"Array"/=item pairs>
 {
   my @array = <a b c>;
   my @pairs;
   ok((@pairs = @array.pairs), "basic pairs on arrays");
   is +@pairs, 3,            "pairs on arrays returned the correct number of elems";
-  if(+@pairs != 3) {
+  if +@pairs != 3 {
     skip 6, "skipped tests which depend on a test which failed";
   } else {
     is @pairs[0].key,     0,  "key of pair returned by array.pairs was correct (1)";
@@ -30,13 +29,13 @@ Basic C<pairs> tests, see S29.
 }
 
 
-# L<S29/"Perl6::Hashes" /"pairs"/>
+# L<S29/"Hash"/=item pairs>
 {
   my %hash = (a => 1, b => 2, c => 3);
   my @pairs;
   ok((@pairs = %hash.pairs.sort), "sorted pairs on hashes");
   is +@pairs, 3,                "pairs on hashes returned the correct number of elems";
-  if(+@pairs != 3) {
+  if +@pairs != 3 {
     skip 6, "skipped tests which depend on a test which failed";
   } else {
     is @pairs[0].key,   "a",      "value of pair returned by hash.pairs was correct (1)";
@@ -54,7 +53,7 @@ Basic C<pairs> tests, see S29.
   my @pairs;
   ok((@pairs = $pair.pairs), "pairs on a pair");
   is +@pairs, 1,           "pairs on a pair returned one elem";
-  if(+@pairs != 1) {
+  if +@pairs != 1 {
     skip 2, "skipped tests which depend on a test which failed";
   } else {
     is @pairs[0].key,   "a", "key of pair returned by pair.pairs";
@@ -71,7 +70,7 @@ Basic C<pairs> tests, see S29.
   is( $hash_of_2_pairs.pairs.sort.map:{ .key~'='~.value }.join( ',' ), 'a=b,c=d', 
     "pairs() on 2-elem hash, 2-depth joined" );
   is( try { $hash_of_1_pair.pairs.sort.map:{ .key~'='~.value }.join( ',' ) }, 'a=b', 
-    "pairs() on 1-elem hash, 2-depth joined", :todo<bug> );
+    "pairs() on 1-elem hash, 2-depth joined" );
 }
 
 {
@@ -79,9 +78,9 @@ Basic C<pairs> tests, see S29.
 
     lives_ok { for %hash.pairs -> $pair {
         $pair.value += 100;
-    } }, 'aliases returned by %hash.pairs should be rw (1)', :todo<bug>;
+    } }, 'aliases returned by %hash.pairs should be rw (1)';
 
-    is %hash<b>, 102, 'aliases returned by %hash.pairs should be rw (2)', :todo<bug>;
+    is %hash<b>, 102, 'aliases returned by %hash.pairs should be rw (2)';
 }
 
 {

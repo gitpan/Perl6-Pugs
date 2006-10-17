@@ -1,5 +1,5 @@
 
-use v6;
+use v6-alpha;
 
 class Set;
 
@@ -18,7 +18,7 @@ sub set (*@contents) returns Set is export {
     return $set;
 }
 
-=for LATER
+=begin LATER
 
 # parsefail :(
 
@@ -35,50 +35,50 @@ method members() returns List {
     $!members.values;
 }
 
-method insert($self: *@items) returns Int {
+method insert(*@items) returns Int {
     my $pre_size = 0;
     if ( $!members.defined ) {
-        $pre_size = $self.size;
+        $pre_size = self.size;
         $!members = any($!members, @items);
     } else {
         $!members = any(@items);
     }
-    return ($self.size - $pre_size);
+    return (self.size - $pre_size);
 }
 
-method remove($self: *@items) returns Int {
+method remove(*@items) returns Int {
     my $pre_size = 0;
     if ( $!members.defined ) {
-        $pre_size = $self.size;
+        $pre_size = self.size;
         my $to_remove = none(@items);
         $!members = any($!members.values.grep:{ $_ === none($to_remove) });
     } else {
         $!members = any();
     }
-    return ($pre_size - $self.size);
+    return ($pre_size - self.size);
 }
 
-method includes($self: *@items) returns Bool {
+method includes(*@items) returns Bool {
     my $answer = (all(@items) === any($!members));
     return $answer;
 }
 
-method member($self: $item) returns Object {
-    return $item if $self.includes($item);
+method member($item) returns Object {
+    return $item if self.includes($item);
 }
 
 method size() returns Int {
     +$!members.values;
 }
 
-method invert($self: *@items) returns Int {
+method invert(*@items) returns Int {
     my int $rv;
     for @items -> $item {
-        if ( $self.includes($item) ) {
-            $self.remove($item);
+        if ( self.includes($item) ) {
+            self.remove($item);
             $rv++;
         } else {
-            $self.insert($item);
+            self.insert($item);
         }
     }
     return $rv;
@@ -88,73 +88,73 @@ method clear() {
     $!members = any();
 }
 
-method clone ($self:) returns Set {
+method clone () returns Set {
     my $set = Set.new;
-    $set.insert($self.members);
+    $set.insert(self.members);
     return $set;
 }
 
-method equal($self: Set $other) returns Bool {
+method equal(Set $other) returns Bool {
 
     # for some reason, directly returning this expression does not
     # yield the correct return value.
 
-    say "Comparing: "~$self.stringify~" vs "~$other.stringify if $DEBUG;
+    say "Comparing: "~self.stringify~" vs "~$other.stringify if $DEBUG;
     my $rv =
-        (($self.size == $other.size) &&
-              ($self.includes($other.members)));
+        ((self.size == $other.size) &&
+              (self.includes($other.members)));
     return $rv;
 }
 
-method not_equal($self: Set $other) returns Bool {
-    my $rv = !$self.equal($other);
+method not_equal(Set $other) returns Bool {
+    my $rv = !self.equal($other);
     return $rv;
 }
 
-method subset($self: Set $other) returns Bool {
-    my $rv = ($self.size <= $other.size && $other.includes($self.members));
+method subset(Set $other) returns Bool {
+    my $rv = (self.size <= $other.size && $other.includes(self.members));
     return $rv;
 }
-method proper_subset($self: Set $other) returns Bool {
-    my $rv = ($self.size < $other.size && $other.includes($self.members));
+method proper_subset(Set $other) returns Bool {
+    my $rv = (self.size < $other.size && $other.includes(self.members));
     return $rv;
 }
-method superset($self: Set $other) returns Bool {
-    my $rv = $other.subset($self);
+method superset(Set $other) returns Bool {
+    my $rv = $other.subset(self);
     return $rv;
 }
-method proper_superset($self: Set $other) returns Bool {
-    my $rv = ($other.proper_subset($self));
+method proper_superset(Set $other) returns Bool {
+    my $rv = ($other.proper_subset(self));
     return $rv;
 }
 
 method stringify() returns Str {
-    return("set(" ~ $?SELF.members.join(" ") ~ ")");
+    return("set({$!members.values})");
 }
 
 
-method union($self: Set $other) returns Set {
-    say "Self is "~$self.stringify~", other is "~$other.stringify if $DEBUG;
-    my $set = set($self.members, $other.members);
+method union(Set $other) returns Set {
+    say "Self is "~self.stringify~", other is "~$other.stringify if $DEBUG;
+    my $set = set(self.members, $other.members);
     say "Returning union of "~$set.stringify if $DEBUG;
     return $set;
 }
-method intersection($self: Set $other) returns Set {
-    my $rv = set($self.members.grep:{ $other.includes($_) });
+method intersection(Set $other) returns Set {
+    my $rv = set(self.members.grep:{ $other.includes($_) });
     return $rv;
 }
-method difference($self: Set $other) returns Set {
-    my $rv = set($self.members.grep:{ !$other.includes($_) });
+method difference(Set $other) returns Set {
+    my $rv = set(self.members.grep:{ !$other.includes($_) });
     return $rv;
 }
 
-method symmetric_difference($self: Set $other) returns Set {
+method symmetric_difference(Set $other) returns Set {
 
     # this one was particularly disturbing..
-    say "Symmetric difference: "~$self.stringify~" % "~$other.stringify if $DEBUG;
-    my $one_diff = $self.difference($other);
+    say "Symmetric difference: "~self.stringify~" % "~$other.stringify if $DEBUG;
+    my $one_diff = self.difference($other);
     say "One diff: "~$one_diff.stringify if $DEBUG;
-    my $two_diff = $other.difference($self);
+    my $two_diff = $other.difference(self);
     say "Two diff: "~$two_diff.stringify if $DEBUG;
     my $symm_diff = $one_diff.union($two_diff);
     say "Symm. diff: "~$symm_diff.stringify if $DEBUG;
@@ -214,11 +214,6 @@ multi sub *infix:<!=> (Set $one, Set $two) returns Set {
 }
 multi sub *infix:<≠> (Set $one, Set $two) returns Set {
     $one.not_equal($two);
-}
-
-# what will be used for stringify?
-method prefix:<~> (Set $self) returns Str {
-    ./stringify
 }
 
 multi sub *infix:«<» (Set $one, Set $two) returns Set {
@@ -287,17 +282,17 @@ multi sub *infix:<∉> ($member, Set $set) returns Bool {
 }
 
 # these methods are for overloaded operations with non-sets
-multi sub *infix:<+> (Set $one, *@args) returns Set {
-    $one.union(set(@args));
+multi sub *infix:<+> (Set $one, $arg) returns Set {
+    $one.union(set($arg));
 }
-multi sub *infix:<-> (Set $one, *@args) returns Set {
-    $one.difference(set(@args));
+multi sub *infix:<-> (Set $one, $arg) returns Set {
+    $one.difference(set($arg));
 }
-multi sub *infix:<*> (Set $one, *@args) returns Set {
-    $one.intersection(set(@args));
+multi sub *infix:<*> (Set $one, $arg) returns Set {
+    $one.intersection(set($arg));
 }
-multi sub *infix:<%> (Set $one, *@args) returns Set {
-    $one.symmetric_difference(set(@args));
+multi sub *infix:<%> (Set $one, $arg) returns Set {
+    $one.symmetric_difference(set($arg));
 }
 multi sub *infix:<~~> (Set $one, $member) returns Bool {
     $one.includes($member);
@@ -565,9 +560,11 @@ Stevan "stevan" Little (misc. ugly hacks to make things work for now)
 
 =head1 SEE ALSO
 
-L<Relation>.
+L<Set::Relation>.
 
 You might want to read the tests of Set.
 
 =cut
+
+
 

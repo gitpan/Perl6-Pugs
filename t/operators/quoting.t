@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 83;
+plan 111;
 
 my $foo = "FOO";
 my $bar = "BAR";
@@ -14,8 +13,8 @@ Tests quoting constructs as defined in L<S02/Literals>
 
 =todo
 
-* q:t - heredocs
-* q:0, q:b, and other interpolation levels
+* q:t - heredocs (done)
+* q:n, q:b, and other interpolation levels (half-done)
 * meaningful quotations (qx, rx, etc)
 * review shell quoting semantics of «»
 * arrays in «»
@@ -24,8 +23,41 @@ Tests quoting constructs as defined in L<S02/Literals>
 
 =cut
 
+# L<S02/Lexical Conventions/"bidirectional mirrorings" or "Ps/Pe properties">
+{
+    my $s = q{ foo bar };
+    is $s, ' foo bar ', 'string using q{}';
+}
 
-{ # backslash interpolation only single quotes L<S02/Literals /:single\s+Interpolate \\\\,/>
+{
+    my $s = q「this is a string」;
+    is $s, 'this is a string',
+        'q-style string with LEFT/RIGHT CORNER BRACKET';
+}
+
+{
+    my $s = q『blah blah blah』;
+    is $s, 'blah blah blah',
+        'q-style string with LEFT/RIGHT WHITE CORNER BRACKET';
+}
+
+{
+    my @list = 'a'..'c';
+
+    my $var = @list[ q（2） ];
+    is $var, 'c',
+        'q-style string with FULLWIDTH LEFT/RIGHT PARENTHESIS';
+
+    $var = @list[ q《0》];
+    is $var, 'a',
+        'q-style string with LEFT/RIGHT DOUBLE ANGLE BRACKET';
+
+    $var = @list[q〈1〉];
+    is $var, 'b', 'q-style string with LEFT/RIGHT ANGLE BRACKET';
+}
+
+# L<S02/Literals/":q" ":single" "Interpolate \\, \q and \'">
+{
     my @q = ();
     @q = (q/$foo $bar/);
     is(+@q, 1, 'q// is singular');
@@ -39,31 +71,48 @@ Tests quoting constructs as defined in L<S02/Literals>
     is(@q[0], '$foo $bar', 'and did not interpolate either');
 };
 
+# L<S02/Literals /That is.*?\(\).*?have no special significance/>
+# non interpolating single quotes with nested parens
+{
+    my @q = ();
+    @q = (q (($foo $bar)));
+    is(+@q, 1, 'q (()) is singular');
+    is(@q[0], '$foo $bar', 'and nests parens appropriately');
+};
+
 { # non interpolating single quotes with nested parens L<S02/Literals /That is.*?\(\).*?have no special significance/>
     my @q = ();
-    try { eval '@q = (q: (($foo $bar)))' };
-    is(+@q, 1, 'q: () is singular', :todo);
-    is(@q[0], '($foo $bar)', 'and nests parens appropriately', :todo);
+    @q = (q ( ($foo $bar)));
+    is(+@q, 1, 'q () is singular');
+    is(@q[0], ' ($foo $bar)', 'and nests parens appropriately');
 };
 
 { # q() is bad L<S02/Literals /Which is mandatory for parens/>
-    my @q = ();
-    @q = (q(($foo $bar)));
-    is(+@q, 0, 'nothing in @q, q() is not allowed', :todo);
+    my @q;
+    sub q { @_ }
+    @q = q($foo,$bar);
+    is(+@q, 2, 'q() is always sub call');
 };
 
-{ # adverb variation L<S02/Literals /:1/>
+{ # adverb variation L<S02/Literals /:q/>
     my @q = ();
-    @q = (q:1/$foo $bar/);
-    is(+@q, 1, "q:1// is singular");
+    @q = (q:q/$foo $bar/);
+    is(+@q, 1, "q:q// is singular");
     is(@q[0], '$foo $bar', "and again, non interpolating");
 };
 
-{ # nested parens
+{ # nested brackets
+    my @q = ();
+    @q = (q[ [$foo $bar]]);
+    is(+@q, 1, 'q[] is singular');
+    is(@q[0], ' [$foo $bar]', 'and nests brackets appropriately');
+};
+
+{ # nested brackets
     my @q = ();
     @q = (q[[$foo $bar]]);
-    is(+@q, 1, 'q[] is singular');
-    is(@q[0], '[$foo $bar]', 'and nests parens appropriately');
+    is(+@q, 1, 'q[[]] is singular');
+    is(@q[0], '$foo $bar', 'and nests brackets appropriately');
 };
 
 { # interpolating quotes L<S02/Literals /same as qq/>
@@ -80,10 +129,10 @@ Tests quoting constructs as defined in L<S02/Literals>
     is(@q[0], "FOO BAR", '"" interpolates');
 };
 
-{ # adverb variation L<S02/Literals /:2/>
+{ # adverb variation L<S02/Literals /:qq/>
     my @q = ();
-    @q = q:2/$foo $bar/;
-    is(+@q, 1, "q:2// is singular");
+    @q = q:qq/$foo $bar/;
+    is(+@q, 1, "q:qq// is singular");
     is(@q[0], "FOO BAR", "blah blah interp");
 };
 
@@ -108,7 +157,7 @@ Tests quoting constructs as defined in L<S02/Literals>
 
 { # quote with \0 as delimiters L<news:20050101220112.GF25432@plum.flirble.org>
     my @q = ();
-    try { eval "\@q = (q\0foo bar\0)" };
+    eval "\@q = (q\0foo bar\0)";
     is(+@q, 1, "single quote with \\0 delims are parsed ok");
     is(@q[0], "foo bar", "and return correct value");
 };
@@ -149,15 +198,15 @@ Tests quoting constructs as defined in L<S02/Literals>
 { # whitespace sep aration does not break quote constructor 
   # L<S02/Literals /Whitespace is allowed between the "q" and its adverb: q :w /..././>
     my @q = ();
-    try { eval '@q = (q :w /$foo $bar/)' };
-    is(+@q, 2, "q :w // is the same as q:w//",:todo<bug>);
-    is(@q[0], '$foo', "...",:todo<bug>);
-    is(@q[1], '$bar', "...",:todo<bug>);
+    @q = (q :w /$foo $bar/);
+    is(+@q, 2, "q :w // is the same as q:w//");
+    is(@q[0], '$foo', "...");
+    is(@q[1], '$bar', "...");
 };
 
 
 { # qq:w,Interpolating quote constructor with words adverb 
-  # L<S02/Literals /Split result on words (no quote protection)/>
+  # L<S02/Literals /"Split result on words (no quote protection)">
     my (@q1, @q2) = ();
     @q1 = qq:w/$foo "gorch $bar"/;
     @q2 = qq:words/$foo "gorch $bar"/;
@@ -170,23 +219,31 @@ Tests quoting constructs as defined in L<S02/Literals>
 };
 
 { # qq:ww, interpolating L<S02/Literals /double angles do interpolate/>
-  # L<S02/Literals /Split result on words (with quote protection)/>
+  # L<S02/Literals/"implicit split" "shell-like fashion">
     my (@q1, @q2, @q3, @q4) = ();
     @q1 = qq:ww/$foo "gorch $bar"/;
     @q2 = «$foo "gorch $bar"»; # french
     @q3 = <<$foo "gorch $bar">>; # texas
     @q4 = qq:quotewords/$foo "gorch $bar"/; # long
 
-    is(+@q1, 2, 'qq:ww// correct number of elements',:todo<bug>);
-    is(+@q2, 2, 'french double angle',:todo<bug>);
-    is(+@q3, 2, 'texas double angle',:todo<bug>);
-    is(+@q4, 2, 'long form',:todo<bug>);
+    is(+@q1, 2, 'qq:ww// correct number of elements');
+    is(+@q2, 2, 'french double angle');
+    is(+@q3, 2, 'texas double angle');
+    is(+@q4, 2, 'long form');
 
-    is(~@q1, 'FOO gorch BAR', "explicit quote word interpolates", :todo<bug>);
-    is(~@q2, 'FOO gorch BAR', "output is the same as french",:todo<bug>);
-    # L<S02/Literals /the built-in «...» quoter automatically does interpolation equivalent to qq:ww/.../ />;
-    is(~@q3, 'FOO gorch BAR', ", texas quotes",:todo<bug>);
-    is(~@q4, 'FOO gorch BAR', ", and long form",:todo<bug>);
+    is(~@q1, 'FOO gorch BAR', "explicit quote word interpolates");
+    is(~@q2, 'FOO gorch BAR', "output is the same as french");
+
+    # L<S02/Literals/"the built-in «...» quoter automatically does interpolation equivalent to qq:ww/.../">
+    is(~@q3, 'FOO gorch BAR', ", texas quotes");
+    is(~@q4, 'FOO gorch BAR', ", and long form");
+};
+
+{
+    #L<S02/Literals/"relationship" "single quotes" "double angles">
+    # Pugs was having trouble with this.  Fixed in r12785.
+    my ($x, $y) = <a b>;
+    ok(«$x $y» === <a b>, "«$x $y» interpolation works correctly");
 };
 
 { # qw, interpolating, shell quoting L<S02/Literals /respects quotes in a shell-like fashion/>
@@ -199,37 +256,35 @@ Tests quoting constructs as defined in L<S02/Literals>
     is(@q1[3], "BAR", '$bar was interpolated');
 
     @q2 = «$foo "$gorch" '$bar'»;
-    is(+@q2, 3, "3 elementes in sub quoted «» list", :todo);
-    is(@q2[1], $gorch, 'second element is both parts of $gorch, interpolated', :todo);
-    is(@q2[2], '$bar', 'single quoted $bar was not interpolated', :todo);
+    is(+@q2, 3, "3 elementes in sub quoted «» list");
+    is(@q2[1], $gorch, 'second element is both parts of $gorch, interpolated');
+    is(@q2[2], '$bar', 'single quoted $bar was not interpolated');
 };
 
 { # qq:t L<S02/Literals /Heredocs are no longer written/>
     my @q = ();
 
-    try { eval '@q = qq:t/FOO/;
+    @q = qq:t/FOO/;
 blah
 $bar
 blah
 $foo
 FOO
-    ' };
 
-    is(+@q, 1, "q:t// is singular", :todo);
-    is(@q[0], "blah\nBAR\nblah\nFOO\n", "here doc interpolated", :todo);
+    is(+@q, 1, "q:t// is singular");
+    is(@q[0], "blah\nBAR\nblah\nFOO\n", "here doc interpolated");
 };
 
 { # q:t indented L<S02/Literals /Here docs allow optional whitespace/>
     my @q = ();
 
-    try { eval '@q = q:t/FOO/;
+    @q = q:t/FOO/;
         blah blah
         $foo
         FOO
-    ' };
 
-    is(+@q, 1, "q:t// is singular, also when indented", :todo);
-    is(@q[0], "blah blah\n\$foo\n", "indentation stripped", :todo);
+    is(+@q, 1, "q:t// is singular, also when indented");
+    is(@q[0], "blah blah\n\$foo\n", "indentation stripped");
 };
 
 { # q:to backslash bug
@@ -242,18 +297,30 @@ FOO
         is(@q[0], "yoink\\n\nsplort\\n\n", "backslashes");
 }
 
-{ # q:0 L<S02/Literals /No escapes at all/>
+{ # q:n L<S02/Literals /No escapes at all/>
     my @q = ();
     
     my $backslash = "\\";
 
-    @q = (q:0/foo\\bar$foo/);
+    @q = (q:n/foo\\bar$foo/);
 
-    is(+@q, 1, "q:0// is singular");
+    is(+@q, 1, "q:n// is singular");
     is(@q[0], "foo\\\\bar\$foo", "special chars are meaningless"); # double quoting is to be more explicit
 };
 
-{ # <<:Pair>> L<S02/Literals /"Pair" notation is also recognized inside/>
+{ # q:n L<S02/Literals /No escapes at all/>
+    my @q = ();
+    
+    my $backslash = "\\";
+
+    @q = (qn/foo\\bar$foo/);
+
+    is(+@q, 1, "qn// is singular");
+    is(@q[0], "foo\\\\bar\$foo", "special chars are meaningless"); # double quoting is to be more explicit
+};
+
+{ # L<S02/Literals/"Pair" notation is also recognized inside>
+  # <<:Pair>>
     diag "XXX: pair.perl is broken atm so these tests may be unreliable";
 
     my @q = <<:p(1)>>;
@@ -272,16 +339,112 @@ FOO
 };
 
 { # weird char escape sequences
-    is("\d97", "a");
-    is("\d102oo", "foo");
-    is("\d123", chr 123);
-    is("\d[12]3", chr(12) ~ "3");
-    is("\d[12] 3", chr(12) ~ " 3");
+    is("\d97", "a", '\d97 is "a"');
+    is("\d102oo", "foo", '\d102 is "f", works next to other letters');
+    is("\d123", chr 123, '"\dXXX" and chr XXX are equivalent');
+    is("\d[12]3", chr(12) ~ "3", '\d[12]3 is the same as chr(12) concatenated with "3"');
+    is("\d[12] 3", chr(12) ~ " 3", 'respects spaces when interpolating a space character');
 
-    is("\x41", "A");
-    is("\o101", "A");
+    is("\x41", "A", 'hex interpolation - \x41 is "A"');
+    is("\o101", "A", 'octal interpolation - \o101 is also "A"' );
 
-    is("\c@", "\0");
-    is("\cA", chr 1);
-    is("\cZ", chr 26);
+    is("\c@", "\0", 'Unicode code point "@" converts correctly to "\0"');
+    is("\cA", chr 1, 'Unicode "A" is #1!');
+    is("\cZ", chr 26, 'Unicode "Z" is chr 26 (or \d26)');
+}
+
+{ # simple test for nested-bracket quoting, per S02
+    my $hi = q<<hi>>;
+    is($hi, "hi", 'q<<hi>> is "hi"');
+}
+
+
+# L<S02/"Literals"/"for user-defined quotes">
+# q:t
+{
+    my $t;
+    $t = q:t /STREAM/;
+Hello, World
+STREAM
+
+    is $t, "Hello, World\n", "Testing for q:t operator.";
+
+$t = q:t /结束/;
+Hello, World
+结束
+
+    is $t, "Hello, World\n", "Testing for q:t operator. (utf8)";
+}
+
+# q:n
+{
+    my $s1 = "hello";
+    my $t1 = q:n /$s1, world/;
+    is $t1, '$s1, world', "Testing for q:n operator.";
+
+    my $s2 = "你好";
+    my $t2 = q:n /$s2, 世界/;
+    is $t2, '$s2, 世界', "Testing for q:n operator. (utf8)";
+}
+
+# q:b
+{
+    my $t = q:b /\n\n\n/;
+    is $t, "\n\n\n", "Testing for q:b operator.";
+}
+
+# q:x
+{
+    is q:x/echo hello/, "hello\n", "Testing for q:x operator.";
+}
+# utf8
+{
+    # 一 means "One" in Chinese.
+    is q:x/echo 一/, "一\n", "Testing for q:x operator. (utf8)";
+}
+
+# L<S02/Literals/"Interpolate % vars">
+# q:h
+{
+    # Pugs can't parse q:h currently.
+    my %t = (a => "perl", b => "rocks");
+    my $s;
+    $s = q:h /%t<>/;
+    is $s, ~%t, "Testing for q:h operator.";
+}
+
+# q:f
+{
+    sub f { "hello" };
+    my $t = q:f /&f(), world/;
+    is $t, f() ~ ", world", "Testing for q:f operator.";
+
+    sub f_utf8 { "你好" };
+    $t = q:f /&f_utf8(), 世界/;
+    is $t, f_utf8() ~ ", 世界", "Testing for q:f operator. (utf8)";
+}
+
+# q:c
+{
+    sub f { "hello" };
+    my $t = q:c /{f}, world/;
+    is $t, f() ~ ", world", "Testing for q:c operator.";
+}
+
+# q:a
+{
+    my @t = qw/a b c/;
+    my $s = q:a /@t[]/;
+    is $s, ~@t, "Testing for q:a operator.";
+}
+
+# q:s
+{
+    my $s = "someone is laughing";
+    my $t = q:s /$s/;
+    is $t, $s, "Testing for q:s operator.";
+
+    my $s = "有人在笑";
+    my $t = q:s /$s/;
+    is $t, $s, "Testing for q:s operator. (utf8)";
 }

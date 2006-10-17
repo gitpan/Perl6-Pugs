@@ -35,7 +35,7 @@ const char pugs_guts_code[] =
 
 "package pugs::guts;\n"
 "our @ISA=('pugs');\n"
-"sub Block { my ($class, $val) = @_;\n"
+"sub Code { my ($class, $val) = @_;\n"
 "            sub { pugs::guts::invoke($val, undef, @_) } }\n"
 
 "sub Array { my ($class, $val) = @_;\n"
@@ -48,33 +48,48 @@ oRZ"   warn 'returning '.$array;\n"
 oRZ"   warn 'returning '.$hash;\n"
 "            return $hash; }\n\n"
 
+"sub Pair { goto &Hash }\n"
+
+"sub Scalar { my ($class, $val) = @_;\n"
+"           my $scalar; tie $$scalar, 'pugs::scalar', $val;\n"
+oRZ"   warn 'returning '.$scalar;\n"
+"            return $scalar; }\n\n"
+
+"sub Handle { my ($class, $val) = @_;\n"
+"           tie *FH, 'pugs::handle', $val;\n"
+oRZ"   warn 'returning '.$handle;\n"
+"            return *FH; }\n\n"
+
 "our $AUTOLOAD;\n"
 "sub AUTOLOAD { my $type = $AUTOLOAD; $type =~ s/.*:://;\n"
-"               return if $type =~ m/^[A-Z]*$/; die 'unhandled supported type: '.$type } \n"
+"               return if $type =~ m/^[A-Z]*$/; die 'unhandled support type: '.$type } \n"
 oRZ"warn 'compiled .'.__PACKAGE__;\n\n"
 
 "package pugs::array;\n"
 
 "our $AUTOLOAD;\n"
+
 "sub AUTOLOAD { my $type = $AUTOLOAD; $type =~ s/.*:://;\n"
-"               warn 'unhandled supported: '.$type } \n"
+"               warn 'unhandled support type: '.$type } \n"
 
 "sub TIEARRAY {\n"
 "       my ($class, $val) = @_;\n"
 "       bless \\$val, $class; }\n\n"
 
+"sub DEREF { ${$_[0]} }\n"
+
 "sub STORE {\n"
 "       my ($self, $index, $elem) = @_;\n"
 oRZ"    warn 'store! '.$elem;\n"
-"       pugs::guts::eval_apply('sub ($x is rw, $y, $z) { $x[$y] = $z;\n"
+"       pugs::guts::eval_apply('sub ($x is rw, $y is rw, $z is rw) { $x[$y] = $z;\n"
 oRZ"                                                     warn $x\n"
 "                               }', $$self, $index, $elem) }\n\n"
 
 "sub PUSH {\n"
-"       my ($self, $elem) = @_;\n"
-"       pugs::guts::eval_apply('sub ($x is rw, $z) { $x.push($z);\n"
+"       my ($self, @elems) = @_;\n"
+"       pugs::guts::eval_apply('sub ($x is rw, @*y) { $x.push(@y);\n"
 oRZ"                                                 warn $x\n"
-"                               }', $$self, $elem) }\n\n"
+"                               }', $$self, @elems) }\n\n"
 
 "sub FETCHSIZE {\n"
 "       my ($self) = @_;\n"
@@ -95,11 +110,34 @@ oRZ"    warn 'FETCH: '.$index;\n"
 
 "our $AUTOLOAD;\n"
 "sub AUTOLOAD { my $type = $AUTOLOAD; $type =~ s/.*:://;\n"
-"               warn 'unhandled supported: '.$type } \n"
+"               warn 'unhandled support type: '.$type } \n"
 
 "sub TIEHASH {\n"
 "       my ($class, $val) = @_;\n"
 "       bless [$val,0], $class; }\n\n"
+
+"sub DEREF { $_[0][0] }\n"
+
+"sub FETCH {\n"
+"       my ($self, $index) = @_;\n"
+oRZ"    warn 'FETCH: '.$index;\n"
+"       pugs::guts::eval_apply('sub ($x, $y) { $x.{$y} }', $self->[0], $index) }\n"
+
+"sub DELETE {\n"
+"       my ($self, $index) = @_;\n"
+oRZ"    warn 'DELETE: '.$index;\n"
+"       pugs::guts::eval_apply('sub ($x, $y) { $x.delete($y) }', $self->[0], $index) }\n"
+
+"sub CLEAR {\n"
+"       my ($self) = @_;\n"
+"       pugs::guts::eval_apply('sub ($x) { $x.delete($x.keys) }', $self->[0]) }\n"
+
+"sub STORE {\n"
+"       my ($self, $index, $elem) = @_;\n"
+oRZ"    warn 'store! '.$elem;\n"
+"       pugs::guts::eval_apply('sub ($x is rw, $y, $z) { $x{$y} = $z;\n"
+oRZ"                                                     warn $x\n"
+"                               }', $self->[0], $index, $elem) }\n\n"
 
 "sub FIRSTKEY {\n"
 "       my ($self) = @_;\n"
@@ -113,6 +151,55 @@ oRZ"       warn $ret;\n"
 "       return undef if $self->[1] > $#{$self->[2]};"
 "       $self->[2]->[$self->[1]++]; }"
 
+"package pugs::scalar;\n"
+
+"our $AUTOLOAD;\n"
+"sub AUTOLOAD { my $type = $AUTOLOAD; $type =~ s/.*:://;\n"
+"               warn 'unhandled support type: '.$type } \n"
+
+"sub TIESCALAR {\n"
+"       my ($class, $val) = @_;\n"
+"       bless \\$val, $class; }\n\n"
+
+"sub DEREF { ${$_[0]} }\n"
+
+"sub FETCH {\n"
+"       my ($self) = @_;\n"
+"       pugs::guts::eval_apply('sub ($x is rw) { $$x }', $$self) }\n"
+
+"sub STORE {\n"
+"       my ($self, $val) = @_;\n"
+"       pugs::guts::eval_apply('sub ($x is rw, $y) { $$x = $y;\n"
+oRZ"                                                     warn $x\n"
+"                               }', $$self, $val) }\n\n"
+
+"package pugs::handle;\n"
+
+"our $AUTOLOAD;\n"
+"sub AUTOLOAD { my $type = $AUTOLOAD; $type =~ s/.*:://;\n"
+"               warn 'unhandled support type: '.$type } \n"
+
+"sub TIEHANDLE {\n"
+"       my ($class, $val) = @_;\n"
+"       bless \\$val, $class; }\n\n"
+
+"sub DEREF { ${$_[0]} }\n"
+
+"sub PRINT {\n"
+"       my ($self, @vals) = shift;\n"
+"       pugs::guts::eval_apply('sub ($x, *@y) { $x.print(@y) }', $$self, @vals) }\n"
+
+"sub READLINE {\n"
+"       my ($self) = @_;\n"
+"       pugs::guts::eval_apply('sub ($x) { ~($x.readline);\n"
+oRZ"                                                     warn $x\n"
+"                               }', $$self) }\n\n"
+
+"sub GETC {\n"
+"       my ($self) = @_;\n"
+"       pugs::guts::eval_apply('sub ($x) { ~($x.getc);\n"
+oRZ"                                                     warn $x\n"
+"                               }', $$self) }\n\n"
 
 oRZ"warn 'compiled';\n"
 "1;\n";
@@ -135,11 +222,12 @@ XS(_pugs_guts_invoke) {
         fullname = SvPV_nolen(sv);
         method = strrchr(fullname, ':');
         method = method ? method+1 : fullname;
-        val = pugs_PvToVal(method);
+        val = pugs_PvnToVal(method, strlen(method));
     }
     inv = SvOK(ST(1)) ? pugs_SvToVal(ST(1)) : NULL;
 
-    stack = (Val **)malloc(sizeof(Val*)*items-1);
+    New(6, stack, items, Val*);
+
     for (i = 2; i < items; ++i) {
         stack[i-2] = pugs_SvToVal(ST(i));
     }
@@ -147,7 +235,7 @@ XS(_pugs_guts_invoke) {
     
     ST(0) = pugs_Apply(val, inv, stack, GIMME_V);
     /* sv_dump (ret); */
-    free (stack);
+    Safefree(stack);
     
     XSRETURN(1);
 }
@@ -163,7 +251,8 @@ XS(_pugs_guts_eval_apply) {
 
     val = pugs_Eval(SvPV_nolen(ST(0)));
 
-    stack = (Val **)malloc(sizeof(Val*)*items-1);
+    New(6, stack, items, Val*);
+
     for (i = 1; i < items; ++i) {
 #if PERL5_EMBED_DEBUG
         fprintf(stderr, "put into stack: %s\n", SvPV_nolen(ST(i)));
@@ -173,7 +262,7 @@ XS(_pugs_guts_eval_apply) {
     stack[i-1] = NULL;
     
     ST(0) = pugs_Apply(val, NULL, stack, GIMME_V);
-    free (stack);
+    Safefree(stack);
     
     XSRETURN(1);
 }
@@ -309,13 +398,32 @@ perl5_SvTRUE ( SV * sv )
 {
     bool rv;
     rv = SvTRUE(sv);
-    return rv;
+    return(rv ? 1 : 0);
+}
+
+bool
+perl5_SvROK ( SV * sv )
+{
+    bool rv;
+    sv_dump(sv);
+    rv = SvROK(sv);
+    return(rv ? 1 : 0);
 }
 
 SV *
-perl5_newSVpv ( char * pv )
+perl5_sv_undef ()
 {
-    return(newSVpv(pv, 0));
+    return(&PL_sv_undef);
+}
+
+SV *
+perl5_newSVpvn ( char * pv, int len )
+{
+    SV *sv = newSVpvn(pv, len);
+#ifdef SvUTF8_on
+    SvUTF8_on(sv);
+#endif
+    return(sv);
 }
 
 SV *
@@ -357,20 +465,36 @@ perl5_apply(SV *sub, SV *inv, SV** args, void *env, int cxt)
     PUTBACK;
 
     if (inv != NULL) {
-        count = call_method(SvPV_nolen(sub), cxt);
+        count = call_method(SvPV_nolen(sub), cxt|G_EVAL);
     }
     else {
-        count = call_sv(sub, cxt);
+        count = call_sv(sub, cxt|G_EVAL);
     }
 
     SPAGAIN;
 
-    Newz(42, out, count+1, SV*);
-
-    for (i=0; i<count; ++i) {
-        out[i] = newSVsv(POPs);
+    if (SvTRUE(ERRSV)) {
+        Newz(42, out, 3, SV*);
+        if (SvROK(ERRSV)) {
+            out[0] = newSVsv(ERRSV);
+            out[1] = NULL;
+        }
+        else {
+            out[0] = ERRSV;
+            out[1] = ERRSV; /* for Haskell-side to read PV */
+        }
+        out[2] = NULL;
     }
-    out[count] = NULL;
+    else {
+        Newz(42, out, count+2, SV*);
+
+        out[0] = NULL;
+
+        for (i=count; i>0; --i) {
+            out[i] = newSVsv(POPs);
+        }
+        out[count+1] = NULL;
+    }
 
     PUTBACK;
     FREETMPS;
@@ -401,6 +525,9 @@ perl5_eval(char *code, void *env, int cxt)
     pugs_setenv(env);
 
     sv = newSVpv(code, 0);
+#ifdef SvUTF8_on
+    SvUTF8_on(sv);
+#endif
     eval_sv(sv, cxt);
     SvREFCNT_dec(sv);
 

@@ -1,9 +1,7 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
-plan 11;
+plan 13;
 
 use Test::Builder::Test;
 
@@ -14,7 +12,7 @@ my $skip_test = Test::Builder::Test::Skip.new(
     reason      => 'reason for skipping'
 );
 
-is( $skip_test.ref, ::Test::Builder::Test::Skip,
+is( $skip_test.WHAT, ::Test::Builder::Test::Skip,
     'new() should return a Test::Builder::Test::Skip instance' );
 
 is( $skip_test.number(), 1, 'number() should return the test number' );
@@ -43,7 +41,7 @@ is( $skip_test.report(), 'not ok 1 #skip reason for skipping',
 
 my %status = $skip_test.status();
 
-is( +( keys %status ), 4, 'status() should return a hash')
+is( +( keys %status ), 4, 'status() should return a hash');
 is( %status<passed>,   1, '... with a passed key set to true');
 is( %status<skip>,     1, '... a skip key set to true'                 );
 

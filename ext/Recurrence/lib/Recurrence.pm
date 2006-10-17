@@ -1,9 +1,9 @@
-use v6;
+use v6-alpha;
 
 use Set::Symbols;  # unicode operators
 use Span;          # stringify()
 
-=for TODO
+=begin TODO
 
     * make a Recurrence::Span class - elements can be spans
 
@@ -134,10 +134,10 @@ method intersection ($self: $set ) {
 
 method complement ($self: ) {
     return $self.new( 
-        closure_next =>        &{ $self._get_complement_next }, 
-        closure_previous =>    &{ $self._get_complement_previous }, 
-        complement_next =>     &{ $self.closure_next },
-        complement_previous => &{ $self.closure_previous },
+        closure_next =>        $self._get_complement_next, 
+        closure_previous =>    $self._get_complement_previous, 
+        complement_next =>     $self.closure_next,
+        complement_previous => $self.closure_previous,
         universe =>            $self.get_universe,
     );
 }
@@ -152,13 +152,17 @@ method grep ($set: Code $select ) {
     return $set.new( 
         closure_next =>
             sub ($x is copy) { 
-                loop{ $x = &{ $set.closure_next }($x); 
-                      return $x if $x==Inf || $select($x) } 
+                loop {
+		    $x = $set.closure_next()($x); 
+		    return $x if $x==Inf || $select($x)
+		} 
             },
         closure_previous =>
             sub ($x is copy) { 
-                loop{ $x = &{ $set.closure_previous }($x); 
-                      return $x if $x==-Inf || $select($x) } 
+                loop {
+		    $x = $set.closure_previous()($x); 
+		    return $x if $x==-Inf || $select($x)
+		} 
             },
         # -- use the default generated closures
         # complement_next =>     sub ($x) {...},
@@ -169,10 +173,10 @@ method grep ($set: Code $select ) {
 
 method negate ($set: ) {
     return $set.new( 
-        closure_next =>        sub ($x) { - &{ $set.closure_previous }( -$x ) }, 
-        closure_previous =>    sub ($x) { - &{ $set.closure_next }( -$x ) }, 
-        complement_next =>     sub ($x) { - &{ $set._get_complement_previous }( -$x ) },
-        complement_previous => sub ($x) { - &{ $set._get_complement_next }( -$x ) },
+        closure_next =>        sub ($x) { - $set.closure_previous()( -$x ) }, 
+        closure_previous =>    sub ($x) { - $set.closure_next()( -$x ) }, 
+        complement_next =>     sub ($x) { - $set._get_complement_previous()( -$x ) },
+        complement_previous => sub ($x) { - $set._get_complement_next()( -$x ) },
         universe =>            $set.get_universe,
     );
 }
@@ -180,15 +184,15 @@ method negate ($set: ) {
 # --------- scalar functions -----------
 
 method next ( $x ) { 
-    return $.closure_next( $x );
+    return $.closure_next()( $x );
 }
 
 method previous ( $x ) { 
-    return $.closure_previous( $x );
+    return $.closure_previous()( $x );
 }
 
 method current ( $x ) {
-    return $.closure_next( $.closure_previous( $x ) );
+    return $.closure_next()( $.closure_previous()( $x ) );
 }
 
 method contains ($self: $x ) returns bool {
@@ -222,8 +226,8 @@ method end ($self: ) {
 submethod _get_union ( $closure1, $closure2, $direction ) {
     return $closure1 if $closure1 === $closure2;
     return sub ( $x is copy ) {
-        my $n1 = &{ $closure1 }( $x );
-        my $n2 = &{ $closure2 }( $x );
+        my $n1 = $closure1( $x );
+        my $n2 = $closure2( $x );
         return ( $n1 <=> $n2 ) == $direction ?? $n1 !! $n2;
     }
 }
@@ -232,12 +236,12 @@ submethod _get_intersection ( $closure1, $closure2, $closure3, $closure4 ) {
     return $closure1 if $closure1 === $closure3;
     return sub ( $x ) {
         my $n1;
-        my $n2 = &{ $closure3 }( $x );
+        my $n2 = $closure3( $x );
         for ( 0 .. $!arbitrary_limit )
         {
-            $n1 = &{ $closure1 }( &{ $closure2 }( $n2 ) );
+            $n1 = $closure1( $closure2( $n2 ) );
             return $n1 if $n1 == $n2;
-            $n2 = &{ $closure3 }( &{ $closure4 }( $n1 ) );
+            $n2 = $closure3( $closure4( $n1 ) );
         }
         warn "Arbitrary limit exceeded when calculating intersection()";
     }
@@ -250,9 +254,9 @@ submethod _get_complement_next ($self: ) {
         sub ( $x is copy ) {
             for ( 0 .. $!arbitrary_limit )
             {
-                $x = &{ $.universe.closure_next }( $x );
+                $x = $.universe.closure_next()( $x );
                 return $x if $x == Inf || $x == -Inf ||
-                             $x != &{ $self.closure_previous }( &{ $self.closure_next }( $x ) );
+                             $x != $self.closure_previous()( $self.closure_next()( $x ) );
             }
             warn "Arbitrary limit exceeded when calculating complement()";
         };
@@ -265,9 +269,9 @@ submethod _get_complement_previous ($self: ) {
         sub ( $x is copy ) {
             for ( 0 .. $!arbitrary_limit )
             {
-                $x = &{ $.universe.closure_previous }( $x );
+                $x = $.universe.closure_previous()( $x );
                 return $x if $x == Inf || $x == -Inf ||
-                             $x != &{ $self.closure_next }( &{ $self.closure_previous }( $x ) );
+                             $x != $self.closure_next()( $self.closure_previous()( $x ) );
             }
             warn "Arbitrary limit exceeded when calculating complement()";
         };

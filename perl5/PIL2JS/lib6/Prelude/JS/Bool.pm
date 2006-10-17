@@ -24,12 +24,12 @@ sub infix:<^^>   ($a, $b) is primitive {
   elsif !$a and  $b { $b }
   else              { ?0 }
 }
-our &infix:<xor> = &infix:<^^>;
+our &infix:<xor> ::= &infix:<^^>;
 
 sub infix:<?|>   ($a, $b)      is primitive { ?($a || $b) }
 
 sub infix:<//>   ($a, Code $b) is primitive { defined($a) ?? $a !! $b() }
-sub infix:<||>   ($a, Code $b) is primitive { $a ?? $a !! $b() }
+sub infix:<||>   ($a, Code $b999999) is primitive { $a ?? $a !! $b999999() }
 sub infix:<&&>   ($a, Code $b) is primitive { $a ?? $b() !! $a }
 sub infix:<err>  ($a, Code $b) is primitive { infix:<//>($a, $b()) }
 sub infix:<or>   ($a, Code $b) is primitive { infix:<||>($a, $b()) }

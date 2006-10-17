@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 
 use Test;
 plan 23;
@@ -11,7 +10,8 @@ Basic C<exists> tests, see S29.
 
 =cut
 
-# L<S29/"Perl6::Arrays" /"exists"/>
+# L<S29/"Array"/=item exists>
+
 my @array = <a b c d>;
 ok @array.exists(0),    "exists(positive index) on arrays (1)";
 ok @array.exists(1),    "exists(positive index) on arrays (2)";
@@ -26,7 +26,7 @@ ok @array.exists(-4),   "exists(negative index) on arrays (4)";
 ok !@array.exists(-5),  "exists(negative index) on arrays (5)";
 ok !@array.exists(-42), "exists(negative index) on arrays (6)";
 
-# L<S29/"Perl6::Hashes" /"exists"/>
+# L<S29/"Hash"/=item exists>
 my %hash = (a => 1, b => 2, c => 3, d => 4);
 ok %hash.exists("a"),   "exists on hashes (1)";
 ok !%hash.exists("42"), "exists on hashes (2)";
@@ -45,7 +45,7 @@ ok !%hash.exists("42"), "exists on hashes (2)";
   bar( $empty_hash{'y'} );
   is( $empty_hash.pairs.sort.join( ',' ), '', "empty hash stays same when read from (3)" );
   my $ref = \( $empty_hash{'z'} );
-  is( $empty_hash.pairs.sort.join( ',' ), '', "taking a reference to a hash element does not auto-vivify the element", :todo<bug> );
+  is( $empty_hash.pairs.sort.join( ',' ), '', "taking a reference to a hash element does not auto-vivify the element");
   foo( $empty_hash{'x'} );
   is( $empty_hash.pairs.sort.join( ',' ), '', "empty hash stays same when read from (4)", :todo<bug> );
 

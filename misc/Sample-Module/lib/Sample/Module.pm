@@ -1,5 +1,5 @@
+use v6-alpha;
 module Sample::Module-0.0.1;
-use v6;
 
 sub greeting(Str $name) returns Str is export {
     "hello, $name";

@@ -1,15 +1,14 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+plan 14;
+
+# L<S29/"Control::Basic"/"=item die">
 
 =pod
 
 Tests for the die() builtin
 
 =cut
-
-plan 14;
 
 ok(!try { die "foo"; 1 });
 my $error = $!;

@@ -1,5 +1,4 @@
-#!/usr/bin/pugs
-use v6;
+use v6-alpha;
 
 # External packages used by packages in this file, that don't export symbols:
 use Locale::KeyedText-(1.72.0...);
@@ -13,7 +12,7 @@ my Str $EMPTY_STR is readonly = q{};
 ###########################################################################
 ###########################################################################
 
-package Rosetta::Model-0.724.0 {
+package Rosetta::Model-0.724.1 {
     # Note: This given version applies to all of this file's packages.
 } # package Rosetta::Model
 
@@ -40,12 +39,12 @@ class Rosetta::Model::Document {
 
 submethod BUILD (Hash :@root_nodes? = []) {
 
-    $?SELF!_assert_arg_rt_nd_aoh( 'new', ':@root_nodes?', @root_nodes );
+    self!_assert_arg_rt_nd_aoh( 'new', ':@root_nodes?', @root_nodes );
 
     @!all_nodes  = [];
     @!root_nodes = [];
     for @root_nodes -> $root_node {
-        Rosetta::Model::Node.new( document => $?SELF, *%{$root_node} );
+        Rosetta::Model::Node.new( document => self, |%$root_node );
     }
 
     return;
@@ -68,18 +67,18 @@ my method _die_with_msg (Str $msg_key!, Any %msg_vars? is ref = {}) {
 }
 
 my method _assert_arg_rt_nd_aoh (Str $meth!, Str $arg!, Str @val!) {
-    $?SELF!_die_with_msg( 'LKT_ARG_UNDEF',
+    self!_die_with_msg( 'LKT_ARG_UNDEF',
             { 'METH' => $meth, 'ARG' => $arg } )
         if !@val.defined;
     for @val -> $val_elem {
-        $?SELF!_die_with_msg( 'LKT_ARG_ARY_ELEM_UNDEF',
+        self!_die_with_msg( 'LKT_ARG_ARY_ELEM_UNDEF',
                 { 'METH' => $meth, 'ARG' => $arg } )
             if !$val_elem.defined;
-        $?SELF!_die_with_msg( 'LKT_ARG_ARY_ELEM_NO_HASH',
+        self!_die_with_msg( 'LKT_ARG_ARY_ELEM_NO_HASH',
                 { 'METH' => $meth, 'ARG' => $arg, 'VAL' => $val_elem } )
             if !$val_elem.does(Hash);
         for ('document', 'parent_node') -> $k {
-            $?SELF!_die_with_msg(
+            self!_die_with_msg(
                     'ROS_M_D_ARG_AOH_TO_CONSTR_CH_ND_HAS_KEY_CONFL',
                     { 'METH' => $meth, 'ARG' => $arg, 'KEY' => $k } )
                 if $val_elem.exists($k);
@@ -126,23 +125,23 @@ submethod BUILD (
             Hash                     :@child_nodes? = [],
         ) {
 
-    $?SELF!_assert_arg_doc( 'new', ':$document!', $document );
+    self!_assert_arg_doc( 'new', ':$document!', $document );
     if ($parent_node.defined) {
-        $?SELF!_assert_arg_node_assume_def(
+        self!_assert_arg_node_assume_def(
             'new', ':$parent_node?', $parent_node );
     }
-    $?SELF!_assert_arg_str( 'new', ':$node_type!', $node_type );
-    $?SELF!_assert_arg_hash( 'new', ':%attributes?', %attributes );
-    $?SELF!_assert_arg_ch_nd_aoh( 'new', ':@child_nodes?', @child_nodes );
+    self!_assert_arg_str( 'new', ':$node_type!', $node_type );
+    self!_assert_arg_hash( 'new', ':%attributes?', %attributes );
+    self!_assert_arg_ch_nd_aoh( 'new', ':@child_nodes?', @child_nodes );
 
     $!document = $document;
-    $document!all_nodes.push( $?SELF );
+    $document!all_nodes.push( self );
     if ($parent_node.defined) {
         $!parent_node = $parent_node;
-        $parent_node!child_nodes.push( $?SELF );
+        $parent_node!child_nodes.push( self );
     }
     else {
-        $document!root_nodes.push( $?SELF );
+        $document!root_nodes.push( self );
     }
     $!node_type   = $node_type;
     %!attributes  = %attributes;
@@ -150,8 +149,8 @@ submethod BUILD (
     for @child_nodes -> $child_node {
         $?CLASS.new(
             document    => $document,
-            parent_node => $?SELF,
-            *%{$child_node},
+            parent_node => self,
+            |%$child_node,
         );
     }
 
@@ -177,53 +176,53 @@ my method _die_with_msg (Str $msg_key!, Any %msg_vars? is ref = {}) {
 }
 
 my method _assert_arg_str (Str $meth!, Str $arg!, Str $val!) {
-    $?SELF!_die_with_msg( 'LKT_ARG_UNDEF',
+    self!_die_with_msg( 'LKT_ARG_UNDEF',
             { 'METH' => $meth, 'ARG' => $arg } )
         if !$val.defined;
-    $?SELF!_die_with_msg( 'LKT_ARG_EMP_STR',
+    self!_die_with_msg( 'LKT_ARG_EMP_STR',
             { 'METH' => $meth, 'ARG' => $arg } )
         if $val eq $EMPTY_STR;
 }
 
 my method _assert_arg_hash (Str $meth!, Str $arg!, Any %val!) {
-    $?SELF!_die_with_msg( 'LKT_ARG_UNDEF',
+    self!_die_with_msg( 'LKT_ARG_UNDEF',
             { 'METH' => $meth, 'ARG' => $arg } )
         if !%val.defined;
-    $?SELF!_die_with_msg( 'LKT_ARG_HASH_KEY_EMP_STR',
+    self!_die_with_msg( 'LKT_ARG_HASH_KEY_EMP_STR',
             { 'METH' => $meth, 'ARG' => $arg } )
         if %val.exists($EMPTY_STR);
 }
 
 my method _assert_arg_doc (Str $meth!, Str $arg!, $val!) {
-    $?SELF!_die_with_msg( 'LKT_ARG_UNDEF',
+    self!_die_with_msg( 'LKT_ARG_UNDEF',
             { 'METH' => $meth, 'ARG' => $arg } )
         if !$val.defined;
-    $?SELF!_die_with_msg( 'LKT_ARG_NO_EXP_TYPE', { 'METH' => $meth,
+    self!_die_with_msg( 'LKT_ARG_NO_EXP_TYPE', { 'METH' => $meth,
             'ARG' => $arg, 'EXP_TYPE' => 'Rosetta::Model::Document',
             'VAL' => $val } )
         if !$val.does(Rosetta::Model::Document);
 }
 
 my method _assert_arg_node_assume_def (Str $meth!, Str $arg!, $val!) {
-    $?SELF!_die_with_msg( 'LKT_ARG_NO_EXP_TYPE', { 'METH' => $meth,
+    self!_die_with_msg( 'LKT_ARG_NO_EXP_TYPE', { 'METH' => $meth,
             'ARG' => $arg, 'EXP_TYPE' => 'Rosetta::Model::Node',
             'VAL' => $val } )
         if !$val.does(Rosetta::Model::Node);
 }
 
 my method _assert_arg_ch_nd_aoh (Str $meth!, Str $arg!, Str @val!) {
-    $?SELF!_die_with_msg( 'LKT_ARG_UNDEF',
+    self!_die_with_msg( 'LKT_ARG_UNDEF',
             { 'METH' => $meth, 'ARG' => $arg } )
         if !@val.defined;
     for @val -> $val_elem {
-        $?SELF!_die_with_msg( 'LKT_ARG_ARY_ELEM_UNDEF',
+        self!_die_with_msg( 'LKT_ARG_ARY_ELEM_UNDEF',
                 { 'METH' => $meth, 'ARG' => $arg } )
             if !$val_elem.defined;
-        $?SELF!_die_with_msg( 'LKT_ARG_ARY_ELEM_NO_HASH',
+        self!_die_with_msg( 'LKT_ARG_ARY_ELEM_NO_HASH',
                 { 'METH' => $meth, 'ARG' => $arg, 'VAL' => $val_elem } )
             if !$val_elem.does(Hash);
         for ('document', 'parent_node') -> $k {
-            $?SELF!_die_with_msg(
+            self!_die_with_msg(
                     'ROS_M_N_ARG_AOH_TO_CONSTR_CH_ND_HAS_KEY_CONFL',
                     { 'METH' => $meth, 'ARG' => $arg, 'KEY' => $k } )
                 if $val_elem.exists($k);
@@ -249,7 +248,7 @@ Abstract syntax tree for the Rosetta D language
 
 =head1 VERSION
 
-This document describes Rosetta::Model version 0.724.0.
+This document describes Rosetta::Model version 0.724.1.
 
 It also describes the same-number versions of Rosetta::Model::Document
 ("Document") and Rosetta::Model::Node ("Node").
@@ -332,7 +331,7 @@ This is the main Document constructor method:
 =item C<new( :@root_nodes? )>
 
 This method creates and returns a new Rosetta::Model::Document object.  If
-the optional named parameter @root_nodes (an array ref) is set, then each
+the optional named parameter @root_nodes is set, then each
 element in it is used to initialize a new Node object (plus an optional
 hierarchy of new child Nodes of that new Node) that gets stored in the Root
 Nodes attribute (that attribute defaults to empty if the parameter's
@@ -369,12 +368,12 @@ Moreover, these data structures are in exactly the right input format for
 Document.new(), by which you can create an identical Document (with member
 Nodes) to the one you first invoked export_as_hash() on.
 
-Specifically, export_as_hash() returns a Perl hash ref whose key list
+Specifically, export_as_hash() returns a Perl hash whose key list
 ('root_nodes') corresponds exactly to the named parameters of
 Document.new(); you can produce a direct clone like this:
 
     my $cloned_doc = Rosetta::Model::Document.new(
-        *%{$original_doc.export_as_hash()} );
+        |%($original_doc.export_as_hash()) );
 
 Or, to demonstrate the use of a persistence solution:
 
@@ -384,7 +383,7 @@ Or, to demonstrate the use of a persistence solution:
 
     # When restoring.
     my $hash_was_saved = MyPersist.get();
-    my $cloned_doc = Rosetta::Model::Document.new( *%{$hash_was_saved} );
+    my $cloned_doc = Rosetta::Model::Document.new( |%($hash_was_saved) );
 
 =back
 
@@ -445,14 +444,14 @@ This is the main Node constructor method:
 This method creates and returns a new Rosetta::Model::Node object, that
 lives in the Document object given in the named parameter $document, and
 whose Node Type attribute is set from the named parameter $node_type (a
-string); the optional named parameter %attributes (a hash ref) sets the
+string); the optional named parameter %attributes sets the
 "Attributes" attribute if provided (it defaults to empty if the parameter's
 corresponding argument is not provided).  If the optional named parameter
 $parent_node (a Node) is set, then the new Node's "Parent Node" attribute
 is set to it, and the new Node is also stored in $parent_node's Child Nodes
 attribute; if $parent_node is not set, then the new Node is instead stored
 in its Document's "Root Nodes" attribute.  If the optional named parameter
-@child_nodes (an array ref) is set, then each element in it is used to
+@child_nodes is set, then each element in it is used to
 initialize a new Node object (plus an optional hierarchy of new child Nodes
 of that new Node) that gets stored in the Child Nodes attribute (that
 attribute defaults to empty if the corresponding argument is undefined).
@@ -506,13 +505,13 @@ solutions.  Moreover, these data structures are in exactly the right input
 format for Node.new(), by which you can create an identical Node (with
 child Nodes) to the one you first invoked export_as_hash() on.
 
-Specifically, export_as_hash() returns a Perl hash ref whose key list
+Specifically, export_as_hash() returns a Perl hash whose key list
 ('node_type', 'attributes', 'child_nodes') corresponds exactly to the named
 parameters of Node.new(); you need to supply its $document and optional
 $parent_node though; you can produce a direct clone like this:
 
     my $cloned_node = Rosetta::Model::Document.new(
-        document => $document, *%{$original_node.export_as_hash()} );
+        document => $document, |%($original_node.export_as_hash()) );
 
 Or, to demonstrate the use of a persistence solution:
 
@@ -523,7 +522,7 @@ Or, to demonstrate the use of a persistence solution:
     # When restoring.
     my $hash_was_saved = MyPersist.get();
     my $cloned_node = Rosetta::Model::Document.new(
-        document => $document, *%{$hash_was_saved} );
+        document => $document, |%($hash_was_saved) );
 
 =back
 

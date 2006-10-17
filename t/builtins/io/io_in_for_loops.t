@@ -1,10 +1,10 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
-plan 49;
-force_todo(26 .. 36, 38 .. 48);
+# L<S16/"Filehandles, files, and directories"/"open">
+# L<S16/"Filehandles, files, and directories"/"close">
+
+plan 37;
 
 if $*OS eq "browser" {
   skip_rest "Programs running in browsers don't have access to regular IO.";
@@ -66,20 +66,11 @@ my $filename = 'tempfile';
     $fh.close();
 }
 
-### Pugs Bugs FIXME
-### these two test groups below will fail
-### with the error:
-###
-###    pugs: tempfile: hGetLine: illegal operation (handle is closed)
-###
-### it seems that accessing it when it is 
-### in the for loop is not okay.
-
 { # now read it in with the $fh controling the loop but call 
   # the =$fh inside the loop inside parens (is this list context??)
     my $fh = open($filename);
     my $num = 1;
-    for (=$fh) -> $line {
+    for =$fh -> $line {
         is($line, "$num", '... got the right line ((=$fh) controlled loop)');
         $num++;
         my $line2 = =$fh;
@@ -102,5 +93,7 @@ my $filename = 'tempfile';
     }
     $fh.close();
 }
+
+# L<S16/"Filehandles, files, and directories"/"unlink">
 
 is(unlink($filename), 1, 'file has been removed');

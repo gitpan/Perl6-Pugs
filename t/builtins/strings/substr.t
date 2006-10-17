@@ -1,11 +1,10 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 plan 40;
 
-# L<S29/"Perl6::Str" /substr/>
+# L<S29/Str/=item substr>
 
 { # read only
     my $str = "foobar";
@@ -46,8 +45,6 @@ skip 4, "more discussion needed";
     is($str, "fayeh", "replacement with negative length");
 };
 
-=end more-discussion-needed
-
 =cut
 
 # as lvalue, XXX: not sure this should work, as that'd be action at distance:
@@ -63,7 +60,7 @@ skip 4, "more discussion needed";
     is($str, "gloop ding", "lvalue assignment modified original string");
 
     my $r = \substr($str, 0, 5);
-    ok(~ref($r), '$r is a reference');
+    ok(~WHAT($r), '$r is a reference');
     is($$r, "gloop", '$r referent is eq to the substring');
 
     $$r = "boing";
@@ -108,7 +105,7 @@ skip 4, "more discussion needed";
 # from L<S09/"Junctions" /Each of the resulting set of calls is then recursively autothreaded/>
 # See also t/junctions/s09eg.t
 # This test is not working as-is
-#    eval_is('substr("camel", 0|1, 2&3)', (("ca"|"am") & ("cam"|"ame")), "junctive substr", :todo);
+#    is(eval('substr("camel", 0|1, 2&3)'), (("ca"|"am") & ("cam"|"ame")), "junctive substr", :todo);
 }
 
 

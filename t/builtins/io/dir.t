@@ -1,11 +1,14 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
-
+use FindBin;
 plan 18;
 
-if ($*OS eq any <MSWin32 mingw msys cygwin browser>) {
+# L<S16/"Filehandles, files, and directories"/"opendir">
+# L<S16/"Filehandles, files, and directories"/"closedir">
+# L<S16/"Filehandles, files, and directories"/"readdir">
+# L<S16/"Filehandles, files, and directories"/"rewinddir">
+
+if ($*OS eq any <browser>) {
     skip_rest "not supported on this platform";
     exit;
 }
@@ -16,8 +19,8 @@ opendir/readdir support
 
 =cut
 
-my $dir = opendir('.');
-isa_ok($dir, 'IO::Dir', "opendir worked");
+my $dir = opendir($FindBin::Bin);
+isa_ok($dir, IO::Dir, "opendir worked on $FindBin::Bin");
 
 my @files = readdir($dir);
 ok(@files, "seems readdir worked too");
@@ -39,7 +42,8 @@ my $rew_2 = rewinddir($dir);
 is($rew_2, 1, "success of rewinddir 2 returns 1");
 
 my @files_scalar;
-for readdir($dir) -> $f {
+loop {
+    my $f = readdir($dir) err last;
     @files_scalar.push($f);
 }
 is_deeply(\@files_scalar, @files, "same list of files retrieved after rewind, using scalar context");
@@ -74,10 +78,10 @@ ok(closedir($dir), "as does closedir");
 # closedir
 
 
-my $dh = opendir('.');
+my $dh = opendir($FindBin::Bin);
 isa_ok($dh, 'IO::Dir', "opendir worked");
 my @files_once_more = $dh.readdir;
-is_deeply([sort @files_once_more], [sort @files], 'same list of files,after reopen');
-ok($dir.closedir, 'closedir usinf $dir.closedir format');
+is_deeply(@files_once_more.sort, @files.sort, 'same list of files,after reopen');
+ok($dir.closedir, 'closedir using $dir.closedir format');
 
 

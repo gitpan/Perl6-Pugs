@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan 21;
+plan 22;
 
 # See L<"http://www.nntp.perl.org/group/perl.perl6.language/22858"> --
 # previously, "my $a; say $::("a")" died (you had to s/my/our/). Now, it was
@@ -32,7 +31,7 @@ plan 21;
 }
 
 {
-  my &a_var = { 42 };
+  my &a_var := { 42 };
   my $b_var = "a_var";
 
   is &::($b_var)(), 42, 'basic symbolic code dereferentiation works';
@@ -49,7 +48,7 @@ plan 21;
   my $result;
 
   try {
-    env $a_var = 42;
+    my $a_var is context = 42;
     my $sub   = sub { $::("CALLER")::("a_var") };
     $result = $sub();
   };
@@ -83,21 +82,19 @@ Following re-specced to be invalid:
 # Symbolic dereferentiation of globals
 {
   sub *a_global_sub () { 42 }
-  try {
   is &::("*::a_global_sub")(), 42,
-    "symbolic dereferentiation of globals works (1)", :todo<bug>;
-  }
+    "symbolic dereferentiation of globals works (1)";
 
-  our $*a_global_var = 42;
+  $*a_global_var = 42;
   is $::("*::a_global_var"),   42,
-    "symbolic dereferentiation of globals works (2)", :todo<bug>;
+    "symbolic dereferentiation of globals works (2)";
 }
 
 # Symbolic dereferentiation of globals *without the star*
 {
-  cmp_ok $::("*IN"), &infix:<=:=>, $*IN,
+  cmp_ok $::("*IN"), &infix:<===>, $*IN,
     "symbolic dereferentiation of globals works (3)";
-  cmp_ok $::("IN"),  &infix:<=:=>, $*IN,
+  cmp_ok $::("IN"),  &infix:<===>, $*IN,
     "symbolic dereferentiation of globals without the star works";
 
   # XXX - should be =:= rather than ~~, but &say =:= &say is currently false.:(
@@ -116,16 +113,13 @@ Following re-specced to be invalid:
 
 # Symbolic dereferentiation of type vars
 {
-  cmp_ok ::Array, &infix:<=:=>, ::("Array"),
+  cmp_ok ::Array, &infix:<===>, ::("Array"),
     "symbolic dereferentiation of type vars works (1)";
 }
 
 {
-  my $ok;
-  eval '
-    class A::B::C {}
-    $ok = ::A::B::C =:= ::A::("B")::C;
-  ';
+  class A::B::C {};
+  my $ok = ::A::B::C === ::A::("B")::C;
   ok $ok, "symbolic dereferentiation of (own) type vars works (2)";
 }
 

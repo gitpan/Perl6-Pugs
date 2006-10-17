@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 use Perl6::Grammar;
@@ -13,7 +11,7 @@ Testing self hosting rules.
 
 plan 25;
 
-if(!eval('("a" ~~ /a/)')) {
+if !eval('("a" ~~ /a/)') {
   skip_rest "skipped tests - rules support appears to be missing";
 } else {
 
@@ -48,7 +46,10 @@ is(?("0x100" ~~ /^<hex>$/),Bool::True,"0x100 (hex) is parsed as a hex");
 is(?("0o100" ~~ /^<oct>$/),Bool::True,"0o100 (oct) is parsed as a oct");
 
 is(?("Perl6" ~~ /^<identZZ>$/),Bool::True,"ids are parsed");
-is(?("Perl6::rule" ~~ /^<identZZ>$/),Bool::True,"ids are parsed as fullid");
+
+flunk("test hangs", :todo<bug>);
+#is(?("Perl6::rule" ~~ /^<identZZ>$/),Bool::True,"ids are parsed as fullid");
+
 is(?("::rule" ~~ /^<identZZ>$/),Bool::True,"global ids are parsed as fullid");
 is(?('$foo' ~~ /^<variable>$/),Bool::True,"scalars are parsed as variables");
 is(?('@foo' ~~ /^<variable>$/),Bool::True,"arrays are parsed as variables");

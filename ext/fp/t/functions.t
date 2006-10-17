@@ -1,13 +1,11 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 use fp;
 
 plan 5;
 
-is identity(3),  3, "id() works";
+is identity(3),  3, "identity() works";
 is const(3).(5), 3, "const() works";
 
 is ~tail((1,2,3)), "2 3", "tail() works";

@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =kwid
@@ -9,7 +8,7 @@ Arrays
 
 =cut
 
-plan 66;
+plan 67;
 
 # array of strings
 
@@ -110,9 +109,9 @@ my @array10 = (1, 2, 3,);
 is(+@array10, 3, "trailing commas make correct array"); 
 
 # declare a multidimension array
-eval_ok('my @multidim[0..3; 0..1]', "multidimension array", :todo);
-eval_ok('my @array11 is shape(2,4)', "another way to declare a multidimension array", :todo);
-eval_ok('@array11[2,0] = 12', "push the value to a multidimension array", :todo);
+ok(eval('my @multidim[0..3; 0..1]'), "multidimension array", :todo);
+ok(eval('my @array11 is shape(2,4)'), "another way to declare a multidimension array", :todo);
+ok(eval('@array11[2,0] = 12'), "push the value to a multidimension array", :todo);
 
 # declare the array with data type
 my Int @array;
@@ -133,7 +132,7 @@ is ~@array12,'a b c d', "assignment to neg index correctly alters the array";
 
 my @array13 = ('a', 'b', 'c', 'd'); 
 # negative index range as lvalue
-@array13[-4 .. -1]   = ('d', 'c', 'b', 'a'); #('a'..'d').reverse
+@array13[-4 .. -1]   = ('d', 'c', 'b', 'a'); # ('a'..'d').reverse
 is ~@array13, 'd c b a', "negative range as lvalue"; 
 
 #hat trick
@@ -158,16 +157,16 @@ is ~@b,
 
 {
   my @arr;
-  lives_ok { defined @arr[-1] },  "readonly accessing [-1] of an empty array is ok (1)";
-  ok !(try { defined @arr[-1] }), "readonly accessing [-1] of an empty array is ok (2)";
+  lives_ok { @arr[-1] },  "readonly accessing [-1] of an empty array is ok (1)";
+  ok !(try { @arr[-1] }), "readonly accessing [-1] of an empty array is ok (2)";
   dies_ok { @arr[-1] = 42 },      "assigning to [-1] of an empty array is fatal";
   dies_ok { @arr[-1] := 42 },     "binding [-1] of an empty array is fatal";
 }
 
 {
   my @arr = (23);
-  lives_ok { defined @arr[-2] },  "readonly accessing [-2] of an one-elem array is ok (1)";
-  ok !(try { defined @arr[-2] }), "readonly accessing [-2] of an one-elem array is ok (2)";
+  lives_ok { @arr[-2] },  "readonly accessing [-2] of an one-elem array is ok (1)";
+  ok !(try { @arr[-2] }), "readonly accessing [-2] of an one-elem array is ok (2)";
   dies_ok { @arr[-2] = 42 },      "assigning to [-2] of an one-elem array is fatal";
   dies_ok { @arr[-2] := 42 },     "binding [-2] of an empty array is fatal";
 }

@@ -1,7 +1,7 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
+
+# L<S03/"Changes to Perl 5 operators"/"The list assignment operator now parses on the right">
 
 plan 208;
 
@@ -151,7 +151,7 @@ plan 208;
     is($a, 3, "... and second");
     my %hash;
     %hash<foo> //= hash();
-    is(ref %hash<foo>, 'Hash', "Verify //= autovivifies correctly");
+    is(WHAT %hash<foo>, 'Hash', "Verify //= autovivifies correctly");
 }
 
 {

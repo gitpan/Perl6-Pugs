@@ -1,6 +1,6 @@
-module Prelude-0.0.1;
+use v6-alpha;
 
-use v6;
+module Prelude-0.0.1;
 
 
 =kwid
@@ -26,6 +26,7 @@ the `is builtin` trait.
 
 =cut
 
+use Math::Basic :GLOBAL<pi>;
 
 class Process {
     multi sub exec($prog, @args) returns Bool is builtin is primitive is unsafe {
@@ -57,16 +58,26 @@ class Control::Basic {
 
     # safety of the individual methods is defined in Pugs.Prim.hs
     # (maybe :lang<YAML> doesn't quite belong here?)
-    multi sub eval (Str $code = $CALLER::_, Str :$lang = 'Perl6')
-            is primitive is safe is builtin {
-        given lc $lang {
-            when 'perl6'   { Pugs::Internals::eval($code) };
-            when 'perl5'   { Pugs::Internals::eval_perl5($code) };
-            when 'haskell' { Pugs::Internals::eval_haskell($code) };
-            when 'parrot'  { Pugs::Internals::eval_parrot($code) };
-            when 'pir'     { Pugs::Internals::eval_parrot($code) };
-            when 'yaml'    { Pugs::Internals::eval_yaml($code) };
-
+    multi sub eval (Str $code, Str :$lang = 'Perl6') is primitive is safe is builtin {
+        if $lang.lc eq 'perl6' {
+            Pugs::Internals::eval_perl6($code);
+        }
+        elsif $lang.lc eq 'perl5' {
+            Pugs::Internals::eval_perl5($code);
+        }
+        elsif $lang.lc eq 'haskell' {
+            Pugs::Internals::eval_haskell($code);
+        }
+        elsif $lang.lc eq 'parrot' {
+            Pugs::Internals::eval_parrot($code);
+        }
+        elsif $lang.lc eq 'pir' {
+            Pugs::Internals::eval_parrot($code);
+        }
+        elsif $lang.lc eq 'yaml' {
+            Pugs::Internals::eval_yaml($code)
+        }
+        else {
             die "Language \"$lang\" unknown.";
         }
     }
@@ -75,7 +86,7 @@ class Control::Basic {
     # S29:
     # Behaves like, and replaces Perl 5 C<do EXPR>, with optional C<$lang>
     # support.
-    multi sub evalfile (Str $filename: Str :$lang = 'Perl6')
+    multi sub evalfile (Str $filename; Str :$lang = 'Perl6')
             is primitive is unsafe {
         eval(slurp $filename, $lang);
     }
@@ -124,7 +135,7 @@ class fatal {
     # interface %*INC, instead of this hack.
     # %*INC<fatal> = { filename => "fatal", resname => "<precompiled>", };
 
-    $fatal::DEFAULT_FATALITY is constant = 1;
+    $fatal::DEFAULT_FATALITY = 1;
     
     sub import {
         Pugs::Internals::install_pragma_value($?CLASS, 1);
@@ -153,9 +164,9 @@ class fatal {
 }
 
 class Carp {
-    # Please remember to update t/pugsrun/11-safemode.t if you change the fully
+    # Please remember to update t/run/11-safemode.t if you change the fully
     # qualified name of longmess.
-    multi sub longmess (: $e = '') returns Str is primitive is safe {
+    multi sub longmess (; $e = '') returns Str is primitive is safe {
         my($mess, $i);
         $mess = "$e at $?CALLER::POSITION";
 
@@ -186,7 +197,7 @@ multi sub infix:<~~> (Rul $r, $x) is primitive is safe is builtin {$r.f.($x)}
 
 sub rx_common_($hook,%mods0,$pat0,$qo,$qc) is builtin is safe {
     state(%modifiers_known, %modifiers_supported_p6, %modifiers_supported_p5);
-    FIRST {
+    START {
         %modifiers_known = map {;($_ => 1)},
         <perl5 Perl5 P5 i ignorecase s sigspace g global c continue p pos
         once bytes codes graphs langs x nth ov overlap ex exhaustive
@@ -265,7 +276,7 @@ sub rx_common_($hook,%mods0,$pat0,$qo,$qc) is builtin is safe {
               $pos += {$m}.from + 1;
            }
            # want.Item
-           0 ?? ([|] \@{$a}) !! $a }))";
+           0 ?? ([|] \@$a) !! $a }))";
         return $code;
     }
     # Use of Rul awaits working infix:<~~> .
@@ -386,37 +397,54 @@ class IO does Iter {
 class Str does Iter {
     method shift () is primitive { =open(self) }
 
-    method trans (Pair *@intable) is primitive is safe {
+#    multi method comb (Regex $rx = /\S+/) is primitive {
+#       list self ~~ rx:g/<$rx>/;
+#    }
+
+    multi method comb () is primitive is safe {
+        list self ~~ rx:P5:g/\S+/;
+    }
+
+    multi method comb ($rx) is primitive {
+        given $rx {
+            when Str { list self ~~ rx:P5:g/\Q$rx\E/; }
+            when Regex {    # XXX kludge absence of /<$rx>/ above
+                my $str = ~self;
+                gather {
+                    while $str ~~ $rx {
+                        take ~$();
+                        substr($str, 0, $/.to) = "";
+                    }
+                }
+            }
+        }
+    }
+
+    method trans (Pair *@intable) is primitive {
         # Motto: If in doubt use brute force!
         my sub expand (Str $string is copy) {
             my @rv;
 
-            my $add_dash;
             my $idx;
 
-            if (substr($string,0,1) eq '-') {
-                push @rv, '-';
-                $string = substr($string,1);
+            $string ~~ s:P5:g/\s+//;
+            my $delim = '!';
+            while index($string,$delim) != -1 {
+                $delim = chr(ord($delim)+1);    # XXX still spoofable
             }
-
-            if (substr($string,-1,1) eq '-') {
-                $add_dash = 1;
-                $string = substr($string,0,-1)
-            }
-
-            while (($idx = index($string,'-')) != -1) {
+            $string = eval "qb$delim$string$delim";
+            while (($idx = index($string,'..')) != -1) {
                 my $pre = substr($string,0,$idx-1);
                 my $start = substr($string,$idx-1,1);
-                my $end = substr($string,$idx+1,1);
+                my $end = substr($string,$idx+2,1);
 
                 push @rv, $pre.split('');
                 push @rv, (~ $start)..(~ $end);
 
-                $string = substr($string,$idx+2);
+                $string = substr($string,$idx+3);
             }
 
             push @rv, $string.split('');
-            push @rv, '-' if $add_dash;
 
             @rv;
         }
@@ -491,6 +519,9 @@ multi sub localtime(Num $when = time) returns Time::Local
 }
 
 class Num {
+
+    # Not Public API
+
     multi sub round_gen(Int $n, Code $corner) returns Int is primitive is safe {
         $n
     }
@@ -501,6 +532,15 @@ class Num {
     sub do_round($n) is primitive is safe {
         ($n < 0) ?? int( $n - 0.5) !! int($n + 0.5);
     }
+    sub do_ceil($n) is primitive is safe {
+        ($n < 0) ?? (-int(-$n)) !! int($n + 1)
+    }
+    sub do_floor($n) is primitive is safe {
+        ($n < 0) ?? (-int(1-$n)) !! int($n)
+    }
+
+    # Public API (but signatures are not spec)
+
     sub round($n) is primitive is safe {
         Num::round_gen($n, &Num::do_round)
     }
@@ -510,21 +550,20 @@ class Num {
     }
     our &trunc ::= &truncate;
 
-    sub do_ceil($n) is primitive is safe {
-        ($n < 0) ?? (-int(-$n)) !! int($n + 1)
-    }
     sub ceiling($n) is primitive is safe {
         Num::round_gen($n, &Num::do_ceil)
     }
     our &ceil ::= &ceiling;
 
-    sub do_floor($n) is primitive is safe {
-        ($n < 0) ?? (-int(1-$n)) !! int($n)
-    }
     sub floor($n) is primitive is safe {
         Num::round_gen($n, &Num::do_floor)
     }
 }
+
+# *pi is non-spec (S29);  Should require use Math::Basic :constants;
+# use Math::Basic :GLOBAL<pi>; fails to define *pi, so...
+sub pi() is primitive is builtin is safe {Math::Basic::pi}
+
 
 sub sprintf ($fmt, *@args) is primitive is builtin is safe {
     my $flen = $fmt.chars;
@@ -562,8 +601,43 @@ sub sprintf ($fmt, *@args) is primitive is builtin is safe {
         }
 
         given $specifier {
-            when any(<c d u o x b i>) {
+            when any(<c d u o x i>) {
                 $str ~= Pugs::Internals::sprintf($conversion,int($arg));
+            }
+
+            ##
+            # No "%b" in Haskell Printf libraries
+            # This may not be 100% compatible with C sprintf,
+            # or even the rest of Perl 6's sprintf
+            when 'b' {
+                my Bool @num;
+                for (0..~int($arg).bytes*8-1) -> $bit {
+                    push @num, int($arg) +& ( 1 ~ (0 x ($bit))) ?? 1 !! 0;
+                }
+
+                my $converted = int(@num.reverse.join(""));
+
+                $conversion ~~ m:P5/(\d+)/;
+                my $formatter = ~$0;
+   
+                my $length = int($formatter) - $converted.bytes;
+   
+                my $ret;
+                if ($length < 0) {
+                    $ret = int(@num.reverse.join(""));
+                }
+                else {
+                    given $formatter {
+                        when rx:P5/^0/ {
+                            $ret = (('0' x $length) ~ $converted);
+                        }
+                        default {
+                            $ret = ((' ' x $length) ~ $converted);
+                        }
+                    }
+                }
+                $str ~= $ret;
+
             }
             when 's' {
                 $str ~= Pugs::Internals::sprintf($conversion,"$arg");
@@ -594,13 +668,17 @@ multi shift ($array) is builtin is primitive { die "Cannot 'shift' scalar"; };
 multi pop (@array) is builtin is primitive { List::pop(@array) };
 multi pop ($array) is builtin is primitive { die "Cannot 'pop' scalar"; };
 
-multi as (Scalar $obj: $fmt) is builtin is primitive is safe {
+multi fmt (Scalar $obj; $fmt) is builtin is primitive is safe {
     sprintf($fmt,$obj);
 }
-multi as (List $obj: $fmt, $comma) is builtin is primitive is safe {
-    join($comma, map -> $v { sprintf($fmt,$v) }, @$obj );
+multi fmt (Pair $obj; $fmt) is builtin is primitive is safe {
+    sprintf($fmt,$obj.kv);
 }
-multi as (Hash $obj: $fmt, $comma) is builtin is primitive is safe {
+# $comma defaults chosen per L<S02/Literals/"interpolate an entire array">.
+multi fmt (List $obj; $fmt, $comma = ' ') is builtin is primitive is safe {
+    join($comma, map -> $v { sprintf($fmt, $v.isa(Pair) ?? $v.kv !! $v) }, @$obj );
+}
+multi fmt (Hash $obj; $fmt, $comma = "\n") is builtin is primitive is safe {
     join($comma, map -> $k,$v { sprintf($fmt,$k,$v) }, $obj.kv );
 }
 
@@ -635,6 +713,7 @@ multi prefix_M ($file) is builtin is primitive is unsafe {
 }
 
 
+=begin disabled
 
 sub Pugs::Internals::Disabled::use ($module=$+_) is builtin is unsafe {
     #Pugs::Internals::use($module);
@@ -678,8 +757,20 @@ sub Pugs::Internals::require_use_helper ($use_,$module) is builtin is unsafe {
 }
 sub Pugs::Internals::compile_file_to_yml($file) is builtin is unsafe {
     # XXX - re-enable this when Parse-YAML supports closures correctly!
-    return if index($file, 'Test.pm') == -1;
+    return() if index($file, 'Test.pm') == -1;
     say "Attempting to compile $file ...";
     system($*EXECUTABLE_NAME~" -CParse-YAML $file > $file.yml");
     say "back.";
 }
+
+=cut
+
+# These are used by t/xx-xx-uncategorized/prelude_test.t
+sub  *prelude_test_1(){'test 1'}
+sub   prelude_test_2_helper(){'test 2'}
+&*prelude_test_2 ::= &prelude_test_2_helper;
+sub   prelude_test_3_helper(){'test 3'}
+&*prelude_test_3 :=  &prelude_test_3_helper;
+multi prelude_test_4(Str $x) is builtin {'test 4'}
+multi *prelude_test_5(Str $x) {'test 5'}
+

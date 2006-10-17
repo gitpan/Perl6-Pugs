@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 2;
@@ -30,8 +28,8 @@ sub manual_cwd () {
 }
 
 if ($?OS eq 'MSWin32') {
-    like(cwd(), rx:perl5{\\}, "cwd() returns a file like value in Win32");
+    like(cwd(), rx:P5"\\", "cwd() returns a file like value in Win32");
 }
 else {
-    like(cwd(), rx:perl5{^\/}, "cwd() returns a file like value in Unix");
+    like(cwd(), rx:P5"^\/", "cwd() returns a file like value in Unix");
 }

@@ -1,6 +1,5 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
 =pod
@@ -10,6 +9,8 @@ calling can on any object fails.
 =cut
 
 plan 2;
+
+# L<S12/"Introspection"/"But Any gives you shortcuts to those:">
 
 class Dog {
         method bark {

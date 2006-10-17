@@ -1,13 +1,16 @@
+﻿
 Here is a list of people and their CPAN id, extracted from the change
 log and the mailing list archives.  These people have either submitted
 patches or suggestions, or their bug reports or comments have inspired
 the appropriate patches.  Corrections, additions, deletions welcome:
 
+Aaron "ajs" Sherman              (ASHER)
 Aankhola Encorporated            (AANKHEN)
 Adam "alias" Kennedy             (ADAMK)
 Adam Preble
 Adrian "adehohum" Taylor
 AEvar Arnfjord Bjarmason         (AVAR)      Ævar Arnfjörð Bjarmason
+Agent Zhang                      (AGENT)     章亦春
 Aldo "dada" Calpini              (ACALPINI)
 Alin "alinbsp" Iacob             (ALIN)
 Allison Randal                   (ARANDAL)
@@ -17,13 +20,16 @@ Andras Barthazi                              András Bártházi
 Andres "kosmikus" Loeh                       Andres Löh
 Andres Kievsky                   (ANK)
 Andrew Savige                    (ASAVIGE)
+Ann Barcomb                      (KUDRA)
 Anton "tobez" Berezin            (GRUBER)
 Arthur "sky" Bergman             (ABERGMAN)
+Arnaud "Arhuman" Assad           (AASSAD)
 Ashley "jql" Winters             (AWIN)
 Audrey Tang                      (AUDREYT)   唐鳳
 Austin "aufrank" Frank
 Balint Szilakszi                 (SZBALINT)  Bálint Szilakszi
 Beau E. Cox                      (BEAU)
+Benedikt "visq" Huber
 Benjamin "integral" Smith        (BSMITH)
 Bestian Tang                                 唐宗浩
 Brad "bsb" Bowman                (BOWMANBS)
@@ -34,10 +40,12 @@ Caio Marcelo de Oliveira Filho
 Carey "revdiablo" Tilden         (CBTILDEN)
 Carl "fireartist" Franks         (CFRANKS)
 Carl Masak                       (MASAK)
+Chaddaï "Jedaï" Fouché
 Cheng-Lung Sung                  (CLSUNG)    宋政隆
 Chia-Liang Kao                   (CLKAO)     高嘉良
 Chip Salzenberg                  (CHIPS)
-Christopher Malon
+Chris Jeris
+Christopher Malon                (OFUN)
 Christopher "cpruden" Pruden
 chromatic                        (CHROMATIC)
 Colin Paul Adams
@@ -48,17 +56,21 @@ Dan "broquaint" Brook            (BROQ)
 Dan Kogai                        (DANKOGAI)  小飼弾
 Darren Duncan                    (DUNCAND)
 Dave "autarch" Rolsky            (DROLSKY)
+David "rodi" Brunton             (DBRUNTON)
 David "machack666" Christensen   (DWC)
 David "autark" Ranvig            (DAVIDRA)
+David Romano                     (UNOBE)
 David Vergin                     (DVERGIN)
 David "qtplatypus" Formosa
 Dimitry Golubovsky
 Don "dons" Stewart
+Douglas Hunter
 Dudley Flanders
 Edwin Steiner
 Elizabeth Mattijsen              (ELIZABETH)
 Eric "eric256" Hodges
 Fayland Lam                      (FAYLAND)   林道
+Flavio "froh-doh" Poletti        (POLETTIX)  Flavio Poletti
 Flavio S. Glock                  (FGLOCK)    Flávio S. Glock
 Florian "rafl" Ragwitz           (FLORA)
 Gaal Yahas                       (GAAL)      גל יחס
@@ -95,7 +107,9 @@ Kang-Min Liu                     (GUGOD)     劉康民
 Kevin "puetzk" Puetz
 Kiran "mkirank" Kumar M.
 Kuang-Che "kcwu" Wu                          吳光哲
+Lanny Ripple
 Larry "TimToady" Wall            (LWALL)
+Lars "daxim" Dieckow                         迪拉斯
 Leopold Toetsch                  (LTOETSCH)  Leopold Tötsch
 Liang-Qi "viirya" Xie                        謝良奇
 Lola Lee
@@ -105,6 +119,7 @@ Mark Stosberg                    (MARKSTOS)
 Markus "malaire" Laire
 "mattc"
 Matt Diephouse
+Matthew "diakopter" Wilson       (WILSON)
 Max Maischein                    (CORION)
 Michael G Schwern                (MSCHWERN)
 Michal "rootmj" Jurosz
@@ -117,8 +132,9 @@ Nicholas Clark                   (NWCLARK)
 Norman Nunley, Jr                (NNUNLEY)
 Offer Kaye
 Oleg Kiselyov
+Ori "salty-horse" Avtalion                   אורי אבטליון
 Paolo "xerox" Martini
-Patrick R. "pmichaud" Michaud
+Patrick R. "pmichaud" Michaud    (PMICHAUD)
 Paul Fenwick                     (PJF)
 Pawel "pmurias" Murias                      Paweł Murias
 Per "pernod" Christian Nodtvedt
@@ -145,11 +161,13 @@ Scott McWhirter                  (KUNGFUFTR)
 Sebastian "sri" Riedel           (SRI)
 Shae "shapr" Matijs Erisson
 Shawn Sorichetti                 (SSORICHE)
+Shen, Yu-Teh
 Shlomi "rindolf" Fish            (SHLOMIF)   שלומי פיש
 Shmarya "shmar" Rubenstein	 (SHMARYA)
 Shu-Chun "scw" Weng                          翁書鈞
 Simon "lathos" Cozens            (SIMON)
 Simon "JeffaCake" Marlow
+Simon "dolmans" Sun
 Solomon "colomon" Foster
 Stefano Rodighiero               (LARSEN)
 Steffen "renormalist" Schwigon   (SCHWIGON)
@@ -161,15 +179,18 @@ Swaroop "snowstalker" C H
 Syed Uzair Aqeel
 Terrence "metaperl" Brannon      (TBONE)
 Thomas Sandlass                              Thomas Sandlaß
-Thomas Yeh
+Thomas Yeh                                   葉志宏
 Ting "tiw" Wang
 Tom Moertel                      (TMOERTEL)
+Trey Harris                      (TREY)
 Uri Guttman                      (URI)
 Vadim Konovalov                  (VKON)
 Will Coleda                      (COKE)
+Wim "andara" Vanderbauwhede	(WVDB)
 Yiyi "xinming" Hu                            鹄驿懿
 Yuan-Chen "ycheng" Cheng                     鄭原真
 Yung-Chung Lin                   (XERN)      林永忠
 Yuval "nothingmuch" Kogman       (NUFFIN)    יובל קוג'מן
 Zhen-Bang "Forth" Wei
 Zohar "lumi" Kelrich                         זהר קלריך/卡卓哈
+Zack Hobson                      (ZGH)

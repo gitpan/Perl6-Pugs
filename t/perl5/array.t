@@ -1,9 +1,8 @@
-#!/usr/bin/pugs
+use v6-alpha;
 
-use v6;
 use Test;
 
-plan(11);
+plan 18;
 
 unless try({ eval("1", :lang<perl5>) }) {
     skip_rest;
@@ -13,8 +12,7 @@ unless try({ eval("1", :lang<perl5>) }) {
 die unless
 eval(q/
 package My::Array;
- use strict; # XXX - if 'use' is in first column it got used by pugs!
-print ''; # XXX - voodoo!
+use strict;
 
 sub new {
     my ($class, $ref) = @_;
@@ -54,44 +52,41 @@ sub push {
 1;
 /, :lang<perl5>);
 
-my $p5ar = eval("My::Array", :lang<perl5>);
+my $p5ar = eval('sub { My::Array->new($_[0]) }', :lang<perl5>);
 my @array = (5,6,7,8);
-my $p5array = $p5ar.new(\@array);
+my $p5array = $p5ar(VAR @array);
 
 my $retarray = $p5array.array;
 
-is(eval('$p5array.my_elems'), @array.elems, 'elems');
-is(eval('$retarray.elems'), @array.elems, 'retro elems', :todo<feature>);
-
+is($p5array.my_elems, @array.elems, 'elems');
 is($p5array.my_exists(1), @array.exists(1), 'exists');
-is($retarray.exists(1), @array.exists(1), 'retro exists', :todo<feature>);
-
 is($p5array.my_exists(10), @array.exists(10), 'nonexists fail');
+is($p5array.fetch(3)+0, @array[3], 'fetch');
+
+my $match = 0;
+lives_ok {
+    $match = ?($retarray.[3] ~~ @array[3]);
+}, 'can retro fetch';
+ok $match, 'retro fetch';
+
+is(eval(q{$retarray.elems}), @array.elems, 'retro elems');
+is($retarray.exists(1), @array.exists(1), 'retro exists');
 is($retarray.exists(10), @array.exists(10), 'retro nonexists' );
 
-is($p5array.fetch(3), @array[3], 'fetch');
+ok(($p5array.push(9)), 'can push');
 
-# this access ruins pugs::env below
-#lives_ok {
-#    is($retarray.[3], @array[3], 'retro fetch');
-#}
+is(0+$p5array.fetch(4), 9, 'push result via obj', :todo<bug>);
+is(@array[4], 9, 'push result via array', :todo<feature>);
 
-# XXX - Infinite loop
-skip_rest; exit;
-
-$p5array.push(9);
-
-is($p5array.fetch(4), 9, 'push result', :todo<feature>);
-is(@array[4], 9, 'push result', :todo<feature>);
-
+flunk("push(9) non-terminates", :todo<bug>);
 #$retarray.push(9);  # this will loop
 
-#is($p5array.fetch(5), 9, 'retro push result');
-#is(@array[5], 9, 'retro push result');
+is(0+$p5array.fetch(5), 9, 'retro push result', :todo<bug>);
+is(@array[5], 9, 'retro push result', :todo<bug>);
 
-$p5array.store(0,3);
+ok($p5array.store(0,3), 'can store');
 
-is(@array[0], 3, 'store result', :todo<feature>);
-is($p5array.fetch(0), 3, 'store result', :todo<feature>);
+is(@array[0], 3, 'store result');
+is(0+$p5array.fetch(0), 3, 'store result');
 
 # TODO: pop, shift, unshift, splice, delete

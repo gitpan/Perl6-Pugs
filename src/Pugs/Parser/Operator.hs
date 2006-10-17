@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -cpp -fglasgow-exts -funbox-strict-fields -fno-full-laziness -fno-cse #-}
+{-# OPTIONS_GHC -cpp -fglasgow-exts -funbox-strict-fields -fno-full-laziness -fno-cse -fallow-overlapping-instances -fno-warn-orphans #-}
 
 module Pugs.Parser.Operator where
 import Pugs.Internals
@@ -6,80 +6,127 @@ import Pugs.AST
 import Pugs.Types
 import Pugs.Lexer
 import Pugs.Rule
-import Pugs.Rule.Expr
+import {-# SOURCE #-} Pugs.Parser
 import qualified Data.Set as Set
+import qualified Data.Map as Map
+import qualified Data.ByteString.Char8 as Buf
+import qualified Data.HashTable as H
+import GHC.Int (Int32(I32#))
 
 import Pugs.Parser.Types
 import Pugs.Parser.Unsafe
 
-operators :: (?parseExpWithTightOps :: RuleParser Exp) =>
-    RuleParser (RuleOperatorTable Exp)
-operators = do
-    tight <- tightOperators
-    loose <- looseOperators
-    return $ concat $
-        [ tight
-        , [ listSyn [","] ]                             -- List constructor
-        , [ listOps ["Y", "\xA5", "==>", "<=="] ]       -- List infix
-        , loose
-    --  , [ listSyn  " ; " ]                            -- Terminator
-        ]
+listCons :: [RuleOperator Exp]
+listCons = listSyn (opWords ",")                         -- List constructor
 
--- Not yet transcribed ------------------------------------------------
+listInfix :: [RuleOperator Exp]
+listInfix = listOps (opWords "Y \xA5 ==> <==")  -- List infix
 
-tightOperators :: (?parseExpWithTightOps :: RuleParser Exp) =>
-    RuleParser (RuleOperatorTable Exp)
+opWords :: String -> Set OpName
+opWords xs = Set.fromList (map (MkOpName . cast) (words xs))
+
+newtype OpName = MkOpName ID
+    deriving (Show, Eq, Typeable, (:>:) String, (:>:) ByteString, (:<:) ByteString, (:>:) ID)
+
+instance Ord OpName where
+    compare (MkOpName MkID{ idKey = a, idBuf = x }) (MkOpName MkID{ idKey = b, idBuf = y })
+        = compare (Buf.length y) (Buf.length x) `mappend` compare b a
+
+-- Not yet transcribed into a full optable parser with dynamic precedence --
+
+tightOperators :: RuleParser (TightFunctions, RuleOperatorTable Exp)
 tightOperators = do
-  [_, optionary, namedUnary, preUnary, postUnary, infixOps] <- currentTightFunctions
-  return $
-    [ methOps   (words " . .+ .? .* .+ .() .[] .{} .<<>> .= ")  -- Method postfix
-    , postOps   (words " ++ -- ")
-      ++ preOps (words " ++ -- ")                               -- Auto-Increment
-    , rightOps  (words " ** ")                                  -- Exponentiation
-    , optPreSyn ["*"]                                           -- Symbolic Unary
-      ++ preOps (words " = ! + - ~ ? +^ ~^ ?^ \\ ^")
-      ++ preSymOps preUnary
-      ++ postOps postUnary
-    , leftOps   (words " * / % x xx +& +< +> ~& ~< ~> ")        -- Multiplicative
-    , leftOps   (words " + - ~ +| +^ ~| ~^ ?| ")                -- Additive
-      ++ leftOps (filter (/= ",") infixOps)                     -- User defined ops
-    , listOps   ["&"]                                           -- Junctive And
-    , listOps   (words " ^ | ")                                 -- Junctive Or
-    , optOps optionary                                          -- Named Unary
-      ++ preOps (filter (\x -> (x /= "true") && (x /= "not")) namedUnary)
-      ++ optSymOps (map (\x -> ['-', x]) fileTestOperatorNames)
-    , noneSyn   (words " is but does ")                         -- Traits
-      ++ noneOps (words " cmp <=> .. ^.. ..^ ^..^ till ^till till^ ")  -- Non-chaining Binary
-      ++ postOps (words "...")                                  -- Infinite range
-    , chainOps (words " != == < <= > >= ~~ !~ eq ne lt le gt ge =:= === ")
-                                                                -- Chained Binary
-    , leftOps  ["&&"]                                           -- Tight And
-    , leftOps  (words " || ^^ // ")                             -- Tight Or
+  tights <- currentTightFunctions
+  return $ (,) tights
+    ( termLevel                     -- Terms and circumfixes
+    : methLevel                     -- Method postfix
+    : incrLevel                     -- Auto-Increment
+    : expoLevel                     -- Exponentiation
+    : (preSymOps (r_pre tights)     -- Symbolic Unary (user-definable)
+        ++ postOps (r_post tights)
+        ++ symbLevel)
+    : multLevel                     -- Multiplicative
+    : Map.foldWithKey foldInfix addiLevel (r_infix tights) -- Additive (user-definable)
+    : junaLevel                     -- Junctive And
+    : junoLevel                     -- Junctive Or
+    : (optOps (r_opt tights)        -- Named Unary (user-definable)
+      ++ preOps (r_named tights Set.\\ opWords " true not ")
+      ++ fileTestOps
+      )
+    : staticLevels
+    )
+    where
+    foldInfix :: OpName -> SubAssoc -> [RuleOperator Exp] -> [RuleOperator Exp]
+    foldInfix op assoc xs = let op' = Set.singleton op in case assoc of
+        A_left  -> leftOps op'  ++ xs
+        A_right -> rightOps op' ++ xs
+        A_non   -> nonOps op'   ++ xs
+        A_chain -> chainOps op' ++ xs
+        A_list  -> listOps op'  ++ xs
+        _       -> leftOps op'  ++ xs   -- Default to left-assoc
+        -- _ -> error $ "Impossible: " ++ show op ++ " has no assoc?"
+
+termLevel, methLevel, incrLevel, expoLevel, symbLevel, multLevel, addiLevel, junaLevel, junoLevel :: [RuleOperator Exp]
+termLevel = circumOps (Set.singleton (MkOpName (cast "\\( )")))
+methLevel = methOps (opWords " . .+ .? .* .+ .() .[] .{} .<<>> .= ")
+incrLevel = postOps incrOps ++ preOps incrOps
+expoLevel = rightOps (opWords " ** ")
+symbLevel = preSyn (Set.singleton (MkOpName (cast "|"))) ++ preOps symbPreops
+multLevel = leftOps (opWords " * / % x xx +& +< +> ~& ~< ~> ?& ")
+addiLevel = leftOps (opWords " + - ~ +| +^ ~| ~^ ?| ")
+junaLevel = listOps (opWords " & ")
+junoLevel = listOps (opWords " ^ | ")
+
+symbPreops :: Set OpName
+symbPreops = opWords " = ! + - ~ ? +^ ~^ ?^ \\ ^"
+incrOps :: Set OpName
+incrOps = opWords " ++ -- "
+
+-- The lower levels of immutable ops.  This will be replaced once we have
+-- user-defineable precedences.
+staticLevels :: [[RuleOperator Exp]]
+staticLevels =
+    [ nonSyn   (opWords " but does ")                            -- Traits
+      ++ nonOps (opWords " leg cmp <=> .. ^.. ..^ ^..^ ff ^ff ff^ ^ff^ fff ^fff fff^ ^fff^ ")  -- Non-chaining Binary
+    , chainOps (opWords " != == < <= > >= eqv eq ne lt le gt ge =:= === ")
+      ++ matchOps (opWords " ~~ ")
+    , leftOps  (opWords "&&")                                    -- Tight And
+    , leftOps  (opWords " || ^^ // ")                            -- Tight Or
     , [ternOp "??" "!!" "if"]                                   -- Ternary
     -- Assignment
-    , (rightOps ["=>"] ++) .                                    -- Pair constructor
+    , (rightOps (opWords " => ") ++) .                           -- Pair constructor
       (DependentPostfix listAssignment :) .
       (DependentPostfix immediateBinding :) .
       (rightAssignSyn :) .
       (rightDotAssignSyn :) $
-      rightSyn (words (
-               " := ~= += -= *= /= %= x= Y= \xA5= **= xx= ||= &&= //= ^^= " ++
-               " +<= +>= ~<= ~>= +&= +|= +^= ~&= ~|= ~^= ?|= ?^= |= ^= &= "))
-    , preOps ["true", "not"]                                    -- Loose unary
+      rightSyn infixAssignmentOps
+    , preOps (opWords " true not ")                              -- Loose unary
     ]
 
-listAssignment :: (?parseExpWithTightOps :: RuleParser Exp) => Exp -> RuleParser Exp
+fileTestOps :: [RuleOperator Exp]
+fileTestOps = optSymOps (Set.fromAscList (map (MkOpName . cast . (\x -> ['-', x])) fileTestOperatorNames))
+
+infixAssignmentOps :: Set OpName
+infixAssignmentOps = opWords
+    ( " := ~= += -= *= /= %= x= Y= \xA5= **= xx= ||= &&= //= ^^= "
+    ++ " +<= +>= ~<= ~>= +&= +|= +^= ~&= ~|= ~^= ?|= ?^= |= ^= &= "
+    )
+
+fromSet :: Set OpName -> [String]
+fromSet = cast . Set.toAscList
+
+listAssignment :: Exp -> RuleParser Exp
 listAssignment x = do
     try $ do
         char '='
         guard (not (isScalarLValue x))
         notFollowedBy (oneOf "=>" <|> (char ':' >> char '='))
         whiteSpace
-    y   <- ?parseExpWithTightOps
+    y   <- parseExpWithTightOps
     rhs <- option y $ do
         -- If we see comma, then convert this to a Syn ",".
         ruleComma
-        ys <- ?parseExpWithTightOps `sepEndBy` ruleComma
+        ys <- parseExpWithTightOps `sepEndBy` ruleComma
         return (Syn "," (y:ys))
     return (Syn "=" [forceParens x, rhs])
     where
@@ -92,10 +139,10 @@ listAssignment x = do
     forceParens (Pad x y inner)     = Pad x y (forceParens inner)
     forceParens exp                 = exp
 
-immediateBinding :: (?parseExpWithTightOps :: RuleParser Exp) => Exp -> RuleParser Exp
+immediateBinding :: Exp -> RuleParser Exp
 immediateBinding x = do
     symbol "::="
-    y <- ?parseExpWithTightOps
+    y <- parseExpWithTightOps
     unsafeEvalExp (Syn ":=" [x, y])
     return x
 
@@ -104,144 +151,197 @@ looseOperators = do
     -- names <- currentListFunctions
     return $
         [ -- preOps names                               -- List Operator
-          leftOps  ["==>"]                              -- Pipe Forward
-        , leftOps  ["and"]                              -- Loose And
-        , leftOps  (words " or xor err ")                       -- Loose Or
+          leftOps  (opWords " ==> ")                     -- Pipe Forward
+        , leftOps  (opWords " and ")                     -- Loose And
+        , leftOps  (opWords " or xor err ")              -- Loose Or
         ]
 
--- not a parser!
-litOperators :: (?parseExpWithTightOps :: RuleParser Exp) =>
-    RuleParser (RuleOperatorTable Exp)
-litOperators = do
-    tight <- tightOperators
-    loose <- looseOperators
-    return $ tight ++ loose
+data CurrentFunction = MkCurrentFunction
+    { f_var     :: !Var
+    , f_assoc   :: !SubAssoc
+    , f_params  :: !Params
+    }
+    deriving (Show)
 
--- read just the current state (ie, not a parser)
--- {-# NOINLINE currentFunctions #-}
-currentFunctions :: RuleParser [(Var, VStr, Params)]
+-- Read just the current state (i.e. not actually consuming anything)
+currentFunctions :: RuleParser [CurrentFunction]
 currentFunctions = do
-    env     <- getRuleEnv
-    return . concat . inlinePerformSTM $ do
+    env <- getRuleEnv
+    let funs = catMaybes $! inlinePerformSTM $! do
         glob <- readTVar $ envGlobal env
-        let funs  = padToList glob ++ padToList (envLexical env)
+        let syms  = padToList (filterPad cur glob)
+                    ++ padToList (filterPad cur (envLexical env))
             pkg   = envPackage env
-        forM [ fun | fun@(('&':_), _) <- funs ] $ \(name, tvars) -> do
-            case inScope pkg (dropWhile (not . isAlphaNum) $ name) of
-                Nothing     -> return []
-                Just name'  -> fmap catMaybes $ forM tvars $ \(_, tvar) -> do
-                    ref <- readTVar tvar
-                    -- read from ref
-                    return $ case ref of
-                        MkRef (ICode cv)
-                            | relevantToParsing (code_assoc cv) (code_type cv)
-                            -> Just (name', code_assoc cv, code_params cv)
-                        MkRef (IScalar sv)
-                            | Just (VCode cv) <- scalar_const sv
-                            , relevantToParsing (code_assoc cv) (code_type cv)
-                            -> Just (name', code_assoc cv, code_params cv)
-                        _ -> Nothing
+            cur var@MkVar{ v_sigil = SCode } = inScope pkg var
+            cur _ = False
+            vars  = concat [ map (\(_, tvar) -> (var, tvar)) tvars
+                           | (var, tvars) <- syms
+                           ]
+        mapM (uncurry filterFun) vars
+    return (length funs `seq` funs)
+
+{-# NOINLINE _RefToFunction #-}
+_RefToFunction :: H.HashTable (TVar VRef) CurrentFunction
+_RefToFunction = unsafePerformIO (H.new (==) hashTVar)
+
+hashTVar :: TVar VRef -> Int32
+hashTVar x = I32# (unsafeCoerce# x)
+
+filterFun :: Var -> TVar VRef -> STM (Maybe CurrentFunction)
+filterFun var tvar = do
+    res <- unsafeIOToSTM (H.lookup _RefToFunction tvar)
+    case res of
+        Just rv -> return (rv `seq` res)
+        Nothing -> do
+            ref <- readTVar tvar
+            case ref of
+                MkRef (ICode cv)
+                    | relevantToParsing (code_type cv) (code_assoc cv) -> do
+                        let rv = MkCurrentFunction var (code_assoc cv) (code_params cv)
+                        unsafeIOToSTM (H.insert _RefToFunction tvar rv)
+                        return (rv `seq` Just rv)
+                MkRef (IScalar sv)
+                    | Just (VCode cv) <- scalar_const sv
+                    , relevantToParsing (code_type cv) (code_assoc cv) -> do
+                        let rv = MkCurrentFunction var (code_assoc cv) (code_params cv)
+                        unsafeIOToSTM (H.insert _RefToFunction tvar rv)
+                        return (rv `seq` Just rv)
+                _ -> return Nothing
+
+inScope :: Pkg -> Var -> Bool
+inScope pkg var
+    | isGlobalVar var           = True
+    | not (isQualifiedVar var)  = True
+    | pkg == varPkg             = True
+    | listPkg == varPkg         = True -- XXX wrong - special case for List::*
+    | otherwise                 = False
     where
-    inScope _ ('L':'i':'s':'t':':':':':name) = Just name
-    inScope pkg name | Just (post, pre) <- breakOnGlue "::" (reverse name) =
-        if pkg == reverse pre then Just (reverse post) else Nothing
-    inScope _ name = Just name
-    relevantToParsing "pre" SubPrim      = True
-    relevantToParsing _     SubPrim      = False
-    relevantToParsing _     SubMethod    = False
-    relevantToParsing ""    _            = False
-    relevantToParsing _     _            = True
+    varPkg = v_package var
+
+relevantToParsing :: SubType -> SubAssoc -> Bool
+relevantToParsing SubMethod  _      = False
+relevantToParsing SubPrim    ANil   = True
+relevantToParsing SubPrim    _      = False
+relevantToParsing _          AIrrelevantToParsing   = False
+relevantToParsing _          _      = True
+
+-- XXX Very bad hacky kluge just for Parser.Operator
+--     Switch to macro export for push(@x, 1) instead!
+listPkg :: Pkg
+listPkg = cast (mkType "List")
 
 -- read just the current state
-currentTightFunctions :: RuleParser [[String]]
+currentTightFunctions :: RuleParser TightFunctions
 currentTightFunctions = do
     funs    <- currentFunctions
-    let (unary, rest) = (`partition` funs) $ \x -> case x of
-            (_, "pre", [MkParam{ paramContext = CxtItem{}, isNamed = False }]) -> True
-            _ -> False
-        (maybeNullary, notNullary) = (`partition` funs) $ \x -> case x of
-            (_, "pre", []) -> True
-            _ -> False
-        rest' = (`filter` rest) $ \x -> case x of
-            (_, _, (_:_:_)) -> True
-            (_, _, [MkParam{ paramContext = CxtSlurpy{}, paramName = ('@':_) }]) -> True
-            _ -> False
-        namesFrom = map (\(name, _, _) -> name)
-        restNames = Set.fromList $ namesFrom rest'
-        notNullaryNames = Set.fromList $ namesFrom notNullary
-        nullary = filter (not . (`Set.member` notNullaryNames)) $ namesFrom maybeNullary
-        (optionary, unary') = mapPair (map snd) . partition fst . sort $
-            [ (isOptional param, name) | (name, _, [param]) <- unary
-            , not (name `Set.member` restNames)
+    let finalResult = foldr splitUnary termResult unary
+        termResult  = foldr splitTerm initResult maybeTerm
+        initResult  = MkTightFunctions emptySet emptySet emptySet emptySet emptyMap infixOps
+        (unary, notUnary)   = partition matchUnary funs
+        slurpyNames         = namesFrom (filter matchSlurpy notUnary)
+        (maybeTerm, notTerm)= partition matchTerm funs
+        nonTermNames        = namesFrom notTerm
+        infixOps            = Map.fromList
+            [ (MkOpName name, assoc)
+            | MkCurrentFunction { f_var = MkVar { v_categ = C_infix, v_name = name }, f_assoc = assoc } <- notUnary
+            , name /= commaID
             ]
-        (namedUnary, preUnary, postUnary) = foldr splitUnary ([],[],[]) unary'
-        splitUnary ('p':'r':'e':'f':'i':'x':':':op) (n, pre, post) = (n, (op:pre), post)
-        splitUnary ('p':'o':'s':'t':'f':'i':'x':':':op) (n, pre, post) = (n, pre, (op:post))
-        splitUnary op (n, pre, post) = ((op:n), pre, post)
-        -- Then we grep for the &infix:... ones.
-        (infixs, _) = (`partition` rest) $ \x -> case x of
-                ('i':'n':'f':'i':'x':':':_, _, _) -> True
-                _  -> False
-        infixOps = map (\(name, _, _) -> drop 6 name) infixs
-        mapPair f (x, y) = (f x, f y)
-    -- Finally, we return the names of the ops.
-    -- But we've to s/^infix://, as we've to return (say) "+" instead of "infix:+".
-    -- Hack: Filter out &infix:<,> (which are most Preludes for PIL -> *
-    -- compilers required to define), because else basic function application
-    -- (foo(1,2,3) will get parsed as foo(&infix:<,>(1,&infix:<,>(2,3))) (bad).
-    return $ map nub [nullary, optionary, namedUnary, preUnary, postUnary, infixOps]
+        splitTerm :: CurrentFunction -> TightFunctions -> TightFunctions
+        splitTerm (MkCurrentFunction MkVar{ v_categ = cat, v_name = n } _ _)
+            res@MkTightFunctions{ r_term = term }
+                | n `Set.member` nonTermNames   = res
+                | otherwise                     = res{ r_term = Map.insert (MkOpName n) cat term }
+
+        splitUnary :: CurrentFunction -> TightFunctions -> TightFunctions
+        splitUnary (MkCurrentFunction MkVar{ v_categ = cat, v_name = n } _ [param])
+            res@MkTightFunctions{ r_opt = opt, r_named = named, r_pre = pre, r_post = post }
+                | n `Set.member` slurpyNames    = res
+                | isOptional param              = res{ r_opt    = Set.insert (MkOpName n) opt }
+                | C_prefix <- cat               = res{ r_pre    = Set.insert (MkOpName n) pre }
+                | C_postfix <- cat              = res{ r_post   = Set.insert (MkOpName n) post }
+                | otherwise                     = res{ r_named  = Set.insert (MkOpName n) named }
+        splitUnary _ res = res
+    return finalResult
+
+namesFrom :: [CurrentFunction] -> Set ID
+namesFrom = Set.fromList . map (v_name . f_var)
+
+commaID :: ID
+commaID = cast ","
+
+data TightFunctions = MkTightFunctions
+    { r_opt         :: !(Set OpName)
+    , r_named       :: !(Set OpName)
+    , r_pre         :: !(Set OpName)
+    , r_post        :: !(Set OpName)
+    , r_term        :: !(Map OpName VarCateg)
+    , r_infix       :: !(Map OpName SubAssoc)
+    }
+
+emptySet :: Set OpName
+emptySet = Set.empty
+
+emptyMap :: Map OpName VarCateg
+emptyMap = Map.empty
+
+matchUnary :: CurrentFunction -> Bool
+matchUnary MkCurrentFunction
+    { f_assoc = ANil, f_params = [MkOldParam
+        { paramContext = CxtItem{}, isNamed = False }] } = True
+matchUnary _ = False
+
+matchTerm :: CurrentFunction -> Bool
+matchTerm MkCurrentFunction{ f_var = MkVar{ v_categ = C_term } } = True
+matchTerm MkCurrentFunction{ f_assoc = ANil, f_params = [] } = True
+matchTerm _ = False
+
+matchSlurpy :: CurrentFunction -> Bool
+matchSlurpy MkCurrentFunction
+    { f_params = (_:_:_) } = True
+matchSlurpy MkCurrentFunction
+    { f_params = [MkOldParam
+        { paramContext = CxtSlurpy{}, paramName = MkVar{ v_sigil = sig } }] }
+            = sig == SArray || sig == SArrayMulti
+matchSlurpy _ = False
 
 fileTestOperatorNames :: String
-fileTestOperatorNames = "rwxoRWXOezsfdlpSbctugkTBMAC"
+fileTestOperatorNames = "ABCMORSTWXbcdefgkloprstuwxz"
 
-preSyn      :: [String] -> [RuleOperator Exp]
-preSyn      = ops $ makeOp1 Prefix "" Syn
-optPreSyn   :: [String] -> [RuleOperator Exp]
-optPreSyn   = ops $ makeOp1 OptionalPrefix "" Syn
-preOps      :: [String] -> [RuleOperator Exp]
+circumOps, rightSyn, chainOps, matchOps, nonSyn, listSyn, preSyn, optPreSyn, preOps, preSymOps, optSymOps, postOps, optOps, leftOps, rightOps, nonOps, listOps :: Set OpName -> [RuleOperator Exp]
+preSyn      = ops  $ makeOp1 Prefix "" Syn
+optPreSyn   = ops  $ makeOp1 OptionalPrefix "" Syn
 preOps      = (ops $ makeOp1 Prefix "&prefix:" doApp) . addHyperPrefix
-preSymOps   :: [String] -> [RuleOperator Exp]
 preSymOps   = (ops $ makeOp1 Prefix "&prefix:" doAppSym) . addHyperPrefix
-optSymOps   :: [String] -> [RuleOperator Exp]
 optSymOps   = (ops $ makeOp1 OptionalPrefix "&prefix:" doAppSym) . addHyperPrefix
-postOps     :: [String] -> [RuleOperator Exp]
 postOps     = (ops $ makeOp1 Postfix "&postfix:" doApp) . addHyperPostfix
-optOps      :: [String] -> [RuleOperator Exp]
 optOps      = (ops $ makeOp1 OptionalPrefix "&prefix:" doApp) . addHyperPrefix
-leftOps     :: [String] -> [RuleOperator Exp]
 leftOps     = (ops $ makeOp2 AssocLeft "&infix:" doApp) . addHyperInfix
-rightOps    :: [String] -> [RuleOperator Exp]
 rightOps    = (ops $ makeOp2 AssocRight "&infix:" doApp) . addHyperInfix
-noneOps     :: [String] -> [RuleOperator Exp]
-noneOps     = ops $ makeOp2 AssocNone "&infix:" doApp
-listOps     :: [String] -> [RuleOperator Exp]
-listOps     = ops $ makeOp2 AssocLeft "&infix:" doApp
-chainOps    :: [String] -> [RuleOperator Exp]
-chainOps    = (ops $ makeOp2 AssocLeft "&infix:" doApp) . addHyperInfix
-rightSyn    :: [String] -> [RuleOperator Exp]
+nonOps      = ops  $ makeOp2 AssocNone "&infix:" doApp
+listOps     = ops  $ makeOp2 AssocLeft "&infix:" doApp
+matchOps    = (ops $ makeOp2Match AssocLeft "&infix:" doApp) . addHyperInfix . addNegation
+chainOps    = (ops $ makeOp2 AssocLeft "&infix:" doApp) . addHyperInfix . addNegation
 rightSyn    = ops $ makeOp2 AssocRight "" Syn
-noneSyn     :: [String] -> [RuleOperator Exp]
-noneSyn     = ops $ makeOp2 AssocNone "" Syn
-listSyn     :: [String] -> [RuleOperator Exp]
+nonSyn      = ops $ makeOp2 AssocNone "" Syn
 listSyn     = ops $ makeOp0 AssocList "" Syn
+circumOps   = ops $ makeCircumOp "&circumfix:"
 rightAssignSyn :: RuleOperator Exp
 rightAssignSyn = makeOp2Assign AssocRight "" Syn
 rightDotAssignSyn :: RuleOperator Exp
 rightDotAssignSyn = makeOp2DotAssign AssocRight "" Syn
 
--- 0x10FFFF is the max number "chr" can take.
-ops :: (String -> a) -> [String] -> [a]
-ops f = map (f . tail) . sort . map (\x -> (chr (0x10FFFF - length x):x))
-
-
--- chainOps    = ops $ makeOpChained
+{-# INLINE ops #-}
+{-# SPECIALISE ops :: (String -> RuleOperator Exp) -> Set OpName -> [RuleOperator Exp] #-}
+{-# SPECIALISE ops :: (String -> RuleParser String) -> Set OpName -> [RuleParser String] #-}
+ops :: (String -> a) -> Set OpName -> [a]
+ops f = map f . cast . Set.toAscList
 
 makeOp1 :: (RuleParser (Exp -> Exp) -> RuleOperator Exp) -> 
         String -> 
         (String -> [Exp] -> Exp) -> 
         String -> 
         RuleOperator Exp
-makeOp1 prec sigil con name = prec $ try $ do
+makeOp1 fixity sigil con name = fixity $ try $ do
     symbol name
     -- `int(3)+4` should not be parsed as `int((3)+4)`
     lookAheadLiterals
@@ -274,22 +374,44 @@ makeOp1 prec sigil con name = prec $ try $ do
         Syn "" []   -> con name []
         _           -> con name [x]
 
+
+makeCircumOp :: String -> String -> RuleOperator Exp
+makeCircumOp sigil op = Term . try $
+    between (lexeme $ string opener) (string closer) $
+        enterBracketLevel ParensBracket $ do
+            (invs, args) <- option (Nothing, []) parseNoParenArgList
+            possiblyApplyMacro $ App (_Var name) invs args
+    where
+    name = sigil ++ opener ++ " " ++ closer
+    [opener, closer] = words op
+
 -- Just for the "state $foo = 1" rewriting
 makeOp2Assign :: Assoc -> String -> (String -> [Exp] -> Exp) -> RuleOperator Exp
 makeOp2Assign prec _ con = (`Infix` prec) $ do
     symbol "="
     return $ \invExp argExp -> stateAssignHack (con "=" [invExp, argExp])
 
+-- Rewrite "EXP ~~ .meth" into "?(EXP.meth)"
+makeOp2Match :: Assoc -> String -> (String -> [Exp] -> Exp) -> String -> RuleOperator Exp
+makeOp2Match prec sigil con name = (`Infix` prec) $ do
+    symbol name
+    return $ \x y -> case y of
+        Syn syn [Var var, rhs] | var == varTopic ->
+            App (_Var "&prefix:?") Nothing [Syn syn [x, rhs]]
+        App app (Just (Var var)) args | var == varTopic ->
+            App (_Var "&prefix:?") Nothing [App app (Just x) args]
+        _ -> con (sigil ++ name) [x,y]
+
 stateAssignHack :: Exp -> Exp
 stateAssignHack exp@(Syn "=" [lhs, _]) | isStateAssign lhs = 
     let pad = unsafePerformSTM $! do
-                state_first_run <- newTVar =<< (fmap scalarRef $! newTVar (VInt 0))
-                state_fresh     <- newTVar False
-                return $! mkPad [("$?STATE_FIRST_RUN", [(state_fresh, state_first_run)])] in
+            state_first_run <- newTVar =<< (fmap scalarRef $! newTVar (VInt 0))
+            state_fresh     <- newTVar False
+            return $! mkPad [(cast "$?STATE_START_RUN", [(state_fresh, state_first_run)])] in
     Syn "block"
         [ Pad SState pad $!
             Syn "if"
-                [ App (Var "&postfix:++") Nothing [Var "$?STATE_FIRST_RUN"]
+                [ App (_Var "&postfix:++") Nothing [_Var "$?STATE_START_RUN"]
                 , lhs
                 , exp
                 ]
@@ -306,6 +428,7 @@ makeOp2DotAssign prec _ con = (`Infix` prec) $ do
     symbol ".="
     insertIntoPosition '.' -- "$x .= foo" becomes "$x .= .foo"
     return $ \invExp argExp -> case argExp of
+        -- XXX - App meth _ args -> stateAssignHack (con ".=" [invExp, App meth Nothing args])
         App meth _ args -> stateAssignHack (con "=" [invExp, App meth (Just invExp) args])
         _               -> Val (VError (VStr "the right-hand-side of .= must be a function application") [])
 
@@ -330,7 +453,7 @@ makeOp0 prec sigil con name = (`InfixList` prec) $ do
     return . con $ sigil ++ name
 
 doApp :: String -> [Exp] -> Exp
-doApp str args = App (Var str) Nothing args
+doApp str args = App (_Var str) Nothing args
 
 {-|
 Take a list of infix-operator names (as a space-separated string), and return
@@ -340,10 +463,13 @@ hyperized forms.
 For example, the string @\"+ -\"@ would be transformed into
 @\"+ >>+\<\< »+« - >>-\<\< »-«\"@.
 -}
-addHyperInfix :: [String] -> [String]
-addHyperInfix = concatMap hyperForm
+addHyperInfix :: Set OpName -> Set OpName
+addHyperInfix xs = xs `Set.union` hyperTexan `Set.union` hyperFrench
     where
-    hyperForm op = [op, ">>" ++ op ++ "<<", "\xBB" ++ op ++ "\xAB"]
+    hyperTexan = Set.mapMonotonic texan xs
+    hyperFrench = Set.mapMonotonic french xs
+    texan x = cast (Buf.concat [__">>", cast x, __"<<"])
+    french x = cast (Buf.concat [__"\187", cast x, __"\171"])
 
 {-|
 Similar to 'addHyperInfix', but for prefix ops.
@@ -351,10 +477,13 @@ Similar to 'addHyperInfix', but for prefix ops.
 For example, @\"++ --\"@ would become
 @\"++ ++\<\< ++« -- --\<\< --«\"@.
 -}
-addHyperPrefix :: [String] -> [String]
-addHyperPrefix = concatMap hyperForm
+addHyperPrefix :: Set OpName -> Set OpName
+addHyperPrefix xs = xs `Set.union` hyperTexan `Set.union` hyperFrench
     where
-    hyperForm op = [op, op ++ "<<", op ++ "\xAB"]
+    hyperTexan = Set.mapMonotonic texan xs
+    hyperFrench = Set.mapMonotonic french xs
+    texan x = cast (cast x +++ __"<<")
+    french x = cast (cast x +++ __"\171")
 
 {-|
 Similar to 'addHyperInfix', but for postfix ops.
@@ -362,56 +491,277 @@ Similar to 'addHyperInfix', but for postfix ops.
 For example, @\"++ --\"@ would become
 @\"++ >>++ »++ -- >>-- »--\"@.
 -}
-addHyperPostfix :: [String] -> [String]
-addHyperPostfix = concatMap hyperForm
+addHyperPostfix :: Set OpName -> Set OpName
+addHyperPostfix xs = xs `Set.union` hyperTexan `Set.union` hyperFrench
     where
-    hyperForm op = [op, ">>" ++ op, "\xBB" ++ op]
+    hyperTexan = Set.mapMonotonic texan xs
+    hyperFrench = Set.mapMonotonic french xs
+    texan x = cast (__">>" +++ cast x)
+    french x = cast (cast "\187" +++ cast x)
+
+{-|
+Add prefix \
+
+-}
+addScanPrefix :: Set OpName -> Set OpName
+addScanPrefix xs = xs `Set.union` scanPrefix
+    where
+    scanPrefix = Set.mapMonotonic scan xs
+    scan x = cast (Buf.cons '\\' (cast x))
+
+addNegation :: Set OpName -> Set OpName
+addNegation xs = xs `Set.union` Set.mapMonotonic negation xs
+    where
+    negation x = let buf = cast x in
+        if Buf.head buf == '!'
+            then x
+            else cast (Buf.cons '!' (cast x))
 
 methOps             :: a -> [b]
 methOps _ = []
 
 doAppSym :: String -> [Exp] -> Exp
-doAppSym name@(_:'p':'r':'e':'f':'i':'x':':':_) args = App (Var name) Nothing args
-doAppSym (sigil:name) args = App (Var (sigil:("prefix:"++name))) Nothing args
+doAppSym name@(_:'p':'r':'e':'f':'i':'x':':':_) args = App (_Var name) Nothing args
+doAppSym (sigil:name) args = App (_Var (sigil:("prefix:"++name))) Nothing args
 doAppSym _ _ = error "doAppSym: bad name"
 
 
-{-|
-Record the current parser position, invoke the given subrule, then record the
-parser's new position and encapsulate the subrule's result in a
-'Pugs.AST.Internals.Pos' indicating the source region matched by the rule.
-
-Also applies 'unwrap' to the result of the given parser.
--}
-expRule :: RuleParser Exp -- ^ Sub-rule to invoke
-        -> RuleParser Exp
-expRule rule = do
-    pos1 <- getPosition
-    exp  <- rule
-    pos2 <- getPosition
-    return $ Ann (Pos (mkPos pos1 pos2)) (unwrap exp)
-
-{-|
-Create a Pugs 'Pugs.AST.Pos' (for storing in the AST) from two Parsec
-@SourcePos@ positions, being the start and end respectively of the current
-region.
--}
-mkPos :: SourcePos -- ^ Starting position of the region
-      -> SourcePos -- ^ Ending position of the region
-      -> Pos
-mkPos pos1 pos2 = MkPos
-    { posName         = sourceName pos1 
-    , posBeginLine    = sourceLine pos1
-    , posBeginColumn  = sourceColumn pos1
-    , posEndLine      = sourceLine pos2
-    , posEndColumn    = sourceColumn pos2
-    }
-
-ternOp :: (?parseExpWithTightOps :: RuleParser Exp) =>
-    String -> String -> String -> RuleOperator Exp
+ternOp :: String -> String -> String -> RuleOperator Exp
 ternOp pre post syn = (`Infix` AssocRight) $ do
     symbol pre
-    y <- ?parseExpWithTightOps
+    y <- parseExpWithTightOps
     symbol post
     return $ \x z -> Syn syn [x, y, z]
+
+
+
+
+emptyTerm :: Exp
+emptyTerm = Syn "" []
+
+type TermOperator       = RuleParser Exp
+type UnaryOperator      = RuleParser (Exp -> Exp)
+type BinaryOperator     = RuleParser (Exp -> Exp -> Exp)
+type ListOperator       = RuleParser ([Exp] -> Exp)
+type DependentOperator  = Exp -> RuleParser Exp
+
+data OpRow = MkOpRow
+    { o_rassoc      :: ![BinaryOperator]
+    , o_lassoc      :: ![BinaryOperator]
+    , o_nassoc      :: ![BinaryOperator]
+    , o_prefix      :: ![UnaryOperator]
+    , o_postfix     :: ![UnaryOperator]
+    , o_optPrefix   :: ![UnaryOperator]
+    , o_listAssoc   :: ![ListOperator]
+    , o_depPostfix  :: ![DependentOperator]
+    , o_term        :: ![TermOperator]
+    }
+
+-----------------------------------------------------------
+-- Convert an OperatorTable and basic term parser into
+-- a full fledged expression parser
+-----------------------------------------------------------
+buildExpressionParser :: RuleOperatorTable Exp -> RuleParser Exp -> RuleParser Exp
+buildExpressionParser = flip (foldl makeParser)
+
+{-# INLINE makeParser #-}
+makeParser :: RuleParser Exp -> [RuleOperator Exp] -> RuleParser Exp
+makeParser simpleTerm ops = do
+    x <- termP
+    rassocP x <|> lassocP x <|> nassocP x <|> listAssocP x <|> return x <?> "operator"
+    where
+    MkOpRow rassoc lassoc nassoc prefix postfix optPrefix listAssoc depPostfix term
+        = foldr splitOp (MkOpRow [] [] [] [] [] [] [] [] []) ops
+    rassocOp          = {-# SCC "rassocOp" #-}      choice rassoc <?> ""
+    lassocOp          = {-# SCC "lassocOp" #-}      choice lassoc <?> ""
+    nassocOp          = {-# SCC "nassocOp" #-}      choice nassoc <?> ""
+    prefixOp          = {-# SCC "prefixOp" #-}      choice prefix <?> ""
+    postfixOp         = {-# SCC "postfixOp" #-}     choice postfix <?> ""
+    optPrefixOp       = {-# SCC "optPrefixOp" #-}   choice optPrefix <?> ""
+    listAssocOp       = {-# SCC "listAssocOp" #-}   choice listAssoc <?> ""
+    depPostfixOp x    = {-# SCC "depPostfixOp" #-}  choice (map ($ x) depPostfix) <?> ""
+    termOp            = {-# SCC "termOp" #-}        choice term <|> simpleTerm
+
+    ambig assoc op    = try
+        (op >> fail ("ambiguous use of a " ++ assoc ++ " associative operator"))
+    ambigRight        = ambig "right" rassocOp
+    ambigLeft         = ambig "left" lassocOp
+    ambigNon          = ambig "non" nassocOp
+
+    foldOp = foldr (.) id
+    termP = {-# SCC "termP" #-} do
+        pres    <-  many $ (fmap Left prefixOp) <|> (fmap Right optPrefixOp)
+        -- Here we handle optional-prefix operators.
+        x       <- if null pres then termOp else case last pres of
+            Left _  -> termOp
+            _       -> option emptyTerm termOp
+        x'      <- depPostP x
+        posts   <- many postfixOp
+        fmap (foldOp posts) $ foldM maybeApplyPrefixMacro x' (map liftEither $ reverse pres)
+
+    maybeApplyPrefixMacro t f = {-# SCC "maybeApplyPrefixMacro" #-} possiblyApplyMacro (f t)
+
+    liftEither (Left x) = x
+    liftEither (Right x) = x
+    depPostP x = (<|> return x) $ do
+        x' <- depPostfixOp x 
+        depPostP x'
+
+    rassocP x  = (do
+        f   <- rassocOp
+        y   <- rassocP1 =<< termP
+        return (f x y)) <|> ambigLeft <|> ambigNon
+
+    rassocP1 x = rassocP x  <|> return x
+
+    lassocP x  = (do
+        f   <- lassocOp
+        y   <- termP
+        lassocP1 (f x y)) <|> ambigRight <|> ambigNon
+
+    lassocP1 x = lassocP x <|> return x
+
+    nassocP x  = do
+        f <- nassocOp
+        y <- termP
+        ambigRight <|> ambigLeft <|> ambigNon <|> return (f x y)
+
+    listAssocP x  = do
+        f   <- listAssocOp
+        xs  <- option [] $ listAssocP1 =<< termP
+        return (f (x:xs))
+
+    listAssocP0 x  = do
+        listAssocOp
+        xs  <- option [] $ listAssocP1 =<< termP
+        return (x:xs)
+    listAssocP1 x = listAssocP0 x <|> return [x]
+
+{-# INLINE splitOp #-}
+splitOp :: RuleOperator Exp -> OpRow -> OpRow
+splitOp col row@(MkOpRow rassoc lassoc nassoc prefix postfix optPrefix listAssoc depPostfix term) = case col of
+    Infix op AssocNone      -> row{ o_nassoc    = op:nassoc }
+    Infix op AssocLeft      -> row{ o_lassoc    = op:lassoc }
+    Infix op AssocRight     -> row{ o_rassoc    = op:rassoc }
+    InfixList op AssocList  -> row{ o_listAssoc = op:listAssoc }
+    Prefix op               -> row{ o_prefix    = op:prefix }
+    Postfix op              -> row{ o_postfix   = op:postfix }
+    OptionalPrefix op       -> row{ o_optPrefix = op:optPrefix }
+    DependentPostfix op     -> row{ o_depPostfix= op:depPostfix }
+    Term op                 -> row{ o_term      = op:term }
+    -- FIXME: add AssocChain
+    _ -> internalError $ "Unhandled operator type" ++ show (op_assoc col)
+
+
+refillCache :: RuleState -> (DynParsers -> RuleParser a) -> RuleParser a
+refillCache state f = do
+    (tights, opsTight)  <- tightOperators
+    opsLoose            <- looseOperators
+    let tightExprs  = buildExpressionParser opsTight parseTerm
+        parseTight  = expRule tightExprs
+        parseFull   = expRule (buildExpressionParser opsFull tightExprs)
+        parseLit    = expRule (buildExpressionParser opsLoose tightExprs)
+        parsePost   = pp "&postfix:" $ incrOps `Set.union` r_post tights
+     -- parsePre    = pp "&prefix:"  $ symbPreops `Set.union` r_pre tights
+     -- parsePreNam = pp "&"         $ r_named tights `Set.union` r_opt tights
+        pp pre ops  = fmap (pre ++) (tryChoice . map string . fromSet $ ops)
+        opParsers   = MkDynParsers parseFull parseTight parseLit parseNullary parsePost -- <|> parsePre <|> parsePreNam)
+        opsFull     = listCons:listInfix:opsLoose
+        parseNullary= try $ do
+            var <- (choice . map parseOneTerm . Map.toAscList $ r_term tights) <?> "term"
+            notFollowedBy (char '(' <|> (char ':' >> char ':'))
+            possiblyApplyMacro $ App (Var var) Nothing []
+        parseOneTerm (name, categ) = do
+            symbol (cast name)
+            return MkVar
+                { v_name    = cast name
+                , v_sigil   = SCode
+                , v_twigil  = TNil
+                , v_categ   = categ
+                , v_package = emptyPkg
+                , v_meta    = MNil
+                }
+    setState state{ s_dynParsers = opParsers }
+    f opParsers
+
+-- was: parseOp
+parseExpWithOps :: RuleParser Exp
+parseExpWithOps = parseExpWithCachedParser dynParseOp
+
+-- was: parseTightOp
+parseExpWithTightOps :: RuleParser Exp
+parseExpWithTightOps = parseExpWithCachedParser dynParseTightOp
+
+-- Parse something in item context -- i.e. everything minus list-associative ones
+parseExpWithItemOps :: RuleParser Exp
+parseExpWithItemOps = parseExpWithCachedParser dynParseLitOp
+
+-- was: parseOpWith
+parseExpWithCachedParser :: (DynParsers -> RuleParser a) -> RuleParser a
+parseExpWithCachedParser f = do
+    state <- getState
+    case s_dynParsers state of
+        MkDynParsersEmpty   -> refillCache state f
+        p                   -> f p
+
+
+ruleHyperPre :: RuleParser String
+ruleHyperPre = ((char '\187' >> return ">>") <|> (string ">>"))
+
+ruleHyperPost :: RuleParser String
+ruleHyperPost = ((char '\171' >> return "<<") <|> (string "<<"))
+
+-- XXX - the rulePipeHyper below should be more generic and put all +<< etc to listop level
+rulePipeHyper :: RuleParser Var
+rulePipeHyper = verbatimRule "" $ do
+    -- sig <- (fmap show ruleSigil) <|> string "|"
+    char '|'
+    ruleHyperPost
+    return $ cast "&prefix:|<<"
+
+ruleInfixOp :: RuleParser String
+ruleInfixOp = verbatimRule "infix operator" $ do
+    -- XXX - Instead of a lookup, add a cached parseInfix here!
+    MkTightFunctions{ r_infix = infixOps } <- currentTightFunctions
+    choice $ ops (try . string)
+        (addScanPrefix (addHyperInfix (Map.keysSet infixOps `Set.union` defaultInfixOps)))
+
+ruleInfixAssignment :: RuleParser String
+ruleInfixAssignment = choice $ ops (try . string) infixAssignmentOps
+
+-- XXX !~~ needs to turn into metaop plus ~~
+defaultInfixOps :: Set OpName
+defaultInfixOps = opWords $ concat
+    [ " ** * / % x xx +& +< +> ~& ~< ~> "
+    , " + - ~ +| +^ ~| ~^ ?| , Y \xA5 "
+    , " & ^ | "
+    , " => = "
+    , " != == < <= > >= ~~ "
+    , " !== !< !<= !> !>= !~~ "
+    , " eq ne lt le gt ge =:= === eqv "
+    , " !eq !ne !lt !le !gt !ge !=:= !=== !eqv "
+    , " && "
+    , " || ^^ // "
+    , " and or xor err "
+    , " .[] .{} "
+    ]
+
+ruleFoldOp :: RuleParser Var
+ruleFoldOp = tryVerbatimRule "reduce metaoperator" $ rulePipeHyper <|> do
+    char '['
+    name <- ruleInfixOp
+    char ']'
+--    possiblyHyper <- option "" ruleHyperPost
+--
+    -- S03: If there is ambiguity between a triangular reduce and an infix operator
+    --      beginning with backslash, the infix operator is chosen.
+    let var = cast ("&prefix:[" ++ name ++ "]")
+        nameID = cast name
+    case name of
+        ('\\':_)  -> do
+            MkTightFunctions{ r_infix = infixOps } <- currentTightFunctions
+            return $ if MkOpName nameID `Map.member` infixOps
+                then var{ v_name = nameID, v_meta = MFold }
+                else var
+        _ -> return var
 

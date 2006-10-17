@@ -1,16 +1,29 @@
 BUILDING PUGS
 -------------
 
-Pugs needs the Glasgow Haskell Compiler (GHC) 6.4.1 or above.  To install GHC,
-download a binary build from http://haskell.org/ghc/.  Although source code
-for GHC is available, it will take a very long time to build by yourself. 
+Pugs needs the Glasgow Haskell Compiler (GHC), preferably version 6.6 or above.
+At the moment the minimum requirement is GHC 6.4.1 or above, but we plan to
+discontinue support for GHC 6.4.* in the next release.
 
-Pugs needs Parrot 0.4.5 or above to support Perl 6 Rules and PIR evaluation.
-To install Parrot, follow the instructions at http://www.parrotcode.org/.
+To install GHC, download a binary build from http://haskell.org/ghc/.
+Although source code for GHC is available, it will take a very long time to
+build by yourself.
 
-http://www.jwcs.net/~jonathan/perl6/ and http://pxperl.com/ both have 
-binary builds for Win32.  If you'd like to build Pugs by hand,
-http://wiki.kn.vutbr.cz/mj/?Perl%206%20and%20Parrot has some instructions.
+Additionally, Pugs uses the Cabal framework (http://haskell.org/cabal/),
+which is usually bundled with GHC itself.
+
+v6-pugs (see <http://perlmonks.org/?node_id=559083>) needs the CPAN modules
+Devel::Caller, Module::Compile and Pugs::Compiler::Rule. The first one is
+dependent on Module::Build with C_support, so install ExtUtils::CBuilder and
+ExtUtils::ParseXS first. Satisfy all with one command:
+
+    $ sudo cpan -fi ExtUtils::CBuilder ExtUtils::ParseXS Module::Build \
+          Devel::Caller Module::Compile Pugs::Compiler::Rule
+
+http://jnthn.net/perl6/ has binary builds for Win32.  For Mac OS X (PowerPC),
+http://www.unobe.com/packages/ has binary builds too. If you'd like to build
+Pugs by hand, http://wiki.kn.vutbr.cz/mj/?Perl%206%20and%20Parrot has some
+instructions.
 
 For dynamic loading/inlining of Haskell modules, you should install the
 hs-plugin library, available here:
@@ -53,8 +66,10 @@ you run "perl Makefile.PL", for example:
 To control which optional subsystems are embedded in Pugs, set the 
 PUGS_EMBED variable. For example: 
  
-    export PUGS_EMBED="perl5 parrot" (bash)
-    setenv PUGS_EMBED "perl5 parrot" (csh)
+    export PUGS_EMBED="parrot noperl5" (bash)
+    setenv PUGS_EMBED "parrot noperl5" (csh)
+
+Perl5 is now embedded by default.  Use "noperl5" to disable.
 
 To build with an embedded parrot interpreter, make sure the PUGS_EMBED 
 variable contains "parrot", and set the PARROT_PATH variable to point to 
@@ -69,27 +84,19 @@ MAKE TARGETS
 The default make target builds an optimized Pugs. This means that Pugs will
 be slower to compile, but will run much faster. To disable this, run:
     
-    make unoptimized  # unoptimised will work, too. We're not picky.
+    make fast
 
-To run the test suite:
-
-    make test
-
-To make a pretty HTML matrix showing test results:
+To run the test suite with a pretty HTML matrix showing test results:
 
     make smoke
-    
-To run the test suite using the PIR backend:
-    
-    make pirtest
-    
-To make a pretty HTML matrix showing test results using the PIR backend:
-
-    make pirsmoke
 
 To turn on profiling in the GHC compiler:
  
-    make profiled
+    make prof
+
+To hack on Pugs using the GHC interactive shell:
+
+    make ghci
 
 BUILD CONFIGURATION CONSOLIDATION VIA config.yml
 ------------------------------------------------
@@ -133,20 +140,3 @@ See `util/config-template.yml` for more information.
 
 [1] See <http://yaml.org/>. Only a subset of the YAML syntax is permitted
 at the moment, to avoid a dependency on the full parser.
-
-CAVEATS FOR ALL USERS
----------------------
-
-Parrot is used to provide Perl6-style regular expressions.
-Perl5-style regular expressions (eg, rx:Perl5/foo/) can be used
-without any parrot at all.  Pugs can be built to use parrot external
-(the default), or embedded.  External is recommended.
-
-Embedding parrot currently requires a parrot version 0.4.5 or later.
-Recent copies of parrot can be obtained from http://www.parrotcode.org/.
-
-CAVEATS FOR Win32 USERS
--------------------------
-
-Embedding Perl5 is disabled GHC is built with MinGW/GCC and Perl 
-is usually built with VC++, they cannot embed one another.

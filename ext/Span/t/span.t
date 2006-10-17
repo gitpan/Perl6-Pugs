@@ -1,12 +1,9 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 63;
 
 use Span; pass "(dummy instead of broken use_ok)";
-use Span;   # XXX should not need this
 
 my $span = Span.new( :start(1), :end(3) );
 
@@ -64,7 +61,7 @@ is( $span.size, 2, "real size" );
     # is( Span.new( :start(1), :end(3), :int ).size, 3, "integer size" );
 
     is( $ispan.size, 3, "integer size" );
-    is( $ispan.span.ref, "Span::Int", "integer span" );
+    is( $ispan.span.WHAT, "Span::Int", "integer span" );
     # is( {$ispan.span}.density, 1, 'get density integer is 1' );
 }
 
@@ -125,7 +122,7 @@ is( $span.contains( 9 ), Bool::False, 'doesn\'t contain object' );
     is( @a[0].stringify, '[1,2]', 'difference 0' );
 }
 
-if(0)
+if 0
 {
     # XXX - this test should emit a warning - how to test this?
     my $span = Span.new( :start(1), :end(2) );

@@ -1,6 +1,4 @@
-#!/usr/bin/pugs
-
-use v6;
+use v6-alpha;
 use Test;
 
 plan 38;
@@ -16,12 +14,8 @@ my $set = set(0, 1, 2, 3, $bob);
 my $union = $set + set(4,5,6);
 isa_ok($union, Set, "set() - infix:<+>");
 
-my $stringified = "$set";
-ok($stringified ~~ rx:perl5/^set\([^<]*<obj:Person>[^<]*\)$/,
-   "prefix:<~>", :todo<bug>);
-diag("stringified to $stringified");
-
-#skip_rest("next test loops"); exit;
+my $stringified = ~$set;
+ok($stringified ~~ rx:P5/^set\(.*Person.*\)$/, "prefix:<~>", :todo<bug>);
 
 ok($union == set(0..6, $bob), "set() - infix:<==>");
 ok(!($union != set(0..6, $bob)), "set() - !infix:<!=>");
@@ -87,10 +81,10 @@ ok not(42 ~~ set(23, 43, 63)), "infix:<~~> works (2)";
 # "Why do you write "+[hash]" instead of "+#" in the test descriptions?"
 # -- The test harness doesn't get that the "#" in "+#" does not start a
 # comment, and thus doesn't interpret the "# TODO feature".
-eval_is '+([1,2,3] +# [1,2,3])',   3, "infix:<+[hash]> works (1)", :todo<feature>;
-eval_is '+([1,2,3] +# [1,2,3,4])', 4, "infix:<+[hash]> works (2)", :todo<feature>;
-eval_is '+([1,2,3] -# [1,2,3])',   0, "infix:<-[hash]> works (1)", :todo<feature>;
-eval_is '+([1,2,3] -# [1,2,3,4])', 0, "infix:<-[hash]> works (2)", :todo<feature>;
-eval_is '+([1,2,3] *# [2,3])',     2, "infix:<*[hash]> works (1)", :todo<feature>;
-eval_is '+([1,2,3] *# [])',        0, "infix:<*[hash]> works (2)", :todo<feature>;
-eval_is '+([1,2,3] %# [1,2,6])',   2, "infix:<%[hash]> works",     :todo<feature>;
+is eval('+([1,2,3] +# [1,2,3])'),   3, "infix:<+[hash]> works (1)";
+is eval('+([1,2,3] +# [1,2,3,4])'), 4, "infix:<+[hash]> works (2)";
+is eval('+([1,2,3] -# [1,2,3])'),   0, "infix:<-[hash]> works (1)";
+is eval('+([1,2,3] -# [1,2,3,4])'), 0, "infix:<-[hash]> works (2)";
+is eval('+([1,2,3] *# [2,3])'),     2, "infix:<*[hash]> works (1)", :todo<feature>;
+is eval('+([1,2,3] *# [])'),        0, "infix:<*[hash]> works (2)", :todo<feature>;
+is eval('+([1,2,3] %# [1,2,6])'),   2, "infix:<%[hash]> works",     :todo<feature>;

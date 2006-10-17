@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
+{-# OPTIONS_GHC -fglasgow-exts -fallow-overlapping-instances #-}
 
 {-|
     Common operations on Eval monad.
@@ -15,20 +15,20 @@
 module Pugs.Monads (
     enterLValue, enterRValue,
     enterLex, enterContext, enterEvalContext, enterPackage, enterCaller,
-    enterGiven, enterWhen, enterWhile, genSymPrim, genSymCC,
+    enterGiven, enterWhen, enterLoop, enterGather, genSymPrim, genSymCC,
     enterBlock, enterSub, envEnterCaller,
     evalVal, tempVar,
+
+    enterFrame, assertFrame, emptyFrames,
     
     MaybeT, runMaybeT,
-
-    module Control.Monad.RWS
 ) where
 import Pugs.Internals
 import Pugs.AST
 import Pugs.Types
-import Control.Monad.RWS
+import Control.Monad.RWS (MonadPlus(..))
 import qualified Data.Map as Map
-
+import qualified Data.Set as Set
 
 newtype MaybeT m a = MaybeT { runMaybeT :: m (Maybe a) }
 
@@ -93,8 +93,8 @@ Perform the specified evaluation in the specified package.
 
 (Subsequent chained 'Eval's do /not/ see this package.)
 -}
-enterPackage :: String -> Eval a -> Eval a
-enterPackage pkg = local (\e -> e{ envPackage = pkg })
+enterPackage :: ByteString -> Eval a -> Eval a
+enterPackage pkg = local (\e -> e{ envPackage = cast pkg })
 
 {-|
 Enter a new environment and mark the previous one as 'Caller'.
@@ -107,69 +107,47 @@ envEnterCaller env = env
     { envCaller = Just env
         { envLexical = MkPad (lex `Map.intersection` envImplicit env)
         }
-    , envDepth = envDepth env + 1
-    , envImplicit = Map.fromList [("$_", ())]
+    , envFrames = FrameRoutine `Set.insert` envFrames env
+    , envImplicit = Map.fromList [(cast "$_", ())]
     }
     where
     MkPad lex = envLexical env
 
 {-|
-Bind @\$_@ to the given topic value in a new lexical scope, then perform
-the specified evaluation in that scope.
-
-Used by "Pugs.Eval"'s implementation of 'Pugs.Eval.reduce' for @\"given\"@.
+Register the fact that we are inside a specially marked control block.
 -}
-enterGiven :: VRef   -- ^ Reference to the value to topicalise
-           -> Eval a -- ^ Action to perform within the new scope
-           -> Eval a
-enterGiven topic action = do
-    sym <- genSym "$_" topic
-    enterLex [sym] action
+enterFrame :: Frame -> Eval a -> Eval a
+enterFrame f = local (\e -> e{ envFrames = f `Set.insert` envFrames e})
+
+enterGather, enterLoop, enterGiven :: Eval Val -> Eval Val
+enterGather = enterFrame FrameGather
+enterLoop   = enterFrame FrameLoop
+enterGiven  = id
+
+assertFrame :: Frame -> Eval a -> Eval a
+assertFrame f action = do
+    frames <- asks envFrames
+    if Set.member f frames
+        then action
+        else fail ("Cannot use this control structure outside a '" ++ (map toLower (drop 5 (show f))) ++ "' structure")
+
+emptyFrames :: Set Frame
+emptyFrames = Set.empty
 
 {-|
-Bind @&continue@ and @&break@ to subs that break out of the @when@ body
-and topicalising block respectively, then perform the given evaluation
-in the new lexical scope.
-
 Note that this function is /not/ responsible for performing the actual @when@
 test, nor is it responsible for adding the implicit @break@ to the end of the
 @when@'s block--those are already taken care of by 'Pugs.Eval.reduce'
 (see the entry for @('Syn' \"when\" ... )@).
 -}
-enterWhen :: Exp      -- ^ The expression that @&break@ should be bound to
-          -> Eval Val -- ^ The @when@'s body block, as an evaluation
+enterWhen :: Eval Val -- ^ The @when@'s body block, as an evaluation
           -> Eval Val
-enterWhen break action = callCC $ \esc -> do
-    env <- ask
-    contRec  <- genSubs env "&continue" $ continueSub esc
-    breakRec <- genSubs env "&break" $ breakSub
-    enterLex (contRec ++ breakRec) action
-    where
-    continueSub esc env = mkPrim
-        { subName = "continue"
-        , subParams = makeParams env
-        , subBody = Prim ((esc =<<) . headVal)
-        }
-    breakSub env = mkPrim
-        { subName = "break"
-        , subParams = makeParams env
-        , subBody = break
-        }
-
-{-|
-Bind @&last@ and @&next@ to subs that respectively break-out-of and repeat the 
-@while@\/@until@, then perform the given evaluation in the new lexical scope.
-
-Note that this function is /not/ responsible for performing the actual
-@while@\/@until@ test; it is the responsibility of the caller to add such a
-test to the top of the body evaluation.
--}
-enterWhile :: Eval Val -- ^ Evaluation representing loop test & body
-           -> Eval Val
-enterWhile action = genSymCC "&last" $ \symLast -> do
-    -- genSymPrim "&next" (const action) $ \symNext -> do
-    callCC $ \esc -> genSymPrim "&next" (const $ action >>= esc) $ \symNext -> do
-        enterLex [symLast, symNext] action
+enterWhen action = do
+    rv  <- enterFrame FrameWhen action
+    case rv of
+        VControl (ControlWhen WhenContinue)   -> retEmpty
+        VControl (ControlWhen WhenBreak)      -> retShiftEmpty
+        _                                     -> retShift rv
 
 {-|
 Generate a new Perl 6 operation from a Haskell function, give it a name, and
@@ -191,8 +169,8 @@ genSymPrim :: (MonadSTM m)
                                     --     transformer is given to
            -> m t -- ^ Result of passing the pad-transformer to the \'action\'
 genSymPrim symName@('&':name) prim action = do
-    newSym <- genSym symName . codeRef $ mkPrim
-        { subName = name
+    newSym <- genSym (cast symName) . codeRef $ mkPrim
+        { subName = cast name
         , subBody = Prim prim
         }
     action newSym
@@ -217,39 +195,71 @@ genSymCC symName action = callCC $ \esc -> do
     genSymPrim symName (const $ esc undef) action
 
 {-|
-Create a Perl 6 @&?BLOCK_EXIT@ function that, when activated, breaks out of
-the block scope by activating the current continuation. The block body
-evaluation is then performed in a new lexical scope with @&?BLOCK_EXIT@
-installed.
-
 Used by 'Pugs.Eval.reduce' when evaluating @('Syn' \"block\" ... )@ 
 expressions.
 -}
 enterBlock :: Eval Val -> Eval Val
-enterBlock action = callCC $ \esc -> do
-    env <- ask
-    exitRec <- genSubs env "&?BLOCK_EXIT" $ escSub esc
-    local (\e -> e{ envOuter = Just env }) $ enterLex exitRec action
-    where
-    escSub esc env = mkPrim
-        { subName = "BLOCK_EXIT"
-        , subParams = makeParams env
-        , subBody = Prim ((esc =<<) . headVal)
-        }
+enterBlock action = local (\e -> e{ envOuter = Just e }) action
 
 enterSub :: VCode -> Eval Val -> Eval Val
 enterSub sub action
-    | typ >= SubPrim = action -- primitives just happen
+    | typ >= SubPrim = runAction -- primitives just happen
     | otherwise     = do
         env <- ask
-        if typ >= SubBlock
-            then do
+        rv  <- case typ of
+            _ | typ >= SubBlock -> tryT $ do
                 doFix <- fixEnv return env
-                local doFix action
-            else resetT $ callCC $ \cc -> do
+                local doFix runAction
+
+            -- For coroutines, we secretly store a continuation into subCont
+            -- whenever "yield" occurs in it.  However, the inner CC must be
+            -- delimited on the subroutine boundary, otherwise the resuming
+            -- continuation will continue into the rest of the program,
+            -- which is now how coroutines are supposed to work.
+            -- On the other hand, the normal &?CALLER_CONTINUATION must still
+            -- work as an undelimiated continuation, which is why callCC here
+            -- occurs before resetT.
+            SubCoroutine -> tryT . callCC $ \cc -> resetT $ do
                 doFix <- fixEnv cc env
-                local doFix action
+                local doFix runAction
+
+            _ -> tryT . callCC $ \cc -> do
+                doFix <- fixEnv cc env
+                local doFix runAction
+        runBlocks (filter (rejectKeepUndo rv . subName) . subLeaveBlocks)
+
+        when (rv == VControl (ControlLoop LoopLast)) $
+            -- We won't have a chance to run the LAST block
+            -- once we exit outside the lexical block, so do it now
+            runBlocks subLastBlocks
+
+        assertBlocks subPostBlocks "POST"
+        case rv of
+            VControl l@(ControlLeave ftyp depth val) -> do
+                let depth' = if ftyp typ then depth - 1 else depth
+                if depth' < 0
+                    then return val
+                    else retControl l{ leaveDepth = depth' }
+            VControl ControlExit{}  -> retShift rv
+            VError{}                -> do
+                -- XXX - Implement CATCH block here
+                retShift rv
+            _ -> return rv
     where
+    rejectKeepUndo VUndef     = (/= __"KEEP")
+    rejectKeepUndo (VControl (ControlLeave _ _ val)) = \n -> rejectKeepUndo val n && (n /= __"NEXT")
+    rejectKeepUndo (VControl (ControlLoop LoopNext)) = (/= __"KEEP")
+    rejectKeepUndo VControl{} = \n -> (n /= __"KEEP") && (n /= __"NEXT")
+    rejectKeepUndo VError{}   = \n -> (n /= __"KEEP") && (n /= __"NEXT")
+    rejectKeepUndo _          = (/= __"UNDO")
+    runAction = do
+        assertBlocks subPreBlocks "PRE"
+        runBlocks subEnterBlocks
+        action
+    runBlocks f = mapM_ (evalExp . Syn "block" . (:[]) . Syn "sub" . (:[]) . Val . castV) (f sub)
+    assertBlocks f name = forM_ (f sub) $ \cv -> do
+        rv <- fromVal =<< (evalExp . Syn "block" . (:[]) . Syn "sub" . (:[]) . Val . castV $ cv)
+        if rv then return () else retError (name ++ " assertion failed") (subName sub)
     typ = subType sub
     doCC :: (Val -> Eval b) -> [Val] -> Eval b
     doCC cc [v] = cc =<< evalVal v
@@ -259,18 +269,18 @@ enterSub sub action
     fixEnv :: (Val -> Eval Val) -> Env -> Eval (Env -> Env)
     fixEnv cc env
         | typ >= SubBlock = do
-            blockRec <- genSym "&?BLOCK" (codeRef (orig sub))
+            blockRec <- genSym (cast "&?BLOCK") (codeRef (orig sub))
             return $ \e -> e
                 { envOuter = Just env
                 , envPackage = maybe (envPackage e) envPackage (subEnv sub)
                 , envLexical = combine [blockRec]
                     (subPad sub `unionPads` envLexical env)
                 , envImplicit= envImplicit e `Map.union` Map.fromList
-                    [ ("&?BLOCK", ()) ]
+                    [ (cast "&?BLOCK", ()) ]
                 }
         | otherwise = do
             subRec <- sequence
-                [ genSym "&?ROUTINE" (codeRef (orig sub))
+                [ genSym (cast "&?ROUTINE") (codeRef (orig sub))
                 ]
             -- retRec    <- genSubs env "&return" retSub
             callerRec <- genSubs env "&?CALLER_CONTINUATION" (ccSub cc)
@@ -279,31 +289,31 @@ enterSub sub action
                 , envPackage = maybe (envPackage e) envPackage (subEnv sub)
                 , envOuter   = maybe Nothing envOuter (subEnv sub)
                 , envImplicit= envImplicit e `Map.union` Map.fromList
-                    [ ("&?ROUTINE", ()), ("&?CALLER_CONTINUATION", ()) ]
+                    [ (cast "&?ROUTINE", ()), (cast "&?CALLER_CONTINUATION", ()) ]
                 }
     ccSub :: (Val -> Eval Val) -> Env -> VCode
     ccSub cc env = mkPrim
-        { subName = "CALLER_CONTINUATION"
+        { subName = __"CALLER_CONTINUATION"
         , subParams = makeParams env
         , subBody = Prim $ doCC cc
         }
 
-genSubs :: t -> Var -> (t -> VCode) -> Eval [PadMutator]
+genSubs :: t -> String -> (t -> VCode) -> Eval [PadMutator]
 genSubs env name gen = sequence
-    [ genMultiSym name (codeRef $ gen env)
-    , genMultiSym name (codeRef $ (gen env) { subParams = [] })
+    [ genMultiSym (cast name) (codeRef $ gen env)
+    , genMultiSym (cast name) (codeRef $ (gen env) { subParams = [] })
     ]
 
 makeParams :: Env -> [Param]
 makeParams MkEnv{ envContext = cxt, envLValue = lv }
-    = [ MkParam
+    = [ MkOldParam
         { isInvocant = False
         , isOptional = False
         , isNamed    = False
         , isLValue   = lv
         , isWritable = lv
         , isLazy     = False
-        , paramName = case cxt of
+        , paramName  = cast $ case cxt of
             CxtSlurpy _ -> "@?0"
             _           -> "$?0"
         , paramContext = cxt
@@ -311,24 +321,21 @@ makeParams MkEnv{ envContext = cxt, envLValue = lv }
         } ]
 
 evalVal :: Val -> Eval Val
-evalVal val = do
+evalVal val@(VRef ref) = do
     lv  <- asks envLValue
-    cls <- asks envClasses
-    typ <- evalValType val
-    if lv then return val else do
-    case val of
-        VRef ref | refType ref == mkType "Scalar::Const" -> do
-            evalVal =<< readRef ref
-        VRef ref | isaType cls "Junction" typ -> do
-            evalVal =<< readRef ref
-        _ -> do
-            return val
+    if lv
+        then return val
+        else if refType ref == mkType "Scalar::Const"
+            then evalVal =<< readRef ref
+            else do
+                cls <- asks envClasses
+                typ <- evalValType val
+                if isaType cls "Junction" typ
+                    then evalVal =<< readRef ref
+                    else return val
+evalVal val = return val
 
-headVal :: [Val] -> Eval Val
-headVal []    = retEmpty
-headVal (v:_) = return v
-
-tempVar :: String -> Val -> Eval a -> Eval a
+tempVar :: Var -> Val -> Eval a -> Eval a
 tempVar var val action = do
     old <- readVar var
     writeVar var val
